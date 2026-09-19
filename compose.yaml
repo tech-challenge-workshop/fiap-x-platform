@@ -1,0 +1,80 @@
+services:
+  api:
+    build: ../fiap-x-api
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CATALOG_BASE_URL=http://catalog:3001
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  catalog:
+    build: ../processing-catalog
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - LOCAL_INTEGRATION=true
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build: ../processing-worker
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  notification:
+    build: ../notification-service
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+      - LOCAL_INTEGRATION=true
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    user: "0:0"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 3s
+      retries: 10

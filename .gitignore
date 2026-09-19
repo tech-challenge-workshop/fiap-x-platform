@@ -1,0 +1,14 @@
+# macOS / AppleDouble sidecars produced by the exFAT working volume
+._*
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Local runtime state
+.env
+.env.*
+!.env.example
