@@ -25,3 +25,8 @@ jobs:
               sys.exit(1)
           print(str(len(services)) + ' services validated')
           PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the smoke script parses
+        run: node --check scripts/smoke-local-integration.mjs
