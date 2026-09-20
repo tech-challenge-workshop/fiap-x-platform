@@ -35,3 +35,71 @@ jobs:
           node-version: 22
       - name: Check the smoke script parses
         run: node --check scripts/smoke-local-integration.mjs
+
+  integration:
+    needs: topology
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Determine whether cross-repository access is available
+        id: access
+        env:
+          TOKEN: ${{ secrets.SERVICES_READ_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No cross-repository token configured; skipping the integration run."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          path: fiap-x-platform
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          repository: tech-challenge-workshop/fiap-x-api
+          path: fiap-x-api
+          token: ${{ secrets.SERVICES_READ_TOKEN }}
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          repository: tech-challenge-workshop/processing-catalog
+          path: processing-catalog
+          token: ${{ secrets.SERVICES_READ_TOKEN }}
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          repository: tech-challenge-workshop/processing-worker
+          path: processing-worker
+          token: ${{ secrets.SERVICES_READ_TOKEN }}
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          repository: tech-challenge-workshop/notification-service
+          path: notification-service
+          token: ${{ secrets.SERVICES_READ_TOKEN }}
+      - name: Start the stack and wait for every health check
+        if: steps.access.outputs.available == 'true'
+        working-directory: fiap-x-platform
+        run: docker compose up --build -d --wait
+      - name: Run the smoke test against the live stack
+        if: steps.access.outputs.available == 'true'
+        working-directory: fiap-x-platform
+        run: node scripts/smoke-local-integration.mjs
+      - name: Collect container logs
+        if: failure() && steps.access.outputs.available == 'true'
+        working-directory: fiap-x-platform
+        run: docker compose logs --no-color > container-logs.txt
+      - name: Upload container logs
+        if: failure() && steps.access.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-logs
+          path: fiap-x-platform/container-logs.txt
+      - name: Tear the stack down
+        if: always() && steps.access.outputs.available == 'true'
+        working-directory: fiap-x-platform
+        run: docker compose down -v
+
