@@ -103,3 +103,28 @@ jobs:
         working-directory: fiap-x-platform
         run: docker compose down -v
 
+  docs-links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report relative links that do not resolve
+        run: |
+          python3 - <<'PY'
+          import re, pathlib
+          root = pathlib.Path('.')
+          files = [root / 'README.md'] + sorted(root.glob('docs/**/*.md'))
+          missing = []
+          for f in files:
+              if not f.exists():
+                  continue
+              for text, target in re.findall(r'\[([^\]]*)\]\(([^)]+)\)', f.read_text()):
+                  if re.match(r'^(https?:|mailto:|#)', target):
+                      continue
+                  t = target.split('#')[0].strip()
+                  if t and not (f.parent / t).exists():
+                      missing.append(str(f) + ': [' + text + '](' + target + ')')
+          print('\n'.join(missing) if missing else 'all relative links resolve')
+          print(str(len(missing)) + ' unresolved link(s) - informational only')
+          PY
