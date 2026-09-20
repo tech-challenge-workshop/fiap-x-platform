@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  topology:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render the compose topology
+        run: docker compose config > rendered-compose.yml
+      - name: Assert every service declares a build context or an image
+        run: |
+          python3 - <<'PY'
+          import sys, yaml
+          doc = yaml.safe_load(open('rendered-compose.yml')) or {}
+          services = doc.get('services') or {}
+          missing = sorted(n for n, v in services.items() if not (v or {}).get('build') and not (v or {}).get('image'))
+          if missing:
+              print('services with neither build nor image: ' + ', '.join(missing))
+              sys.exit(1)
+          print(str(len(services)) + ' services validated')
+          PY
