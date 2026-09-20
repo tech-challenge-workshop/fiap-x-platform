@@ -9,7 +9,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 ---
 
 **Design**: `.specs/features/ci-pipeline/design.md`
-**Status**: Draft
+**Status**: Done
 
 ---
 
@@ -208,12 +208,24 @@ T6
 
 **Done when**:
 
-- [ ] A pull request to `main` shows the `topology` check running
-- [ ] A deliberately malformed `compose.yaml` turns the check red at the config step
-- [ ] Reverting that error turns the check green
-- [ ] The `integration` job either passes or reports as skipped, and in neither case blocks the pull request
-- [ ] The exact `topology` check name is recorded in the design so it can be selected as a required status check
-- [ ] No unrelated change remains in the branch
+- [x] A pull request to `main` shows the `topology` check running
+- [x] A deliberately malformed `compose.yaml` turns the check red at the config step
+- [x] Reverting that error turns the check green
+- [x] The `integration` job either passes or reports as skipped, and in neither case blocks the pull request
+- [x] The exact `topology` check name is recorded in the design so it can be selected as a required status check
+- [x] No unrelated change remains in the branch
+
+**Completed**: 2026-09-20
+
+| Evidence | Run |
+| --- | --- |
+| Required check `topology` turned **red** on a deliberately malformed `compose.yaml`, failing at `Render the compose topology` | [35538789362](https://github.com/tech-challenge-workshop/fiap-x-platform/actions/runs/35538789362) |
+| Reverting the probe turned `topology` **green** | [35538841296](https://github.com/tech-challenge-workshop/fiap-x-platform/actions/runs/35538841296) |
+
+Dependent jobs behaved as designed: they reported `SKIPPED` while the gate was red.
+The temporary pull request was closed without merging and its branch deleted, so no
+probe reached `main`. `topology` is now a required status check in the `protect main`
+ruleset.
 
 **Tests**: none
 **Gate**: build
