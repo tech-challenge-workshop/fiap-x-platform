@@ -25,8 +25,16 @@ services:
       - PORT=3001
       - LOCAL_INTEGRATION=true
       - RABBITMQ_URL=amqp://rabbitmq:5672
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=fiapx
+      - DATABASE_SCHEMA=catalog
+      - DATABASE_USER=catalog
+      - DATABASE_PASSWORD=catalog
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
@@ -58,8 +66,16 @@ services:
       - PORT=3003
       - LOCAL_INTEGRATION=true
       - RABBITMQ_URL=amqp://rabbitmq:5672
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=fiapx
+      - DATABASE_SCHEMA=notification
+      - DATABASE_USER=notification
+      - DATABASE_PASSWORD=notification
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
@@ -78,3 +94,27 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - POSTGRES_DB=fiapx
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # Runs only on an empty volume. See README: a stale volume needs
+      # `docker compose down -v`.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fiapx"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

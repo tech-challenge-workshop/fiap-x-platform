@@ -40,6 +40,21 @@ node scripts/smoke-local-integration.mjs
 
 Compose builds each service from its sibling repository, so all five repositories must be checked out under the same parent directory.
 
+### The database bootstrap runs only once
+
+`db/init/01-schemas.sql` creates a schema and a least-privilege role for the Catalog and for the Notification Service. PostgreSQL executes it **only when it initialises an empty data directory**, and never again.
+
+So if you have a `postgres-data` volume from before this file existed, the schemas are missing and those two services fail to start with `permission denied for schema` or a missing relation. The fix is to discard the volume:
+
+```sh
+docker compose down -v
+docker compose up --build
+```
+
+This costs you the local data, which is the intent — the volume holds nothing worth keeping between runs.
+
+Each service evolves its own tables through its own migrations. This file only creates the empty schemas and denies each role access to the other's, which is the boundary `docs/foudation.md` requires.
+
 ## Layout
 
 | Path | Contents |
