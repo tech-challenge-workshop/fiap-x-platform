@@ -9,7 +9,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 ---
 
 **Design**: `.specs/features/durable-persistence/design.md`
-**Status**: Draft
+**Status**: Complete
 
 ---
 
@@ -73,14 +73,18 @@ T4 → T5
 
 **Done when**:
 
-- [ ] The service declares a health check using `pg_isready`
-- [ ] The Catalog and the Notification Service declare `depends_on` with the healthy condition
-- [ ] Data lives in a named volume, so `down -v` starts the next run empty
-- [ ] No credential is hardcoded outside the compose environment block
-- [ ] Quick gate passes: `docker compose config -q`
+- [x] The service declares a health check using `pg_isready`
+- [x] The Catalog and the Notification Service declare `depends_on` with the healthy condition
+- [x] Data lives in a named volume, so `down -v` starts the next run empty
+- [x] No credential is hardcoded outside the compose environment block
+- [x] Quick gate passes: `docker compose config -q`
 
 **Tests**: none
 **Gate**: quick
+
+**Evidence**: `a7b7513`. `docker compose config -q` = 0. `docker compose ps` reporta `postgres running healthy` via `pg_isready -U postgres -d fiapx`, e catalog e notification sobem depois dele por `condition: service_healthy`. Dados em volume nomeado `postgres-data`; as credenciais existem apenas no bloco `environment`, com comentario dizendo que nada ali alcanca ambiente implantado (AD-005).
+
+**Evidence**: `a7b7513`. `docker compose config -q` = 0. `docker compose ps` reporta `postgres running healthy` via `pg_isready -U postgres -d fiapx`, e catalog e notification sobem depois dele por `condition: service_healthy`. Dados em volume nomeado `postgres-data`; as credenciais existem apenas no bloco `environment`, com comentario dizendo que nada ali alcanca ambiente implantado (AD-005).
 
 ---
 
@@ -99,13 +103,17 @@ T4 → T5
 
 **Done when**:
 
-- [ ] Each owning service has its own schema and its own role
-- [ ] Each role is granted its own schema and **denied** the other's, asserted by a query that must fail
-- [ ] The file states that it runs only on an empty data volume
-- [ ] Full gate passes
+- [x] Each owning service has its own schema and its own role
+- [x] Each role is granted its own schema and **denied** the other's, asserted by a query that must fail
+- [x] The file states that it runs only on an empty data volume
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+
+**Evidence**: `a7b7513`, corrigido em `47637eb`. Os 4 objetos existem apos o boot: `catalog.processing_request`, `catalog.processed_event`, `catalog.outbox`, `notification.delivery_record`. O arquivo foi tornado idempotente porque roles sao cluster-wide - `CREATE ROLE catalog` falhava ao encontrar um segundo banco - e o `GRANT CONNECT` passou a nomear `current_database()` em vez de um banco fixo.
+
+**Evidence**: `a7b7513`, corrigido em `47637eb`. Os 4 objetos existem apos o boot: `catalog.processing_request`, `catalog.processed_event`, `catalog.outbox`, `notification.delivery_record`. O arquivo foi tornado idempotente porque roles sao cluster-wide - `CREATE ROLE catalog` falhava ao encontrar um segundo banco - e o `GRANT CONNECT` passou a nomear `current_database()` em vez de um banco fixo.
 
 ---
 
@@ -124,12 +132,16 @@ T4 → T5
 
 **Done when**:
 
-- [ ] The README names the symptom a developer with a stale volume will see
-- [ ] It gives `docker compose down -v` as the fix
-- [ ] Build gate passes: the stack starts and the smoke test still succeeds
+- [x] The README names the symptom a developer with a stale volume will see
+- [x] It gives `docker compose down -v` as the fix
+- [x] Build gate passes: the stack starts and the smoke test still succeeds
 
 **Tests**: integration
 **Gate**: build
+
+**Evidence**: `a7b7513`. `README.md:45-56` afirma que o PostgreSQL executa o init **so** ao inicializar um diretorio vazio, nomeia o sintoma exato de um volume velho (`permission denied for schema` ou relacao ausente), da `docker compose down -v` como correcao e diz que o custo e aceito de proposito.
+
+**Evidence**: `a7b7513`. `README.md:45-56` afirma que o PostgreSQL executa o init **so** ao inicializar um diretorio vazio, nomeia o sintoma exato de um volume velho (`permission denied for schema` ou relacao ausente), da `docker compose down -v` como correcao e diz que o custo e aceito de proposito.
 
 ---
 
@@ -148,13 +160,17 @@ T4 → T5
 
 **Done when**:
 
-- [ ] The script reads the migrations rather than any hand-written SQL
-- [ ] A missing sibling repository fails the script naming the path, so a stale deliverable is never silently reproduced
-- [ ] Changing a migration and regenerating produces a different file
-- [ ] Quick gate passes
+- [x] The script reads the migrations rather than any hand-written SQL
+- [x] A missing sibling repository fails the script naming the path, so a stale deliverable is never silently reproduced
+- [x] Changing a migration and regenerating produces a different file
+- [x] Quick gate passes
 
 **Tests**: none
 **Gate**: quick
+
+**Evidence**: `47637eb`. `scripts/generate-db-script.mjs` le os template literals do `up()` de cada migration dos dois servicos - nenhum SQL escrito a mao entra no resultado. Regenerado agora: `git diff db/create-database.sql` vazio, ou seja, zero drift entre o script versionado e as migrations atuais. O cabecalho declara o que ele **nao** faz: escrever o ledger de migrations do TypeORM.
+
+**Evidence**: `47637eb`. `scripts/generate-db-script.mjs` le os template literals do `up()` de cada migration dos dois servicos - nenhum SQL escrito a mao entra no resultado. Regenerado agora: `git diff db/create-database.sql` vazio, ou seja, zero drift entre o script versionado e as migrations atuais. O cabecalho declara o que ele **nao** faz: escrever o ledger de migrations do TypeORM.
 
 ---
 
@@ -173,13 +189,17 @@ T4 → T5
 
 **Done when**:
 
-- [ ] Applied to an empty database, the script creates every schema and table the system needs
-- [ ] The result matches what the migrations produce, compared table by table rather than by eye
-- [ ] The smoke test passes against a stack whose database was created this way
-- [ ] Build gate passes
+- [x] Applied to an empty database, the script creates every schema and table the system needs
+- [x] The result matches what the migrations produce, compared table by table rather than by eye
+- [x] The smoke test passes against a stack whose database was created this way
+- [x] Build gate passes
 
 **Tests**: integration
 **Gate**: build
+
+**Evidence**: Verificado contra banco vazio, nao por inspecao. `CREATE DATABASE fiapx_verify` seguido de `psql -v ON_ERROR_STOP=1 -f db/create-database.sql` saiu 0. Comparacao tabela a tabela com o banco que as migrations produziram: mesmas 4 tabelas; comparacao coluna a coluna incluindo tipo e nullability: 25 colunas de cada lado, `diff` vazio. Smoke contra a stack: `node scripts/smoke-local-integration.mjs` saiu 0, `RECEIVED -> COMPLETED` com entrega registrada.
+
+**Evidence**: Verificado contra banco vazio, nao por inspecao. `CREATE DATABASE fiapx_verify` seguido de `psql -v ON_ERROR_STOP=1 -f db/create-database.sql` saiu 0. Comparacao tabela a tabela com o banco que as migrations produziram: mesmas 4 tabelas; comparacao coluna a coluna incluindo tipo e nullability: 25 colunas de cada lado, `diff` vazio. Smoke contra a stack: `node scripts/smoke-local-integration.mjs` saiu 0, `RECEIVED -> COMPLETED` com entrega registrada.
 
 **Commit**: `feat(platform): add the database and its creation deliverable`
 
