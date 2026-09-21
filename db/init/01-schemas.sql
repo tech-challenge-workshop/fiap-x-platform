@@ -17,14 +17,35 @@
 CREATE SCHEMA IF NOT EXISTS catalog;
 CREATE SCHEMA IF NOT EXISTS notification;
 
-CREATE ROLE catalog LOGIN PASSWORD 'catalog';
-CREATE ROLE notification LOGIN PASSWORD 'notification';
+-- Roles are cluster-wide, not per-database, so a plain CREATE ROLE fails the
+-- moment this script is applied to a second database in the same cluster.
+-- The deliverable has to be applicable to an empty database, not only an
+-- empty cluster.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'catalog') THEN
+    CREATE ROLE catalog LOGIN PASSWORD 'catalog';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notification') THEN
+    CREATE ROLE notification LOGIN PASSWORD 'notification';
+  END IF;
+END
+$$;
 
 -- Each role owns its schema outright, so its migrations can create tables.
 ALTER SCHEMA catalog OWNER TO catalog;
 ALTER SCHEMA notification OWNER TO notification;
 
-GRANT CONNECT ON DATABASE fiapx TO catalog, notification;
+-- current_database() rather than a literal: the deliverable must work in
+-- whatever database it is applied to.
+DO $$
+BEGIN
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO catalog, notification',
+    current_database()
+  );
+END
+$$;
 
 -- Neither role may see the other's schema. PUBLIC is revoked first, because
 -- otherwise every role would inherit access to anything created later.

@@ -1,0 +1,35 @@
+{
+  "rabbit_version": "4.0.0",
+  "users": [
+    {
+      "name": "guest",
+      "password": "guest",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [{ "name": "/" }],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "dead-letter",
+      "pattern": "^(video\\.validation\\.requested|video\\.accepted|video\\.rejected|processing\\.(queued|started|completed|failed|terminal))$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "dead-letter-exchange": "fiapx.events.dlx"
+      }
+    }
+  ],
+  "queues": [],
+  "exchanges": [],
+  "bindings": []
+}

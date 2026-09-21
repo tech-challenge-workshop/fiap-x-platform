@@ -86,6 +86,14 @@ services:
   rabbitmq:
     image: rabbitmq:4-management-alpine
     user: "0:0"
+    # Dead-lettering is applied here as a broker policy, not as a queue
+    # argument. Five queues are declared by two services, and RabbitMQ rejects
+    # a second declaration whose arguments differ - which closed the Worker's
+    # channel with PRECONDITION_FAILED the first time a service tried to own
+    # the topology alone. A policy binds no declarer, so nothing can conflict.
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/10-fiapx.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     ports:
       - "5672:5672"
       - "15672:15672"
