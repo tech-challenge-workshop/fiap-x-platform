@@ -32,6 +32,17 @@ graph TD
 
 ---
 
+## Observed check name (recorded by T6)
+
+The required status check is named **`topology`**, verified against a real pull request on
+2026-09-20 and now enforced by the `protect main` ruleset. Renaming the job silently
+detaches that rule, so the name is a published contract.
+
+Jobs deliberately left out of the required set: they either depend on the gate or can
+legitimately not run, so requiring them would let an unrelated condition block merges.
+
+---
+
 ## Code Reuse Analysis
 
 ### Existing Components to Leverage
