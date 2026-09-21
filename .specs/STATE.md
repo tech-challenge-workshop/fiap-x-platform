@@ -66,6 +66,30 @@
 - **Date**: 2026-09-19
 - **Status**: active
 
+### AD-009
+- **Decision**: `processing-catalog` and `notification-service` persist through TypeORM against PostgreSQL, with schema changes applied only as versioned migrations that each service runs at boot. Each service owns its own schema (`catalog`, `notification`) inside one database, under its own least-privilege role. `synchronize` is never enabled anywhere.
+- **Reason**: Both services already express their state as entities, and the challenge asks for a database creation script as a deliverable - which is generated from the migrations rather than maintained beside them, so it cannot drift. Schema-per-service inside one database keeps the ownership boundary of AD-001 (no service reads another's tables) without asking a local-first stack to run two database servers. `synchronize` would let a code change rewrite a production schema with no review and no rollback.
+- **Trade-off**: One database is one blast radius, and a single PostgreSQL is a shared failure domain that four independent services would not have. The schemas and the separate roles keep the boundary enforceable, so splitting them later is an infrastructure change rather than a code change.
+- **Scope**: `processing-catalog` and `notification-service` persistence; `fiap-x-platform` bootstrap and generated script.
+- **Date**: 2026-09-20
+- **Status**: active
+
+### AD-010
+- **Decision**: In `processing-catalog`, nothing publishes to the broker except the outbox relay. A state transition, its deduplication record, and the events it emits commit in one transaction as outbox rows; a polling relay publishes them and marks them sent only **after** the broker confirms.
+- **Reason**: Publishing inside a use case makes the commit and the publication two separate failures: a crash between them either loses an event that the state says happened, or announces one that was rolled back. Recording the intent in the same transaction removes the window. Marking rows sent before the confirm would reintroduce the loss the slice exists to remove, so the order is fixed.
+- **Trade-off**: Delivery becomes at-least-once - a crash between confirm and mark republishes a row - and an event is delayed by up to one poll interval. Every consumer already deduplicates by `eventId`, so a repeat is absorbed; losing an event is the worse failure, and the delay is bounded and observable through the relay's pending count and oldest-pending age.
+- **Scope**: `processing-catalog` application and messaging layers.
+- **Date**: 2026-09-20
+- **Status**: active
+
+### AD-011
+- **Decision**: RabbitMQ topology that more than one service declares is configured by broker policy in `fiap-x-platform`, not by queue arguments in a service. Services may declare queues and bindings; they may not set arguments that change a shared queue's behaviour.
+- **Reason**: Five queues are declared by both `processing-catalog` and `processing-worker`. RabbitMQ rejects a second declaration whose arguments differ from the first, and the rejection closes the declaring channel. Adding `x-dead-letter-exchange` on one side did exactly that: the Worker's channel closed with `PRECONDITION_FAILED`, `VideoAccepted` was never published, and every request stalled at `RECEIVED` while both services reported healthy. A policy is applied by the broker to queues that match a pattern, so no declarer can contradict another.
+- **Trade-off**: Dead-lettering is no longer visible in the code of the service that depends on it, and the policy must be applied wherever the broker runs - it now travels with the platform's definitions file rather than with a service image. In exchange, a topology change can no longer take a healthy-looking service silently off the bus.
+- **Scope**: `fiap-x-platform` broker definitions; queue declaration in all services.
+- **Date**: 2026-09-20
+- **Status**: active
+
 ## Handoff
 
 - **Feature**: Platform repository extraction (AD-007)
