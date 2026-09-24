@@ -116,6 +116,23 @@ Every ambiguity is resolved or recorded here - nothing is left silently unclear.
 
 ---
 
+### P6: The smoke proves a rejection, across every service
+
+**User Story**: As a reviewer, I want the local smoke to drive one request to `FAILED` through the real services so that the failure path is proven the same way the success path is.
+
+**Why P6**: S2's "done when" asked for a request reaching `FAILED` by validation rejection through the running system. The S1–S3 verification (2026-09-24) found it proven only against a fake broker inside the Catalog, because the Worker could not reject anything. This slice is the first in which it can, so it is where the proof belongs.
+
+**Acceptance Criteria**:
+
+1. WHEN the smoke runs THEN it SHALL seed, alongside the valid fixture, an object that is not a video, and SHALL create a second request naming it.
+2. WHEN that request settles THEN the smoke SHALL assert its status is `FAILED` and its `failureReason` is the safe text mapped from `FORMATO_INVALIDO`.
+3. WHEN that request settles THEN the smoke SHALL assert that no archive exists for it and that Notification recorded exactly one delivery for its terminal event.
+4. IF the request reaches `COMPLETED` or stays non-terminal past the smoke's timeout THEN the smoke SHALL exit non-zero and SHALL name the status it observed.
+
+**Independent Test**: Run the smoke and see both requests settle, one `COMPLETED` with an archive and one `FAILED` with the safe reason; then bind the Worker back to `AcceptAllVideoValidator` and confirm the smoke fails naming `COMPLETED` where `FAILED` was expected.
+
+---
+
 ### P5: CPU limit and thread count set together
 
 **User Story**: As the operator, I want the Worker's CPU limit and its FFmpeg thread count to come from one place so that they cannot drift apart.
@@ -146,7 +163,7 @@ Every ambiguity is resolved or recorded here - nothing is left silently unclear.
 
 Each requirement gets a unique ID for tracking across design, tasks, and validation.
 
-`RM-` is shared with `processing-worker`, which owns `RM-07` through `RM-17`. The numbering is continuous across the two repositories so a single slice reads as one set of requirements.
+`RM-` is shared with `processing-worker`, which owns `RM-07` through `RM-18`. The numbering is continuous across the two repositories so a single slice reads as one set of requirements; `RM-19` was added here after the Worker's range was fixed.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
@@ -156,12 +173,13 @@ Each requirement gets a unique ID for tracking across design, tasks, and validat
 | RM-04 | P3: A real video, seeded | Design | Pending |
 | RM-05 | P5: CPU limit and thread count set together | Design | Pending |
 | RM-06 | P4: The smoke proves a ZIP, not a status | Design | Pending |
+| RM-19 | P6: The smoke proves a rejection, across every service | Design | Pending |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 6 total, 0 mapped to tasks, 6 unmapped ⚠️
+**Coverage:** 7 total, 0 mapped to tasks, 7 unmapped ⚠️
 
 ---
 
@@ -174,9 +192,15 @@ How we know the feature is successful:
 - [ ] The smoke downloads the produced ZIP and asserts an entry count equal to the fixture's seconds of video
 - [ ] Replacing the Worker's frame packager with a stub makes the smoke fail, and the failure names the missing or empty archive
 - [ ] The Worker's CPU limit and thread count are read from one place, and a deliberate mismatch fails the check
+- [ ] The same smoke run drives a non-video object to `FAILED` with the safe `FORMATO_INVALIDO` reason and one Notification delivery
 
 ---
 
 ## Dependencies
 
-This slice assumes S3 (`durable-persistence`) is merged: the Compose topology it extends is the one that includes PostgreSQL, and the smoke it extends is the one that already reaches `COMPLETED` through a durable Catalog. The specification is independent of that merge; the implementation branch is not.
+S3 (`durable-persistence`) is merged, and this branch was rebased onto it on 2026-09-24: the Compose topology it extends includes PostgreSQL, and the smoke it extends already reaches `COMPLETED` through a durable Catalog.
+
+Two findings of the S1–S3 verification bear on whether this smoke can be trusted, and neither is fixed by this slice. They are tracked in the gap analysis under "Validar depois":
+
+- **V3** — the Catalog can handle `ProcessingCompleted` before `ProcessingStarted` commits and dead-letter it. An 8-second fixture extracts fast enough to hit that window, so a red smoke must be read for this cause before it is blamed on the media path.
+- **V11** — the CI `integration` job skips itself when `SERVICES_READ_TOKEN` is absent and still reports success. Until that changes, this smoke is proved only by running it locally.

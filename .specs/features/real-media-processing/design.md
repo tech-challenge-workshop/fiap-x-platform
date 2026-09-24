@@ -16,7 +16,7 @@ Read from `.specs/STATE.md` `## Decisions`.
 | **AD-007** — this repository owns the topology, the smoke and the deployment artefacts | The storage service, its bootstrap, the fixture and the smoke assertion all live here. The FFmpeg invocation does not |
 | **AD-008** — no cache tier | Nothing here adds one. Retention is the bucket's own lifecycle rule, not a cache eviction policy |
 
-**Not yet in this branch's decision log.** `AD-009` through `AD-011` were recorded on `feat/durable-persistence` and are absent from `STATE.md` here, because this branch was cut from `main` before that merge. `AD-011` is the one that constrains this repository: shared broker topology is configured as a broker policy in `rabbitmq/definitions.json`. Nothing in this slice touches the broker, so the constraint is untouched rather than honoured by effort.
+**Decisions recorded by S3.** This branch was rebased onto `main` after `durable-persistence` merged (2026-09-24), so `AD-009` through `AD-011` are now in `STATE.md`. `AD-011` is the one that constrains this repository: shared broker topology is configured as a broker policy in `rabbitmq/definitions.json`. Nothing in this slice touches the broker, so the constraint is untouched rather than honoured by effort.
 
 **No new project-level decision is proposed.**
 
@@ -191,7 +191,8 @@ One bucket with two prefixes rather than two buckets: both are private to the sa
 | `deploy.resources.limits` is ignored by `docker compose up` outside Swarm | `compose.yaml` | The declared CPU limit may not be enforced locally, so a local run does not prove the pairing works | Use the top-level `cpus` field, which Compose v2 does honour, and state in the README that the declared value is the contract S9a carries into Kubernetes `limits` |
 | exFAT sidecars in a new `fixtures/` directory | `fixtures/` | `mc cp` would upload `._sample-8s.mp4`, and a BuildKit context send would fail | `clean-appledouble.mjs` already runs before `docker compose up`; the seed script names the file explicitly rather than globbing the directory |
 | A committed binary cannot be reviewed by reading the diff | `fixtures/sample-8s.mp4` | A reviewer cannot tell what it contains | `fixtures/README.md` carries the generating command and the asserted properties, and the smoke asserts the frame count those properties imply - so a wrong fixture fails the smoke rather than passing unnoticed |
-| This branch's `STATE.md` is three decisions behind `main` | `.specs/STATE.md` | A design could contradict AD-009 to AD-011 without the log showing it | Called out at the top of this document and in the worker's design; the implementation branch must be cut after S3 merges |
+| The smoke can go red for a reason outside the media path | Catalog consumers (gap analysis V3) | `ProcessingCompleted` handled before `ProcessingStarted` commits is dead-lettered, leaving the request in `PROCESSING`; a short fixture makes the window real | Out of this slice's scope. The smoke's timeout message names the last status it saw, so a request stuck in `PROCESSING` is distinguishable from a missing archive |
+| A status-only rejection check would pass against the old validator | `scripts/smoke-local-integration.mjs` | The same blindness RM-06 fixes for the archive, on the failure side | RM-19's negative verification in T11: rebind `AcceptAllVideoValidator` and confirm the smoke fails naming `COMPLETED` |
 
 ---
 

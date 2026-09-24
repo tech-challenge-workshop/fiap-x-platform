@@ -26,7 +26,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 | Scripts | none | Syntax-checked only; their behaviour is verified by the topology run | `scripts/*.mjs` | `node --check scripts/<name>.mjs` |
 | Smoke assertions | integration | The new archive assertion is verified **negatively** - stub the packager and require a red run | `scripts/smoke-local-integration.mjs` | `node scripts/smoke-local-integration.mjs` |
 | Fixture | integration | Its declared duration is asserted by the frame count the smoke checks | `fixtures/` | exercised by the topology run |
-| Documentation | none | Build gate only | `README.md`, `fixtures/README.md` | `node scripts/check-docs-links.mjs` |
+| Documentation | none | Build gate only | `README.md`, `fixtures/README.md` | the relative-link check from the `docs-links` job in `.github/workflows/ci.yml` |
 
 ## Gate Check Commands
 
@@ -34,7 +34,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 
 | Gate Level | When to Use | Command |
 | --- | --- | --- |
-| Quick | After tasks touching a script or a document only | `node --check scripts/<changed>.mjs` and `node scripts/check-docs-links.mjs` |
+| Quick | After tasks touching a script or a document only | `node --check scripts/<changed>.mjs` and the relative-link check from the `docs-links` job in `.github/workflows/ci.yml` |
 | Full | After tasks touching `compose.yaml` or the bootstrap | `docker compose config -q` then `docker compose up --build -d --wait` |
 | Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
 
@@ -68,7 +68,8 @@ T6
 ```
 T7 -> T8
 T8 -> T9
-T9 -> T10
+T9 -> T11
+T11 -> T10
 ```
 
 ---
@@ -173,7 +174,7 @@ T9 -> T10
 - [ ] `fixtures/README.md` carries the exact generating command verbatim, the declared duration, and the frame count that follows at 1 frame per second
 - [ ] The README states that the expected frame count in the smoke is derived from this file, so changing the fixture without changing the expectation fails the smoke rather than passing unnoticed
 - [ ] The design's revision is reflected: the fixture is committed rather than generated at seed time, because generating would require FFmpeg on the host
-- [ ] Quick gate passes: `node scripts/check-docs-links.mjs`
+- [ ] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
 
 **Tests**: none
 **Gate**: quick
@@ -309,11 +310,37 @@ T9 -> T10
 
 ---
 
+### T11: Drive a non-video object to FAILED, and prove the assertion can fail
+
+**What**: Seed a second, non-video object, create a request for it in the same smoke run, and assert it settles as `FAILED` with the safe reason, no archive, and one Notification delivery.
+**Where**: `scripts/seed-source-video.mjs` (extend), `scripts/smoke-local-integration.mjs` (extend)
+**Depends on**: T9
+**Reuses**: The seed script from T5; the request creation and polling from T7
+**Requirement**: RM-19
+
+**Tools**:
+
+- MCP: NONE
+- Skill: NONE
+
+**Done when**:
+- [ ] The seed places a small text payload under `sources/` with an `.mp4` name, generated at seed time rather than committed
+- [ ] The smoke creates one request per seeded object and waits for both to settle
+- [ ] The rejected request is asserted `FAILED` with the exact safe reason the Catalog maps from `FORMATO_INVALIDO`, no object under its `zips/` prefix, and exactly one Notification delivery record for its terminal event
+- [ ] A request that settles `COMPLETED`, or stays non-terminal past the timeout, fails the smoke naming the observed status
+- [ ] **Verified negatively**: with the Worker bound back to `AcceptAllVideoValidator`, the smoke exits non-zero and names `COMPLETED` where `FAILED` was expected
+- [ ] Build gate passes: the same sequence as T9
+
+**Tests**: integration
+**Gate**: build
+
+---
+
 ### T10: Document the storage, the seed and the retention
 
 **What**: A README section covering the bucket layout, how to seed a video, what retention applies, and the sizing contract.
 **Where**: `README.md`
-**Depends on**: T9
+**Depends on**: T11
 **Reuses**: The README's existing structure, including the empty-volume section written for PostgreSQL
 **Requirement**: RM-01, RM-03, RM-04, RM-05
 
@@ -327,7 +354,8 @@ T9 -> T10
 - [ ] Seeding is documented as a stand-in that S6 removes, so nobody maintains it as a feature
 - [ ] It states that the bootstrap runs on every start and is therefore idempotent - unlike the SQL bootstrap, which runs only on an empty volume
 - [ ] It states that the declared CPU limit is the contract S9a carries into Kubernetes `limits`
-- [ ] Quick gate passes: `node scripts/check-docs-links.mjs`
+- [ ] It states that the smoke proves two outcomes per run: an archive with the right frame count, and a rejection with the safe reason
+- [ ] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
 
 **Tests**: none
 **Gate**: quick
@@ -339,12 +367,12 @@ T9 -> T10
 Phases run in sequence; tasks within a phase run in order.
 
 ```
-Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T10)
+Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10)
 ```
 
-10 tasks pack into two task-budgeted batches at ~7 tasks per worker, cutting only on phase boundaries: **Phases 1-3** (6) and **Phase 4** (4). Because that is more than one batch, Execute must present the sub-agent offer before dispatching, and the Verifier runs automatically after T10.
+11 tasks pack into two task-budgeted batches at ~7 tasks per worker, cutting only on phase boundaries: **Phases 1-3** (6) and **Phase 4** (5). Because that is more than one batch, Execute must present the sub-agent offer before dispatching, and the Verifier runs automatically after T10. T11 was added after the S1–S3 verification of 2026-09-24.
 
-**Cross-repository ordering.** T9's negative verification needs the Worker's real packager to exist so it can be substituted, and the positive assertion needs it to work. Run the Worker's Phase 4 before this repository's Phase 4; Phases 1-3 here come first, because the Worker cannot be exercised without a bucket.
+**Cross-repository ordering.** T9's negative verification needs the Worker's real packager to exist so it can be substituted, and the positive assertion needs it to work; T11 likewise needs the Worker's real validator (its Phase 3). Run the Worker's Phases 3 and 4 before this repository's Phase 4; Phases 1-3 here come first, because the Worker cannot be exercised without a bucket.
 
 ---
 
@@ -362,6 +390,7 @@ Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9
 | T8: Count archive entries | 1 function | ✅ Granular |
 | T9: Assert the count + prove it fails | 1 assertion | ✅ Granular |
 | T10: Documentation | 1 document | ✅ Granular |
+| T11: Rejection path in the smoke | 1 seed step + 1 assertion | ✅ Granular (cohesive - the assertion is unverifiable without its seed) |
 
 ---
 
@@ -378,7 +407,8 @@ Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9
 | T7 | None | — | ✅ Match |
 | T8 | T7 | T7 → T8 | ✅ Match |
 | T9 | T8 | T8 → T9 | ✅ Match |
-| T10 | T9 | T9 → T10 | ✅ Match |
+| T10 | T11 | T11 → T10 | ✅ Match |
+| T11 | T9 | T9 → T11 | ✅ Match |
 
 No task depends on a later phase.
 
@@ -398,5 +428,6 @@ No task depends on a later phase.
 | T8 | Scripts | none | none | ✅ OK |
 | T9 | Smoke assertions | integration | integration | ✅ OK |
 | T10 | Documentation | none | none | ✅ OK |
+| T11 | Scripts + smoke assertions | integration | integration | ✅ OK |
 
 The five `Tests: none` tasks all sit on layers the matrix marks `none`: this repository has no test runner, and its scripts and documents are verified by the topology run and the link check rather than by unit tests. T4, T5, T7 and T8 are each proved by T9, which fails when the fixture, the seed, the key or the count is wrong - and which is itself verified by a deliberate red run.
