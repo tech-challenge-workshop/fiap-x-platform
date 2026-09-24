@@ -4,10 +4,19 @@
     {
       "name": "guest",
       "password": "guest",
-      "tags": ["administrator"]
+      "tags": [
+        "administrator"
+      ]
     }
   ],
-  "vhosts": [{ "name": "/" }],
+  "vhosts": [
+    {
+      "name": "/",
+      "metadata": {
+        "default_queue_type": "quorum"
+      }
+    }
+  ],
   "permissions": [
     {
       "user": "guest",
@@ -21,15 +30,236 @@
     {
       "vhost": "/",
       "name": "dead-letter",
-      "pattern": "^(video\\.validation\\.requested|video\\.accepted|video\\.rejected|processing\\.(queued|started|completed|failed|terminal))$",
+      "pattern": "^(video-validation|processing|video\\.accepted|video\\.rejected|processing\\.started|processing\\.completed|processing\\.failed|notification\\.terminal)$",
       "apply-to": "queues",
       "priority": 0,
       "definition": {
-        "dead-letter-exchange": "fiapx.events.dlx"
+        "dead-letter-exchange": "fiapx.events.dlx",
+        "delivery-limit": 5
       }
     }
   ],
-  "queues": [],
-  "exchanges": [],
-  "bindings": []
+  "queues": [
+    {
+      "name": "video-validation",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.accepted",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.rejected",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.started",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.completed",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.failed",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "notification.terminal",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video-validation.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.accepted.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.rejected.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.started.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.completed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "processing.failed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "notification.terminal.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "fiapx.events.dlx",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "video-validation.dlq",
+      "destination_type": "queue",
+      "routing_key": "video-validation",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "processing.dlq",
+      "destination_type": "queue",
+      "routing_key": "processing",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "video.accepted.dlq",
+      "destination_type": "queue",
+      "routing_key": "video.accepted",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "video.rejected.dlq",
+      "destination_type": "queue",
+      "routing_key": "video.rejected",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "processing.started.dlq",
+      "destination_type": "queue",
+      "routing_key": "processing.started",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "processing.completed.dlq",
+      "destination_type": "queue",
+      "routing_key": "processing.completed",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "processing.failed.dlq",
+      "destination_type": "queue",
+      "routing_key": "processing.failed",
+      "arguments": {}
+    },
+    {
+      "source": "fiapx.events.dlx",
+      "vhost": "/",
+      "destination": "notification.terminal.dlq",
+      "destination_type": "queue",
+      "routing_key": "notification.terminal",
+      "arguments": {}
+    }
+  ]
 }
