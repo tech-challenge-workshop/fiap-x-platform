@@ -393,13 +393,154 @@ The S9a sentence was already written under "Worker sizing" by T6 and is kept the
 
 ---
 
+### Phase 5: Verifier fixes (round 1)
+
+Added by the orchestrator from the platform Verifier's FAIL of 2026-09-25 (13 of 19 mutants killed, RM-05 AC3 unwired, one edge case untrue). Each task closes one ranked gap.
+
+```
+T12 -> T13
+T14 -> T16
+T15 -> T16
+T17
+```
+
+---
+
+### Phase 5: Verifier fixes (round 1)
+
+### T12: Make the sizing check refuse a limit the engine cannot grant
+
+**What**: Correct the edge case that was never true, and make the sizing check fail fast, naming both values, when `WORKER_CPUS` exceeds the engine's CPU count.
+**Where**: `scripts/check-worker-sizing.mjs`, `.specs/features/real-media-processing/spec.md` (Edge Cases)
+**Depends on**: None
+**Reuses**: The existing check's failure message style
+**Requirement**: RM-05
+
+**Why**: Docker refuses to create a container whose `cpus` exceeds the engine's CPUs ("range of CPUs is from 0.01 to 10.00"), so "the stack SHALL still start" cannot hold. The Verifier reproduced it with `WORKER_CPUS=16` on a 10-CPU engine.
+
+**Done when**:
+- [ ] The edge case reads: WHEN the declared CPU limit exceeds the engine's CPU count THEN the sizing check SHALL fail before the stack starts, naming both values
+- [ ] The check reads the engine's CPU count from `docker info` (`NCPU`) and fails naming `WORKER_CPUS` and that count when the limit exceeds it
+- [ ] Verified: with `WORKER_CPUS` above the engine's count the check exits 1 naming both; with the default it still passes
+- [ ] Quick gate passes
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T13: Run the sizing check in the Build gate and in CI
+
+**What**: Wire `scripts/check-worker-sizing.mjs` into this feature's Build gate and into the CI `topology` job.
+**Where**: `.github/workflows/ci.yml`, `.specs/features/real-media-processing/tasks.md` (Gate Check Commands)
+**Depends on**: T12
+**Reuses**: The `topology` job's rendered-config step
+**Requirement**: RM-05 AC3
+
+**Why**: Mutant M7 (thread count decoupled from `cpus`) passed both the Build gate and CI. The check existed and nothing ran it.
+
+**Done when**:
+- [ ] The Build gate command includes `node scripts/check-worker-sizing.mjs` after `docker compose config -q`
+- [ ] The CI `topology` job runs the check and fails the job on a mismatch
+- [ ] Verified by a deliberate mismatch in a scratch copy: the check exits non-zero
+- [ ] Quick gate passes, and the workflow file still parses (`docker compose config` unaffected)
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T14: Assert from outside that the bucket stays private
+
+**What**: The smoke issues an anonymous GET for the seeded object and for the bucket, and fails unless both are refused.
+**Where**: `scripts/smoke-local-integration.mjs`
+**Depends on**: None
+**Reuses**: The smoke's existing failure reporting
+**Requirement**: RM-02 (P1 AC3)
+
+**Why**: Mutant M5b made the bucket public after the bootstrap's own check and survived: only the bootstrap asserted the posture, and only at bootstrap time.
+
+**Done when**:
+- [ ] An unauthenticated request for `sources/sample-8s.mp4` and for the bucket listing is refused (HTTP 403); any 2xx fails the smoke naming the URL
+- [ ] Verified negatively: with anonymous download enabled by hand on a running stack, the smoke exits 1 naming the exposure
+- [ ] Build gate passes
+
+**Tests**: integration
+**Gate**: build
+
+---
+
+### T15: Observe that the smoke leaves no artefact behind
+
+**What**: After cleanup, the smoke asserts its own temporary directory no longer exists, and fails naming it otherwise.
+**Where**: `scripts/smoke-local-integration.mjs`
+**Depends on**: None
+**Reuses**: The existing cleanup path
+**Requirement**: RM-06 (P4 AC4)
+
+**Why**: Mutant M10 (temp directory not removed) survived: the requirement had no observable check.
+
+**Done when**:
+- [ ] The smoke checks the directory is gone after cleanup, on success and on failure paths, and exits non-zero naming the path if it remains
+- [ ] Covered by the self-test from T16 or verified negatively by disabling the removal in a scratch copy
+- [ ] Quick gate passes
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T16: Give the smoke's assertions a self-test that proves each can fail
+
+**What**: `node scripts/smoke-local-integration.mjs --self-test` feeds each assertion a synthetic bad input and exits non-zero if any assertion accepts it; CI's `topology` job runs it.
+**Where**: `scripts/smoke-local-integration.mjs`, `.github/workflows/ci.yml`
+**Depends on**: T14, T15
+**Reuses**: The assertion functions the smoke already has, factored so they can be called without a stack
+**Requirement**: RM-06, RM-19
+
+**Why**: Mutants M2 (count comparison removed), M3 (rejection accepts COMPLETED), M11 (`deliveries < 1`) and M12 (no-archive check disabled) survived, because the negative runs of T9/T11 were one-off and manual. A self-test that needs no Docker makes every assertion's failure mode permanent and CI-enforced.
+
+**Done when**:
+- [ ] The self-test covers, at minimum: frame count differs from 8; archive absent, unreadable and empty; rejected request observed as COMPLETED and as FAILED with another code; delivery count 0 and 2; an archive present for the rejected request; the bucket answering an anonymous request; the temp directory remaining
+- [ ] Each case asserts the specific failure message, not merely a non-zero exit
+- [ ] The self-test exits 0 only when every case was rejected; CI's `topology` job runs it
+- [ ] Verified: re-applying each of M2, M3, M11 and M12 in a scratch copy makes the self-test exit non-zero
+- [ ] Quick gate passes (`node --check` and `--self-test`)
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T17: Write the recorded deviations back into the spec and tasks
+
+**What**: Align the text with what was built and verified.
+**Where**: `.specs/features/real-media-processing/spec.md`, `.specs/features/real-media-processing/tasks.md`
+**Depends on**: None
+**Reuses**: The deviations recorded in the task evidence
+**Requirement**: RM-02, RM-04, RM-19
+
+**Done when**:
+- [ ] The fixture assumption says it is committed, with the generating command in `fixtures/README.md`, and states its real size
+- [ ] RM-19 AC2 names where the safe reason is observable: `failureCode` on the Catalog, the exact sentence on the Notification delivery record
+- [ ] T2's text says `mc anonymous get` must report `private`, which is how the pinned `mc` names a closed bucket
+- [ ] The T11 negative is described as binding the pre-S4 Worker (both stubs)
+- [ ] `validate_spec.py` and `validate_tasks.py` report 0 errors
+
+**Tests**: none
+**Gate**: quick
+
+---
+
 ## Phase Execution Map
 
 Phases run in sequence; tasks within a phase run in order.
 
 ```
-Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10)
+Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10) then Phase 5 (T12 T13 T14 T15 T16 T17)
 ```
+
+Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the Verifier re-runs after T17.
 
 11 tasks pack into two task-budgeted batches at ~7 tasks per worker, cutting only on phase boundaries: **Phases 1-3** (6) and **Phase 4** (5). Because that is more than one batch, Execute must present the sub-agent offer before dispatching, and the Verifier runs automatically after T10. T11 was added after the S1–S3 verification of 2026-09-24.
 
