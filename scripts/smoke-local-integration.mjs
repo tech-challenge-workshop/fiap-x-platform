@@ -56,11 +56,16 @@ function assertScratchRemoved(dir, stillExists) {
   if (stillExists) throw new Error(`Downloaded artefact left behind: ${dir} still exists after cleanup`);
 }
 
+// Every scratch directory this run created, so the last step can check that
+// none survived the run.
+const scratchDirs = [];
+
 // Runs fn in a fresh temporary directory, removes the directory whatever the
 // outcome, and then checks it is gone. A leak is reported alongside, never
 // instead of, the failure that fn raised.
 function withScratchDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-'));
+  scratchDirs.push(dir);
   let result;
   let failure;
   try {
@@ -107,21 +112,25 @@ function assertArchiveContents(zipKey, path) {
   return entries;
 }
 
-// Downloads the archive with mc (no SDK, no package.json) into a temporary
-// directory that is removed whatever the outcome, then asserts its entry
-// count. Absent, unreadable and empty are reported as three distinct causes.
-function assertArchiveFrameCount(zipKey) {
+// Fetches the archive with mc (no SDK, no package.json). The transfer's
+// outcome is returned, not judged: the "archive count" step asserts on it.
+function transferArchive(zipKey) {
   const transfer = spawnSync(
     'docker',
     ['compose', 'run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'cat', `local/${BUCKET}/${zipKey}`],
     { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 },
   );
   if (transfer.error) throw new Error(`Could not run docker to fetch the archive: ${transfer.error.message}`);
-  assertArchiveTransferred(zipKey, transfer);
+  return transfer;
+}
 
+// Writes the archive into a scratch directory that is removed whatever the
+// outcome, then asserts its entry count. Absent, unreadable and empty are
+// reported as three distinct causes.
+function checkArchiveBytes(zipKey, bytes) {
   return withScratchDir((dir) => {
     const path = join(dir, 'frames.zip');
-    writeFileSync(path, transfer.stdout);
+    writeFileSync(path, bytes);
     return assertArchiveContents(zipKey, path);
   });
 }
@@ -140,10 +149,9 @@ function assertNoArchiveListing(id, listing) {
   if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
 }
 
-function assertNoArchive(id) {
+function listArchives(id) {
   const prefix = `local/${BUCKET}/zips/${id}/`;
-  const listing = dockerCompose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'ls', '--recursive', prefix]).trim();
-  assertNoArchiveListing(id, listing);
+  return dockerCompose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'ls', '--recursive', prefix]).trim();
 }
 
 // The non-video must settle FAILED with FORMATO_INVALIDO; COMPLETED or any
@@ -210,13 +218,19 @@ function assertAnonymousRefused(url, status) {
   }
 }
 
+function anonymousUrls(videoKey) {
+  return [`${STORAGE_URL}/${BUCKET}/${videoKey}`, `${STORAGE_URL}/${BUCKET}/`];
+}
+
 // A plain fetch carries no S3 signature, so it is an anonymous request.
-async function checkAnonymousAccess(videoKey) {
-  for (const url of [`${STORAGE_URL}/${BUCKET}/${videoKey}`, `${STORAGE_URL}/${BUCKET}/`]) {
+async function anonymousStatuses(videoKey) {
+  const statuses = {};
+  for (const url of anonymousUrls(videoKey)) {
     const res = await fetch(url);
     await res.arrayBuffer();
-    assertAnonymousRefused(url, res.status);
+    statuses[url] = res.status;
   }
+  return statuses;
 }
 
 function sleep(ms) {
@@ -312,38 +326,130 @@ async function waitForNotificationDelivery(id) {
   throw new Error('Notification delivery record was not created');
 }
 
+// A check reads what an earlier observe stored. A value that was never
+// observed fails the step by name rather than passing on `undefined`.
+function observed(ctx, key) {
+  if (ctx[key] === undefined) throw new Error(`Nothing was observed for ${key}; the step that observes it did not run`);
+  return ctx[key];
+}
+
+// The smoke is this ordered list and nothing else. Each step may observe the
+// live stack (observe), then assert on what it stored (check), then print a
+// line (report). Every assertion lives in a check, and each check reads only
+// ctx, so --self-test runs the same checks without a stack.
+export const SMOKE_STEPS = [
+  {
+    name: 'api health',
+    observe: () => waitForApiHealth(),
+  },
+  {
+    name: 'seed',
+    observe: (ctx) => Object.assign(ctx, seedSources()),
+    report: (ctx) => `Seeded source video at ${ctx.videoKey} and a non-video at ${ctx.notAVideoKey}`,
+  },
+  {
+    name: 'anonymous access',
+    observe: async (ctx) => {
+      ctx.anonymous = await anonymousStatuses(ctx.videoKey);
+    },
+    check: (ctx) => {
+      const statuses = observed(ctx, 'anonymous');
+      for (const url of anonymousUrls(observed(ctx, 'videoKey'))) assertAnonymousRefused(url, statuses[url]);
+    },
+    report: (ctx) => `Storage refused anonymous GET of ${BUCKET}/${ctx.videoKey} and of the ${BUCKET} listing (403)`,
+  },
+  {
+    name: 'create requests',
+    observe: async (ctx) => {
+      ctx.id = await postProcessingRequest(ctx.videoKey);
+      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey);
+    },
+    report: (ctx) => `Created processing request ${ctx.id}\nCreated processing request ${ctx.rejectedId} for the non-video`,
+  },
+  {
+    name: 'video completed',
+    observe: async (ctx) => {
+      ctx.completed = await waitForTerminalStatus(ctx.id);
+    },
+    check: (ctx) => assertCompleted(observed(ctx, 'id'), observed(ctx, 'completed')),
+  },
+  {
+    name: 'key scope',
+    check: (ctx) => assertArchiveKeyScoped(observed(ctx, 'id'), observed(ctx, 'completed').zipStorageKey),
+    report: (ctx) => `Catalog reached COMPLETED for ${ctx.id} with archive ${ctx.completed.zipStorageKey}`,
+  },
+  {
+    name: 'rejection',
+    observe: async (ctx) => {
+      ctx.rejected = await waitForTerminalStatus(ctx.rejectedId);
+    },
+    check: (ctx) => assertRejected(observed(ctx, 'rejectedId'), observed(ctx, 'rejected')),
+    report: (ctx) => `Catalog reached FAILED (FORMATO_INVALIDO) for ${ctx.rejectedId}`,
+  },
+  {
+    name: 'archive count',
+    observe: (ctx) => {
+      ctx.transfer = transferArchive(ctx.completed.zipStorageKey);
+    },
+    check: (ctx) => {
+      const zipKey = observed(ctx, 'completed').zipStorageKey;
+      const transfer = observed(ctx, 'transfer');
+      assertArchiveTransferred(zipKey, transfer);
+      ctx.frames = checkArchiveBytes(zipKey, transfer.stdout);
+    },
+    report: (ctx) =>
+      `Archive ${ctx.completed.zipStorageKey} holds ${ctx.frames} frames, as ${FIXTURE_SECONDS} s at ${FRAMES_PER_SECOND} frame/s requires`,
+  },
+  {
+    name: 'no archive',
+    observe: (ctx) => {
+      ctx.rejectedListing = listArchives(ctx.rejectedId);
+    },
+    check: (ctx) => assertNoArchiveListing(observed(ctx, 'rejectedId'), observed(ctx, 'rejectedListing')),
+    report: (ctx) => `No archive exists under zips/${ctx.rejectedId}/`,
+  },
+  {
+    name: 'video delivery',
+    observe: (ctx) => waitForNotificationDelivery(ctx.id),
+    report: (ctx) => `Notification delivered for ${ctx.id}`,
+  },
+  {
+    name: 'delivery sentence',
+    observe: async (ctx) => {
+      ctx.delivery = await waitForNotificationDelivery(ctx.rejectedId);
+    },
+    check: (ctx) => assertDeliverySentence(observed(ctx, 'rejectedId'), observed(ctx, 'delivery')),
+  },
+  {
+    name: 'single delivery',
+    observe: (ctx) => {
+      ctx.deliveries = countDeliveries(ctx.rejectedId);
+    },
+    check: (ctx) => assertSingleDelivery(observed(ctx, 'rejectedId'), observed(ctx, 'deliveries')),
+    report: (ctx) => `Notification delivered once for ${ctx.rejectedId}: ${ctx.delivery.failureReason}`,
+  },
+  {
+    name: 'no leftovers',
+    observe: (ctx) => {
+      ctx.scratchDirs = [...scratchDirs];
+    },
+    check: (ctx) => {
+      for (const dir of observed(ctx, 'scratchDirs')) assertScratchRemoved(dir, existsSync(dir));
+    },
+    report: (ctx) => `No downloaded artefact left behind (${ctx.scratchDirs.length} scratch directory removed)`,
+  },
+];
+
+async function runSteps(steps, ctx) {
+  for (const step of steps) {
+    if (step.observe) await step.observe(ctx);
+    if (step.check) step.check(ctx);
+    if (step.report) console.log(step.report(ctx));
+  }
+}
+
 async function main() {
-  await waitForApiHealth();
-  const { videoKey, notAVideoKey } = seedSources();
-  console.log(`Seeded source video at ${videoKey} and a non-video at ${notAVideoKey}`);
-  await checkAnonymousAccess(videoKey);
-  console.log(`Storage refused anonymous GET of ${BUCKET}/${videoKey} and of the ${BUCKET} listing (403)`);
-  const id = await postProcessingRequest(videoKey);
-  console.log(`Created processing request ${id}`);
-  const rejectedId = await postProcessingRequest(notAVideoKey);
-  console.log(`Created processing request ${rejectedId} for the non-video`);
-
-  const completed = await waitForTerminalStatus(id);
-  assertCompleted(id, completed);
-  const zipKey = completed.zipStorageKey;
-  assertArchiveKeyScoped(id, zipKey);
-  console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
-
-  const rejected = await waitForTerminalStatus(rejectedId);
-  assertRejected(rejectedId, rejected);
-  console.log(`Catalog reached FAILED (FORMATO_INVALIDO) for ${rejectedId}`);
-
-  const frames = assertArchiveFrameCount(zipKey);
-  console.log(`Archive ${zipKey} holds ${frames} frames, as ${FIXTURE_SECONDS} s at ${FRAMES_PER_SECOND} frame/s requires`);
-  assertNoArchive(rejectedId);
-  console.log(`No archive exists under zips/${rejectedId}/`);
-
-  await waitForNotificationDelivery(id);
-  console.log(`Notification delivered for ${id}`);
-  const delivery = await waitForNotificationDelivery(rejectedId);
-  assertDeliverySentence(rejectedId, delivery);
-  assertSingleDelivery(rejectedId, countDeliveries(rejectedId));
-  console.log(`Notification delivered once for ${rejectedId}: ${delivery.failureReason}`);
+  await runSteps(SMOKE_STEPS, {});
 }
 
 // A minimal archive for the self-test: some bytes, then an End of Central
@@ -356,21 +462,33 @@ function syntheticZip(entries) {
   return Buffer.concat([Buffer.from('local file headers and central directory'), eocd]);
 }
 
-// Runs the archive assertions exactly as the smoke does after the transfer:
-// write the bytes into a scratch directory, count, remove, check removal.
-function checkArchiveBytes(zipKey, bytes) {
-  return withScratchDir((dir) => {
-    const path = join(dir, 'frames.zip');
-    writeFileSync(path, bytes);
-    return assertArchiveContents(zipKey, path);
-  });
+// The steps --self-test requires by name. Removing one from SMOKE_STEPS, or
+// its check, fails the self-test naming it.
+const REQUIRED_STEPS = [
+  'anonymous access',
+  'video completed',
+  'key scope',
+  'rejection',
+  'archive count',
+  'no archive',
+  'delivery sentence',
+  'single delivery',
+  'no leftovers',
+];
+
+// Runs one step's own check through runSteps, exactly as main() would after
+// its observe, against a context the self-test supplies.
+async function runStepCheck(name, ctx) {
+  const step = SMOKE_STEPS.find((candidate) => candidate.name === name);
+  if (!step) throw new Error(`step "${name}" is missing from SMOKE_STEPS`);
+  await runSteps([{ name, check: step.check }], ctx);
 }
 
 // `--self-test` needs no stack. It feeds every assertion a synthetic bad input
 // and requires the exact failure message, and feeds each a good input and
 // requires it to pass, so an assertion that was disabled, loosened or made to
 // reject everything is caught here and in CI, not by a one-off negative run.
-function selfTest() {
+async function selfTest() {
   const zipKey = 'zips/self-test-request/self-test-attempt/frames.zip';
   const id = 'self-test-request';
   const objectUrl = `${STORAGE_URL}/${BUCKET}/sources/sample-8s.mp4`;
@@ -444,10 +562,67 @@ function selfTest() {
     ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
   ];
 
+  // The steps main() runs: each required step must be in SMOKE_STEPS with a
+  // check, and its own check, run through runSteps, must reject a context
+  // holding one bad observation and accept a context holding none.
+  const rejectedId = 'self-test-rejected';
+  const survivingDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
+  const goneDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
+  rmSync(goneDir, { recursive: true, force: true });
+  const good = {
+    videoKey: 'sources/sample-8s.mp4',
+    anonymous: { [objectUrl]: 403, [listingUrl]: 403 },
+    id,
+    rejectedId,
+    completed: { status: 'COMPLETED', zipStorageKey: zipKey },
+    rejected: { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' },
+    transfer: { status: 0, stdout: syntheticZip(8), stderr: Buffer.alloc(0) },
+    rejectedListing: '',
+    delivery: { status: 'FAILED', failureReason: sentence },
+    deliveries: 1,
+    scratchDirs: [goneDir],
+  };
+  const stepRejections = [
+    ['anonymous access', { anonymous: { [objectUrl]: 200, [listingUrl]: 403 } },
+      `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
+    ['video completed', { completed: { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } },
+      `Request ${id} for the video: expected COMPLETED, observed FAILED (PROCESSAMENTO_FALHOU)`],
+    ['key scope', { completed: { status: 'COMPLETED', zipStorageKey: 'zips/another-request/attempt/frames.zip' } },
+      `Catalog reported zipStorageKey "zips/another-request/attempt/frames.zip", expected a key under zips/${id}/`],
+    ['rejection', { rejected: { status: 'COMPLETED', zipStorageKey: zipKey } },
+      `Request ${rejectedId} for the non-video: expected FAILED (FORMATO_INVALIDO), observed COMPLETED`],
+    ['archive count', { transfer: { status: 0, stdout: syntheticZip(7), stderr: Buffer.alloc(0) } },
+      `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
+    ['no archive', { rejectedListing: listing },
+      `Rejected request ${rejectedId} left an archive under zips/${rejectedId}/:\n${listing}`],
+    ['delivery sentence', { delivery: { status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' } },
+      `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
+    ['single delivery', { deliveries: 2 },
+      `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
+    ['no leftovers', { scratchDirs: [goneDir, survivingDir] },
+      `Downloaded artefact left behind: ${survivingDir} still exists after cleanup`],
+  ];
+  for (const [step, bad, expected] of stepRejections) {
+    rejections.push([`step "${step}" given a bad observation`, () => runStepCheck(step, { ...good, ...bad }), expected]);
+  }
+  for (const step of REQUIRED_STEPS) {
+    acceptances.push([`step "${step}" given good observations`, () => runStepCheck(step, { ...good })]);
+  }
+  acceptances.push(['runSteps observes before it checks', () => runSteps([{
+    name: 'order',
+    observe: (ctx) => { ctx.seen = true; },
+    check: (ctx) => { if (!ctx.seen) throw new Error('check ran before observe'); },
+  }], {})]);
+
   const failures = [];
+  for (const step of REQUIRED_STEPS) {
+    if (!SMOKE_STEPS.some((candidate) => candidate.name === step && typeof candidate.check === 'function')) {
+      failures.push(`required step "${step}" is missing from SMOKE_STEPS, or has no check`);
+    }
+  }
   for (const [name, run, expected] of rejections) {
     try {
-      run();
+      await run();
       failures.push(`${name}: accepted, expected rejection with ${JSON.stringify(expected)}`);
     } catch (err) {
       if (err.message !== expected) {
@@ -457,11 +632,12 @@ function selfTest() {
   }
   for (const [name, run] of acceptances) {
     try {
-      run();
+      await run();
     } catch (err) {
       failures.push(`${name}: rejected a good input with ${JSON.stringify(err.message)}`);
     }
   }
+  rmSync(survivingDir, { recursive: true, force: true });
 
   if (failures.length > 0) {
     for (const failure of failures) console.error(`Self-test failed: ${failure}`);
@@ -469,12 +645,15 @@ function selfTest() {
     return;
   }
   console.log(
-    `Self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
+    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
   );
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  selfTest().catch((err) => {
+    console.error(`Self-test failed: ${err.message}`);
+    process.exitCode = 1;
+  });
 } else {
   main().catch((err) => {
     console.error(err.message);
