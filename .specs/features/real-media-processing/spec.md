@@ -155,7 +155,7 @@ Every ambiguity is resolved or recorded here - nothing is left silently unclear.
 - IF a stale storage volume from an earlier run holds a bucket without the lifecycle rule THEN the bootstrap SHALL add the rule rather than assume it is present.
 - WHEN the smoke runs twice against the same stack THEN it SHALL create a distinct request each time and SHALL NOT assert against a ZIP from the previous run.
 - IF FFmpeg is unavailable where the fixture is generated THEN the seed script SHALL fail with that named cause rather than uploading a zero-byte object.
-- WHEN the topology starts on a machine with fewer cores than the declared CPU limit THEN the stack SHALL still start, and the thread count SHALL remain the declared value.
+- WHEN the declared CPU limit exceeds the engine's CPU count THEN the sizing check SHALL fail before the stack starts, naming both values. Docker refuses to create a container whose `cpus` exceeds the engine's CPUs, so the stack cannot start with that limit; the check names the cause first.
 
 ---
 

@@ -39,4 +39,18 @@ if (cpuCount !== threadCount) {
   fail(`worker cpus is ${cpus} but FFMPEG_THREADS is ${threads}; both must come from WORKER_CPUS`);
 }
 
-console.log(`worker cpus ${cpus} matches FFMPEG_THREADS ${threads}`);
+// Docker refuses to create a container whose `cpus` exceeds the engine's CPU
+// count, so a limit the engine cannot grant fails here, before `up`, naming
+// both values rather than surfacing as a daemon error halfway through a start.
+const engine = spawnSync('docker', ['info', '--format', '{{.NCPU}}'], { encoding: 'utf8' });
+if (engine.error) fail(`could not run docker info: ${engine.error.message}`);
+if (engine.status !== 0) fail(`docker info failed, so the engine's CPU count is unknown:\n${engine.stderr.trim()}`);
+const engineCpus = Number(engine.stdout.trim());
+if (!Number.isInteger(engineCpus) || engineCpus < 1) {
+  fail(`docker info reported the engine's CPU count as "${engine.stdout.trim()}", expected a positive integer`);
+}
+if (cpuCount > engineCpus) {
+  fail(`WORKER_CPUS is ${cpus} but the Docker engine has only ${engineCpus} CPUs; set WORKER_CPUS to at most ${engineCpus}`);
+}
+
+console.log(`worker cpus ${cpus} matches FFMPEG_THREADS ${threads}, within the engine's ${engineCpus} CPUs`);
