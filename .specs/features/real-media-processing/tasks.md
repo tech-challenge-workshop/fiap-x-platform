@@ -145,14 +145,15 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] `mc ilm rule add --expire-days 7 --prefix "sources/"` and the same for `zips/`
-- [ ] Each rule is guarded by a check for an existing rule on that prefix, so a re-run neither fails nor accumulates duplicates
-- [ ] Reading the lifecycle configuration back shows exactly two rules, both at 7 days
-- [ ] Verified after a second `up` without `down -v`: still exactly two rules
-- [ ] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
+- [x] `mc ilm rule add --expire-days 7 --prefix "sources/"` and the same for `zips/`
+- [x] Each rule is guarded by a check for an existing rule on that prefix, so a re-run neither fails nor accumulates duplicates
+- [x] Reading the lifecycle configuration back shows exactly two rules, both at 7 days
+- [x] Verified after a second `up` without `down -v`: still exactly two rules
+- [x] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
 
 ---
 
