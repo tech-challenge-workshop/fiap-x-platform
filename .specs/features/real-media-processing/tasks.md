@@ -227,15 +227,16 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] A single `.env` value drives both the Worker's `cpus` limit and its `FFMPEG_THREADS`
-- [ ] The check reads `docker compose config` **output**, not the template, so it verifies the substitution rather than the intent
-- [ ] A deliberate mismatch fails the check, and the message names both values
-- [ ] Uses the top-level `cpus` field rather than `deploy.resources.limits`, which Compose ignores outside Swarm - a declared limit that is not enforced would make the pairing unprovable locally
-- [ ] The README states that this declared value is the contract S9a carries into Kubernetes `limits`
-- [ ] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
+- [x] A single `.env` value drives both the Worker's `cpus` limit and its `FFMPEG_THREADS`
+- [x] The check reads `docker compose config` **output**, not the template, so it verifies the substitution rather than the intent
+- [x] A deliberate mismatch fails the check, and the message names both values
+- [x] Uses the top-level `cpus` field rather than `deploy.resources.limits`, which Compose ignores outside Swarm - a declared limit that is not enforced would make the pairing unprovable locally
+- [x] The README states that this declared value is the contract S9a carries into Kubernetes `limits`
+- [x] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
 
 ---
 
