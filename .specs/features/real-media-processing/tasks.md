@@ -118,15 +118,16 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] Uses `mc mb --ignore-existing`, so a second run is a no-op rather than a failure - unlike the SQL bootstrap, this runs on **every** start, which is the same trap that made `CREATE ROLE` fail on a second database
-- [ ] Asserts `mc anonymous get` reports `none` and exits non-zero otherwise; it never **sets** the policy, because a set could only loosen it
-- [ ] The Worker declares `depends_on` with `condition: service_completed_successfully`, so it can never start against a missing bucket
-- [ ] A failed bootstrap exits non-zero and keeps the Worker from starting
-- [ ] Verified by bringing the stack up **twice** without `down -v` between runs
-- [ ] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
+- [x] Uses `mc mb --ignore-existing`, so a second run is a no-op rather than a failure - unlike the SQL bootstrap, this runs on **every** start, which is the same trap that made `CREATE ROLE` fail on a second database
+- [x] Asserts `mc anonymous get` reports `none` and exits non-zero otherwise; it never **sets** the policy, because a set could only loosen it
+- [x] The Worker declares `depends_on` with `condition: service_completed_successfully`, so it can never start against a missing bucket
+- [x] A failed bootstrap exits non-zero and keeps the Worker from starting
+- [x] Verified by bringing the stack up **twice** without `down -v` between runs
+- [x] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
 
 ---
 
