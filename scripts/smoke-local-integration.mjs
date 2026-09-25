@@ -1,9 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(SCRIPTS_DIR, '..');
+const BUCKET = 'fiapx';
+
+// fixtures/README.md: sample-8s.mp4 lasts 8 seconds and the Worker extracts
+// one frame per second, so its archive must hold exactly 8 entries.
+const FIXTURE_SECONDS = 8;
+const FRAMES_PER_SECOND = 1;
+const EXPECTED_FRAMES = FIXTURE_SECONDS * FRAMES_PER_SECOND;
 
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
@@ -35,6 +44,46 @@ function countZipEntries(path) {
     }
   }
   throw new UnreadableArchiveError(`${path} has no End of Central Directory record`);
+}
+
+// Downloads the archive with mc (no SDK, no package.json) into a temporary
+// directory that is removed whatever the outcome, then asserts its entry
+// count. Absent, unreadable and empty are reported as three distinct causes.
+function assertArchiveFrameCount(zipKey) {
+  const transfer = spawnSync(
+    'docker',
+    ['compose', 'run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'cat', `local/${BUCKET}/${zipKey}`],
+    { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (transfer.error) throw new Error(`Could not run docker to fetch the archive: ${transfer.error.message}`);
+  if (transfer.status !== 0) {
+    const cause = transfer.stderr.toString().trim().split('\n').pop();
+    throw new Error(`Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (${cause})`);
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-'));
+  try {
+    const path = join(dir, 'frames.zip');
+    writeFileSync(path, transfer.stdout);
+    let entries;
+    try {
+      entries = countZipEntries(path);
+    } catch (err) {
+      if (err instanceof UnreadableArchiveError) {
+        throw new Error(`Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`);
+      }
+      throw err;
+    }
+    if (entries === 0) {
+      throw new Error(`Archive empty: ${BUCKET}/${zipKey} holds 0 entries, expected ${EXPECTED_FRAMES}`);
+    }
+    if (entries !== EXPECTED_FRAMES) {
+      throw new Error(`Archive frame count mismatch: ${BUCKET}/${zipKey} holds ${entries} entries, expected ${EXPECTED_FRAMES}`);
+    }
+    return entries;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function sleep(ms) {
@@ -134,6 +183,8 @@ async function main() {
     throw new Error(`Catalog reported zipStorageKey ${JSON.stringify(zipKey)}, expected a key under zips/${id}/`);
   }
   console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
+  const frames = assertArchiveFrameCount(zipKey);
+  console.log(`Archive ${zipKey} holds ${frames} frames, as ${FIXTURE_SECONDS} s at ${FRAMES_PER_SECOND} frame/s requires`);
   await waitForNotificationDelivery(id);
   console.log(`Notification delivered for ${id}`);
 }
