@@ -49,8 +49,16 @@ services:
     environment:
       - PORT=3002
       - RABBITMQ_URL=amqp://rabbitmq:5672
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - STORAGE_ENDPOINT=http://minio:9000
+      - STORAGE_BUCKET=fiapx
+      - STORAGE_ACCESS_KEY=minioadmin
+      - STORAGE_SECRET_KEY=minioadmin
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
@@ -131,5 +139,27 @@ services:
       timeout: 3s
       retries: 10
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # Readiness, not liveness: a TCP probe would pass while the server is
+      # listening but not yet serving.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres-data:
+  minio-data:

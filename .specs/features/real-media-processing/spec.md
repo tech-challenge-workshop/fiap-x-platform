@@ -167,7 +167,7 @@ Each requirement gets a unique ID for tracking across design, tasks, and validat
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| RM-01 | P1: Object storage in the local topology | Design | Pending |
+| RM-01 | P1: Object storage in the local topology | Execute | Implementing |
 | RM-02 | P1: Object storage in the local topology | Design | Pending |
 | RM-03 | P2: Retention that the product rule requires | Design | Pending |
 | RM-04 | P3: A real video, seeded | Design | Pending |
@@ -179,7 +179,7 @@ Each requirement gets a unique ID for tracking across design, tasks, and validat
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 7 total, 0 mapped to tasks, 7 unmapped ⚠️
+**Coverage:** 7 total, 7 mapped to tasks (T1-T11), 0 unmapped
 
 ---
 
