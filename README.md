@@ -49,7 +49,7 @@ Each run creates two new requests and proves two outcomes, so neither can pass o
 - **A private bucket.** An anonymous request for the seeded object and for the bucket listing must be refused with 403.
 - **No leftovers.** The smoke's own temporary directory must be gone after cleanup.
 
-`node scripts/smoke-local-integration.mjs --self-test` needs no stack: it feeds every assertion above a bad input and requires the specific failure, so an assertion that stops checking fails CI's `topology` job.
+The smoke is one ordered list of steps. Each step observes the stack, then checks what it observed. `node scripts/smoke-local-integration.mjs --self-test` needs no stack. It requires nine assertion steps to be in that list: anonymous access, the video completed, the archive key scoped to this request, the rejection, the archive count, no archive for the rejection, the delivery sentence, a single delivery, and no leftovers. It runs each step's own check against one bad observation and requires the exact failure message, then against good observations and requires a pass. It also calls each assertion helper directly with bad and good inputs. So a step that is removed, or a check that stops checking, fails the self-test. It does not reach the stack: whether an HTTP call or a `docker compose` command observes the right thing is proved only by the real run. CI's `topology` job and the build gate run it.
 
 Both assertions were verified by making them fail: a Worker that stores no archive, and a Worker that validates nothing, each turn the smoke red. The smoke seeds its own source objects, so it needs nothing but a running stack.
 
@@ -94,6 +94,8 @@ Each service evolves its own tables through its own migrations. This file only c
 ### Worker sizing
 
 `WORKER_CPUS` sets both the Worker's CPU limit (`cpus`) and its FFmpeg thread count (`FFMPEG_THREADS`). It defaults to 2; set it in `.env` or the shell to change both. FFmpeg reads the host's core count rather than the container's limit, so the two must agree (AD-006). `node scripts/check-worker-sizing.mjs` reads the rendered `docker compose config` and fails, naming both values, when they do not. It also fails when `WORKER_CPUS` exceeds the Docker engine's CPU count, because Docker refuses to start a container with a larger limit. It runs in the build gate and in CI.
+
+`node scripts/check-worker-sizing.mjs --self-test` needs no Docker. It feeds the two comparisons a thread count that differs from the limit, a non-integer or non-positive thread count, and a limit above the engine's count, including one CPU more than the engine has. Each must fail with its exact message. A matching pair, and a limit equal to or below the engine's count, must pass. It does not test reading `docker compose config` or `docker info`; the check itself does that. The build gate and CI run it too.
 
 This declared value is the contract S9a carries into the Worker's Kubernetes `limits`.
 
