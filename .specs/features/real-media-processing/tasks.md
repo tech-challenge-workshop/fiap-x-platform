@@ -642,12 +642,28 @@ An unmutated control copy exited 0. The scratch copies were removed.
 **Why**: Round-2 mutants N6 (sentence check disabled) and N9 (key-scope check weakened) survived: the checks were inline in `main()`, where no self-test reaches.
 
 **Done when**:
-- [ ] The self-test rejects a delivery with a different sentence and an archive key outside `zips/<processingRequestId>/`, each with its exact message
-- [ ] Verified in scratch copies: N6 and N9 make the self-test exit non-zero
-- [ ] Quick gate passes (`node --check`, `--self-test`)
+- [x] The self-test rejects a delivery with a different sentence and an archive key outside `zips/<processingRequestId>/`, each with its exact message
+- [x] Verified in scratch copies: N6 and N9 make the self-test exit non-zero
+- [x] Quick gate passes (`node --check`, `--self-test`)
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25).** `main()` now calls three helpers in place of its inline checks, with the same messages: `assertCompleted` (the video settles `COMPLETED`), `assertArchiveKeyScoped` (the key sits under `zips/<id>/`) and `assertDeliverySentence` (the delivery is `FAILED` with the exact sentence). The video `COMPLETED` check is included because T20 allows no assertion in `main()` outside its step list, and the round-2 report asked for it. The self-test gains 6 bad inputs, each with its exact message:
+- the video observed `FAILED (PROCESSAMENTO_FALHOU)`
+- an archive key under another request, and under a request whose id extends this one (`zips/<id>-2/`)
+- a missing archive key
+- a delivery with another sentence, and a delivery observed `COMPLETED` that carries the right sentence
+
+It gains 3 good inputs: the video `COMPLETED`, a key under this request, and a `FAILED` delivery with the sentence. The self-test spells the sentence as a literal, so changing `FORMATO_INVALIDO_REASON` fails it too. Output: `Self-test passed: 19 bad inputs rejected with the expected message, 10 good inputs accepted` (was 13 and 7; no case removed or changed), exit 0. `node --check` exit 0.
+
+Mutants were applied to a scratch copy of the script, never to this tree, through the exact-once helper. Each self-test exited 1:
+- N6 (sentence/status check → `if (false)`): `delivery with another sentence: accepted` and `delivery observed COMPLETED: accepted`
+- N9 (scope check reduced to the type check): `archive key under another request: accepted` and `… whose id extends this one: accepted`
+- Also killed: the status half dropped (`delivery observed COMPLETED`), the sentence half dropped (`delivery with another sentence`), the trailing slash dropped from the scope prefix (`… whose id extends this one`), the sentence constant changed (the good delivery rejected), and the video check → `if (false)` (`video request observed FAILED: accepted`).
+
+An unmutated control copy exited 0. The scratch copies were removed.
 
 ---
 

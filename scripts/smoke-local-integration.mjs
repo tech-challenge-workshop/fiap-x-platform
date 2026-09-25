@@ -154,6 +154,31 @@ function assertRejected(id, request) {
   }
 }
 
+// The video must settle COMPLETED; anything else fails naming what was observed.
+function assertCompleted(id, request) {
+  if (request.status !== 'COMPLETED') {
+    throw new Error(`Request ${id} for the video: expected COMPLETED, observed ${describe(request)}`);
+  }
+}
+
+// Every run creates a new request and the archive key is scoped to it, so a
+// second run can never assert against the previous run's archive.
+function assertArchiveKeyScoped(id, zipKey) {
+  if (typeof zipKey !== 'string' || !zipKey.startsWith(`zips/${id}/`)) {
+    throw new Error(`Catalog reported zipStorageKey ${JSON.stringify(zipKey)}, expected a key under zips/${id}/`);
+  }
+}
+
+// RM-19 AC2: the Catalog stores the code, not the sentence, so the exact
+// sentence is observed on the Notification delivery record.
+function assertDeliverySentence(id, delivery) {
+  if (delivery.status !== 'FAILED' || delivery.failureReason !== FORMATO_INVALIDO_REASON) {
+    throw new Error(
+      `Delivery for ${id}: expected FAILED with ${JSON.stringify(FORMATO_INVALIDO_REASON)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
+    );
+  }
+}
+
 // Exactly one: none means the terminal event never arrived, two means it was
 // delivered twice.
 function assertSingleDelivery(id, deliveries) {
@@ -299,15 +324,9 @@ async function main() {
   console.log(`Created processing request ${rejectedId} for the non-video`);
 
   const completed = await waitForTerminalStatus(id);
-  if (completed.status !== 'COMPLETED') {
-    throw new Error(`Request ${id} for the video: expected COMPLETED, observed ${describe(completed)}`);
-  }
-  // Every run creates a new request and the archive key is scoped to it, so a
-  // second run can never assert against the previous run's archive.
+  assertCompleted(id, completed);
   const zipKey = completed.zipStorageKey;
-  if (typeof zipKey !== 'string' || !zipKey.startsWith(`zips/${id}/`)) {
-    throw new Error(`Catalog reported zipStorageKey ${JSON.stringify(zipKey)}, expected a key under zips/${id}/`);
-  }
+  assertArchiveKeyScoped(id, zipKey);
   console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
 
   const rejected = await waitForTerminalStatus(rejectedId);
@@ -322,11 +341,7 @@ async function main() {
   await waitForNotificationDelivery(id);
   console.log(`Notification delivered for ${id}`);
   const delivery = await waitForNotificationDelivery(rejectedId);
-  if (delivery.status !== 'FAILED' || delivery.failureReason !== FORMATO_INVALIDO_REASON) {
-    throw new Error(
-      `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(FORMATO_INVALIDO_REASON)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
-    );
-  }
+  assertDeliverySentence(rejectedId, delivery);
   assertSingleDelivery(rejectedId, countDeliveries(rejectedId));
   console.log(`Notification delivered once for ${rejectedId}: ${delivery.failureReason}`);
 }
@@ -362,6 +377,8 @@ function selfTest() {
   const listingUrl = `${STORAGE_URL}/${BUCKET}/`;
   const listing = '[2026-09-25 12:00:00 UTC] 1.2KiB STANDARD self-test-attempt/frames.zip';
   const leftover = join(tmpdir(), 'fiapx-smoke-self-test');
+  // Literal, not FORMATO_INVALIDO_REASON: a changed constant must fail here too.
+  const sentence = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
 
   const rejections = [
     ['frame count 16', () => checkArchiveBytes(zipKey, syntheticZip(16)),
@@ -390,6 +407,18 @@ function selfTest() {
       `Anonymous access allowed: GET ${listingUrl} returned 200; the bucket must refuse requests without credentials`],
     ['temp directory remaining', () => assertScratchRemoved(leftover, true),
       `Downloaded artefact left behind: ${leftover} still exists after cleanup`],
+    ['video request observed FAILED', () => assertCompleted(id, { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' }),
+      `Request ${id} for the video: expected COMPLETED, observed FAILED (PROCESSAMENTO_FALHOU)`],
+    ['archive key under another request', () => assertArchiveKeyScoped(id, 'zips/another-request/attempt/frames.zip'),
+      `Catalog reported zipStorageKey "zips/another-request/attempt/frames.zip", expected a key under zips/${id}/`],
+    ['archive key under a request whose id extends this one', () => assertArchiveKeyScoped(id, `zips/${id}-2/attempt/frames.zip`),
+      `Catalog reported zipStorageKey "zips/${id}-2/attempt/frames.zip", expected a key under zips/${id}/`],
+    ['archive key missing', () => assertArchiveKeyScoped(id, undefined),
+      `Catalog reported zipStorageKey undefined, expected a key under zips/${id}/`],
+    ['delivery with another sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' }),
+      `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
+    ['delivery observed COMPLETED', () => assertDeliverySentence(id, { status: 'COMPLETED', failureReason: sentence }),
+      `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed COMPLETED with ${JSON.stringify(sentence)}`],
   ];
 
   let scratch;
@@ -410,6 +439,9 @@ function selfTest() {
     ['no archive for the rejected request', () => assertNoArchiveListing(id, '')],
     ['anonymous GET refused with 403', () => assertAnonymousRefused(objectUrl, 403)],
     ['temp directory gone', () => assertScratchRemoved(leftover, false)],
+    ['video request COMPLETED', () => assertCompleted(id, { status: 'COMPLETED', zipStorageKey: zipKey })],
+    ['archive key under this request', () => assertArchiveKeyScoped(id, zipKey)],
+    ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
   ];
 
   const failures = [];
