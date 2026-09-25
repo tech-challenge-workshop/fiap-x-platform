@@ -678,13 +678,35 @@ An unmutated control copy exited 0. The scratch copies were removed.
 **Why**: Round-2 mutants N3w, N5, N7 and N8 removed a call from `main()` and survived, because the self-test calls helpers directly.
 
 **Done when**:
-- [ ] Every assertion `main()` performs is a named step in one exported list, and `main()` performs no assertion outside it
-- [ ] The self-test checks the list contains every required step (anonymous access, archive count, rejection, no archive, single delivery, delivery sentence, key scope, no leftovers) and fails naming any that is missing
-- [ ] Verified in scratch copies: N3w, N5, N7 and N8 (a step removed from the list) make the self-test exit non-zero
-- [ ] Build gate passes, including a real smoke run
+- [x] Every assertion `main()` performs is a named step in one exported list, and `main()` performs no assertion outside it
+- [x] The self-test checks the list contains every required step (anonymous access, archive count, rejection, no archive, single delivery, delivery sentence, key scope, no leftovers) and fails naming any that is missing
+- [x] Verified in scratch copies: N3w, N5, N7 and N8 (a step removed from the list) make the self-test exit non-zero
+- [x] Build gate passes, including a real smoke run
 
 **Tests**: integration
 **Gate**: build
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, local).** `main()` is now `runSteps(SMOKE_STEPS, {})`, and nothing else. `SMOKE_STEPS` is the one exported, ordered list: `api health`, `seed`, `anonymous access`, `create requests`, `video completed`, `key scope`, `rejection`, `archive count`, `no archive`, `video delivery`, `delivery sentence`, `single delivery`, `no leftovers`. A step may `observe` the live stack into a shared context, then `check` it, then `report` a line. Every assertion is in a `check`, and a check reads only the context. The I/O helpers that used to assert (`assertArchiveFrameCount`, `assertNoArchive`, `checkAnonymousAccess`) are now observe-only (`transferArchive`, `listArchives`, `anonymousStatuses`). A check that reads a value its observe never stored fails with `Nothing was observed for <key>; …` instead of passing on `undefined`. `withScratchDir` records each directory it creates, and `no leftovers` checks at the end of the run that none still exists. It keeps its own immediate check from T15.
+- The self-test adds three layers to the 19 + 10 cases from T19, which are unchanged:
+  - For each of the 9 required steps (the 8 named above plus `video completed`), the step must be in `SMOKE_STEPS` with a `check`. A missing one fails with `required step "<name>" is missing from SMOKE_STEPS, or has no check`.
+  - Each required step's own check runs through `runSteps`. It must reject a context holding one bad observation, with the exact message, and accept a context holding none.
+  - `runSteps` must observe before it checks.
+- Output: `Self-test passed: 9 required steps present, 28 bad inputs rejected with the expected message, 20 good inputs accepted`, exit 0.
+- Build gate green: clean 0, `config -q` 0, sizing 0, sizing self-test 0, `up --build -d --wait` 0, seed 0, and the smoke 0 twice with distinct request ids. The run ends `No downloaded artefact left behind (1 scratch directory removed)`, and the smoke self-test gave 0. No `fiapx-smoke-*` remained. `down -v` gave 0, with no volumes left.
+- Live negative: `mc anonymous set download local/fiapx` on the running stack made the smoke exit 1 at its third step, with `Anonymous access allowed: GET http://localhost:9000/fiapx/sources/sample-8s.mp4 returned 200; …`.
+
+Mutants were applied to scratch copies of the script, never to this tree, and each pattern had to match exactly once. Each self-test exited 1:
+- N3w, N5, N7 and N8 as a step removed from the list (`anonymous access`, `rejection`, `no archive`, `single delivery`): each named, e.g. `required step "rejection" is missing from SMOKE_STEPS, or has no check`.
+- The same four as the assertion call removed inside the step's check: `step "<name>" given a bad observation: accepted`.
+- Also killed:
+  - `runSteps` no longer calling `check`
+  - the removal of `no leftovers`, `key scope`, `archive count`, `delivery sentence` or `video completed`
+  - the leftover check emptied
+  - the archive check skipping the count
+  - N6 and N9 re-applied to the restructured file
+
+An unmutated control copy exited 0. The scratch copies were removed.
 
 ---
 
