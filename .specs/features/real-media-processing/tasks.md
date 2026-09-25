@@ -517,14 +517,36 @@ T17
 **Why**: Mutants M2 (count comparison removed), M3 (rejection accepts COMPLETED), M11 (`deliveries < 1`) and M12 (no-archive check disabled) survived, because the negative runs of T9/T11 were one-off and manual. A self-test that needs no Docker makes every assertion's failure mode permanent and CI-enforced.
 
 **Done when**:
-- [ ] The self-test covers, at minimum: frame count differs from 8; archive absent, unreadable and empty; rejected request observed as COMPLETED and as FAILED with another code; delivery count 0 and 2; an archive present for the rejected request; the bucket answering an anonymous request; the temp directory remaining
-- [ ] Each case asserts the specific failure message, not merely a non-zero exit
-- [ ] The self-test exits 0 only when every case was rejected; CI's `topology` job runs it
-- [ ] Verified: re-applying each of M2, M3, M11 and M12 in a scratch copy makes the self-test exit non-zero
-- [ ] Quick gate passes (`node --check` and `--self-test`)
+- [x] The self-test covers, at minimum: frame count differs from 8; archive absent, unreadable and empty; rejected request observed as COMPLETED and as FAILED with another code; delivery count 0 and 2; an archive present for the rejected request; the bucket answering an anonymous request; the temp directory remaining
+- [x] Each case asserts the specific failure message, not merely a non-zero exit
+- [x] The self-test exits 0 only when every case was rejected; CI's `topology` job runs it
+- [x] Verified: re-applying each of M2, M3, M11 and M12 in a scratch copy makes the self-test exit non-zero
+- [x] Quick gate passes (`node --check` and `--self-test`)
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25).** The assertions are now pure functions that the smoke calls: `assertArchiveTransferred`, `assertArchiveContents` (run inside `withScratchDir`), `assertRejected`, `assertSingleDelivery`, `assertNoArchiveListing`, `assertAnonymousRefused` and `assertScratchRemoved`. `--self-test` needs no stack and runs 13 bad inputs, each of which must throw its exact message:
+- frame count 16 and 7
+- archive absent, unreadable and empty
+- rejected request observed `COMPLETED`, and `FAILED (PROCESSAMENTO_FALHOU)`
+- 0 and 2 deliveries
+- an archive listed for the rejected request
+- anonymous 200 on the object and on the listing
+- a remaining temp directory
+
+It also runs 7 good inputs, each of which must pass: an 8-frame archive whose scratch directory is gone afterwards, a transfer that succeeded, `FAILED (FORMATO_INVALIDO)`, 1 delivery, an empty listing, 403, and no leftover. Output: `Self-test passed: 13 bad inputs rejected with the expected message, 7 good inputs accepted`, exit 0. CI's `topology` job runs it after the parse check.
+
+Mutants were re-applied to a scratch copy of the script, never to this tree. Each self-test exited 1, naming the case that caught it:
+- M2 (count comparison disabled): `frame count 16: accepted` and `frame count 7: accepted`
+- M3 (rejection returns early on `COMPLETED`): `rejected request observed COMPLETED: accepted`
+- M11 (`deliveries < 1`): `2 deliveries: accepted`
+- M12 (no-archive check disabled): `archive present for the rejected request: accepted`
+- M10 (removal disabled): the leak message is appended to the archive cases
+- The 2xx branch of the anonymous check disabled: the wrong message is named
+
+An unmutated control copy exited 0. The scratch copies and the directories M10 leaked were removed.
 
 ---
 

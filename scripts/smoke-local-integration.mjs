@@ -78,6 +78,35 @@ function withScratchDir(fn) {
   return result;
 }
 
+// A failed transfer means the archive is absent, the first of three causes.
+function assertArchiveTransferred(zipKey, transfer) {
+  if (transfer.status !== 0) {
+    const cause = transfer.stderr.toString().trim().split('\n').pop();
+    throw new Error(`Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (${cause})`);
+  }
+}
+
+// Unreadable and empty are the other two causes; a readable archive with the
+// wrong count names both numbers.
+function assertArchiveContents(zipKey, path) {
+  let entries;
+  try {
+    entries = countZipEntries(path);
+  } catch (err) {
+    if (err instanceof UnreadableArchiveError) {
+      throw new Error(`Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`);
+    }
+    throw err;
+  }
+  if (entries === 0) {
+    throw new Error(`Archive empty: ${BUCKET}/${zipKey} holds 0 entries, expected ${EXPECTED_FRAMES}`);
+  }
+  if (entries !== EXPECTED_FRAMES) {
+    throw new Error(`Archive frame count mismatch: ${BUCKET}/${zipKey} holds ${entries} entries, expected ${EXPECTED_FRAMES}`);
+  }
+  return entries;
+}
+
 // Downloads the archive with mc (no SDK, no package.json) into a temporary
 // directory that is removed whatever the outcome, then asserts its entry
 // count. Absent, unreadable and empty are reported as three distinct causes.
@@ -88,30 +117,12 @@ function assertArchiveFrameCount(zipKey) {
     { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 },
   );
   if (transfer.error) throw new Error(`Could not run docker to fetch the archive: ${transfer.error.message}`);
-  if (transfer.status !== 0) {
-    const cause = transfer.stderr.toString().trim().split('\n').pop();
-    throw new Error(`Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (${cause})`);
-  }
+  assertArchiveTransferred(zipKey, transfer);
 
   return withScratchDir((dir) => {
     const path = join(dir, 'frames.zip');
     writeFileSync(path, transfer.stdout);
-    let entries;
-    try {
-      entries = countZipEntries(path);
-    } catch (err) {
-      if (err instanceof UnreadableArchiveError) {
-        throw new Error(`Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`);
-      }
-      throw err;
-    }
-    if (entries === 0) {
-      throw new Error(`Archive empty: ${BUCKET}/${zipKey} holds 0 entries, expected ${EXPECTED_FRAMES}`);
-    }
-    if (entries !== EXPECTED_FRAMES) {
-      throw new Error(`Archive frame count mismatch: ${BUCKET}/${zipKey} holds ${entries} entries, expected ${EXPECTED_FRAMES}`);
-    }
-    return entries;
+    return assertArchiveContents(zipKey, path);
   });
 }
 
@@ -125,10 +136,30 @@ function dockerCompose(args, input) {
 }
 
 // A rejected request must leave nothing under its archive prefix.
+function assertNoArchiveListing(id, listing) {
+  if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
+}
+
 function assertNoArchive(id) {
   const prefix = `local/${BUCKET}/zips/${id}/`;
   const listing = dockerCompose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'ls', '--recursive', prefix]).trim();
-  if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
+  assertNoArchiveListing(id, listing);
+}
+
+// The non-video must settle FAILED with FORMATO_INVALIDO; COMPLETED or any
+// other failure code fails naming what was observed.
+function assertRejected(id, request) {
+  if (request.status !== 'FAILED' || request.failureCode !== 'FORMATO_INVALIDO') {
+    throw new Error(`Request ${id} for the non-video: expected FAILED (FORMATO_INVALIDO), observed ${describe(request)}`);
+  }
+}
+
+// Exactly one: none means the terminal event never arrived, two means it was
+// delivered twice.
+function assertSingleDelivery(id, deliveries) {
+  if (deliveries !== 1) {
+    throw new Error(`Delivery for ${id}: expected exactly 1 record, found ${deliveries}`);
+  }
 }
 
 // The HTTP view returns one record, so it cannot show a duplicate; the count
@@ -280,9 +311,7 @@ async function main() {
   console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
 
   const rejected = await waitForTerminalStatus(rejectedId);
-  if (rejected.status !== 'FAILED' || rejected.failureCode !== 'FORMATO_INVALIDO') {
-    throw new Error(`Request ${rejectedId} for the non-video: expected FAILED (FORMATO_INVALIDO), observed ${describe(rejected)}`);
-  }
+  assertRejected(rejectedId, rejected);
   console.log(`Catalog reached FAILED (FORMATO_INVALIDO) for ${rejectedId}`);
 
   const frames = assertArchiveFrameCount(zipKey);
@@ -298,14 +327,125 @@ async function main() {
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(FORMATO_INVALIDO_REASON)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
     );
   }
-  const deliveries = countDeliveries(rejectedId);
-  if (deliveries !== 1) {
-    throw new Error(`Delivery for ${rejectedId}: expected exactly 1 record, found ${deliveries}`);
-  }
+  assertSingleDelivery(rejectedId, countDeliveries(rejectedId));
   console.log(`Notification delivered once for ${rejectedId}: ${delivery.failureReason}`);
 }
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exitCode = 1;
-});
+// A minimal archive for the self-test: some bytes, then an End of Central
+// Directory record declaring `entries` entries.
+function syntheticZip(entries) {
+  const eocd = Buffer.alloc(EOCD_SIZE);
+  eocd.writeUInt32LE(EOCD_SIGNATURE, 0);
+  eocd.writeUInt16LE(entries, 8);
+  eocd.writeUInt16LE(entries, 10);
+  return Buffer.concat([Buffer.from('local file headers and central directory'), eocd]);
+}
+
+// Runs the archive assertions exactly as the smoke does after the transfer:
+// write the bytes into a scratch directory, count, remove, check removal.
+function checkArchiveBytes(zipKey, bytes) {
+  return withScratchDir((dir) => {
+    const path = join(dir, 'frames.zip');
+    writeFileSync(path, bytes);
+    return assertArchiveContents(zipKey, path);
+  });
+}
+
+// `--self-test` needs no stack. It feeds every assertion a synthetic bad input
+// and requires the exact failure message, and feeds each a good input and
+// requires it to pass, so an assertion that was disabled, loosened or made to
+// reject everything is caught here and in CI, not by a one-off negative run.
+function selfTest() {
+  const zipKey = 'zips/self-test-request/self-test-attempt/frames.zip';
+  const id = 'self-test-request';
+  const objectUrl = `${STORAGE_URL}/${BUCKET}/sources/sample-8s.mp4`;
+  const listingUrl = `${STORAGE_URL}/${BUCKET}/`;
+  const listing = '[2026-09-25 12:00:00 UTC] 1.2KiB STANDARD self-test-attempt/frames.zip';
+  const leftover = join(tmpdir(), 'fiapx-smoke-self-test');
+
+  const rejections = [
+    ['frame count 16', () => checkArchiveBytes(zipKey, syntheticZip(16)),
+      `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 16 entries, expected 8`],
+    ['frame count 7', () => checkArchiveBytes(zipKey, syntheticZip(7)),
+      `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
+    ['archive absent', () => assertArchiveTransferred(zipKey, { status: 1, stderr: Buffer.from('mc: <ERROR> Object does not exist.\n') }),
+      `Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (mc: <ERROR> Object does not exist.)`],
+    ['archive unreadable', () => checkArchiveBytes(zipKey, Buffer.from('plain text, not an archive')),
+      `Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`],
+    ['archive empty', () => checkArchiveBytes(zipKey, syntheticZip(0)),
+      `Archive empty: ${BUCKET}/${zipKey} holds 0 entries, expected 8`],
+    ['rejected request observed COMPLETED', () => assertRejected(id, { status: 'COMPLETED', zipStorageKey: zipKey }),
+      `Request ${id} for the non-video: expected FAILED (FORMATO_INVALIDO), observed COMPLETED`],
+    ['rejected request FAILED with another code', () => assertRejected(id, { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' }),
+      `Request ${id} for the non-video: expected FAILED (FORMATO_INVALIDO), observed FAILED (PROCESSAMENTO_FALHOU)`],
+    ['0 deliveries', () => assertSingleDelivery(id, 0),
+      `Delivery for ${id}: expected exactly 1 record, found 0`],
+    ['2 deliveries', () => assertSingleDelivery(id, 2),
+      `Delivery for ${id}: expected exactly 1 record, found 2`],
+    ['archive present for the rejected request', () => assertNoArchiveListing(id, listing),
+      `Rejected request ${id} left an archive under zips/${id}/:\n${listing}`],
+    ['anonymous GET of the object answered 200', () => assertAnonymousRefused(objectUrl, 200),
+      `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
+    ['anonymous GET of the listing answered 200', () => assertAnonymousRefused(listingUrl, 200),
+      `Anonymous access allowed: GET ${listingUrl} returned 200; the bucket must refuse requests without credentials`],
+    ['temp directory remaining', () => assertScratchRemoved(leftover, true),
+      `Downloaded artefact left behind: ${leftover} still exists after cleanup`],
+  ];
+
+  let scratch;
+  const acceptances = [
+    ['8-frame archive, scratch directory removed', () => {
+      const entries = withScratchDir((dir) => {
+        scratch = dir;
+        const path = join(dir, 'frames.zip');
+        writeFileSync(path, syntheticZip(EXPECTED_FRAMES));
+        return assertArchiveContents(zipKey, path);
+      });
+      if (entries !== EXPECTED_FRAMES) throw new Error(`returned ${entries}, expected ${EXPECTED_FRAMES}`);
+      if (existsSync(scratch)) throw new Error(`${scratch} still exists`);
+    }],
+    ['archive transferred', () => assertArchiveTransferred(zipKey, { status: 0, stderr: Buffer.alloc(0) })],
+    ['rejected request FAILED (FORMATO_INVALIDO)', () => assertRejected(id, { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' })],
+    ['1 delivery', () => assertSingleDelivery(id, 1)],
+    ['no archive for the rejected request', () => assertNoArchiveListing(id, '')],
+    ['anonymous GET refused with 403', () => assertAnonymousRefused(objectUrl, 403)],
+    ['temp directory gone', () => assertScratchRemoved(leftover, false)],
+  ];
+
+  const failures = [];
+  for (const [name, run, expected] of rejections) {
+    try {
+      run();
+      failures.push(`${name}: accepted, expected rejection with ${JSON.stringify(expected)}`);
+    } catch (err) {
+      if (err.message !== expected) {
+        failures.push(`${name}: rejected with ${JSON.stringify(err.message)}, expected ${JSON.stringify(expected)}`);
+      }
+    }
+  }
+  for (const [name, run] of acceptances) {
+    try {
+      run();
+    } catch (err) {
+      failures.push(`${name}: rejected a good input with ${JSON.stringify(err.message)}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(`Self-test failed: ${failure}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(
+    `Self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
+  );
+}
+
+if (process.argv.includes('--self-test')) {
+  selfTest();
+} else {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exitCode = 1;
+  });
+}
