@@ -34,11 +34,43 @@ Every dependency runs locally as a container and is reached through a standard p
 ## Running locally
 
 ```sh
-docker compose up --build
+docker compose up --build -d --wait
 node scripts/smoke-local-integration.mjs
 ```
 
 Compose builds each service from its sibling repository, so all five repositories must be checked out under the same parent directory.
+
+### What the smoke proves
+
+Each run creates two new requests and proves two outcomes, so neither can pass on a status alone:
+
+- **An archive with the right frame count.** The fixture video must reach `COMPLETED`. The smoke then downloads the archive at the `zipStorageKey` the Catalog reports and counts its entries: 8 seconds at 1 frame per second gives 8. It fails naming which of three things it found: an archive that is absent, one that is unreadable, or one that is empty. A wrong count names both numbers.
+- **A rejection with the safe reason.** An object that is not a video must reach `FAILED` with `FORMATO_INVALIDO`. It must leave no archive, and the Notification Service must record exactly one delivery carrying the user-facing sentence.
+
+Both assertions were verified by making them fail: a Worker that stores no archive, and a Worker that validates nothing, each turn the smoke red. The smoke seeds its own source objects, so it needs nothing but a running stack.
+
+### Object storage
+
+MinIO serves the S3 API on `localhost:9000`, with its console on `localhost:9001`. One private bucket, `fiapx`, holds two prefixes:
+
+| Prefix | Holds |
+| --- | --- |
+| `sources/` | Source videos the Worker reads |
+| `zips/<processingRequestId>/<attemptId>/frames.zip` | The archive of extracted frames the Worker writes |
+
+Objects under both prefixes expire **7 days** after creation. That is a product rule from [`docs/foudation.md`](docs/foudation.md), not a housekeeping choice, and the bucket's own lifecycle rules enforce it. No job deletes anything.
+
+`minio/bootstrap.sh` runs in the one-shot `minio-init` service **on every start**, and the Worker does not start until it has succeeded. That is the opposite of the database bootstrap below, which runs only on an empty volume. So every step is idempotent: it creates the bucket only if it is missing, asserts that the bucket is private without ever setting a policy, and adds each retention rule only when its prefix has none. A volume left over from an earlier run is therefore brought up to date instead of failing.
+
+### Seeding a source video
+
+```sh
+node scripts/seed-source-video.mjs
+```
+
+This uploads the committed fixture [`fixtures/sample-8s.mp4`](fixtures/README.md) to `sources/sample-8s.mp4`. It also writes a small non-video to `sources/not-a-video.mp4`, and prints both keys. The keys are fixed, so running it again leaves the same two objects.
+
+The script is a **stand-in for the upload path**. S6 replaces it with presigned uploads through the API and deletes it, so do not extend it as a feature.
 
 ### The database bootstrap runs only once
 
@@ -70,7 +102,9 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 | `.specs/STATE.md` | Cross-repository decision log (AD-001 onward) |
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
-| `scripts/` | Local integration smoke test |
+| `scripts/` | Local integration smoke test, source seeding, Worker sizing check |
+| `fixtures/` | The committed source video and its provenance |
+| `minio/` | The object storage bootstrap |
 
 ## Decisions
 

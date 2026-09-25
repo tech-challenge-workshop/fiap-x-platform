@@ -378,15 +378,18 @@ The distinguishable error is `UnreadableArchiveError`. Checked by hand against t
 - Skill: NONE
 
 **Done when**:
-- [ ] The bucket layout and both prefixes are documented, with the 7-day expiry stated as a product rule from `docs/foudation.md`
-- [ ] Seeding is documented as a stand-in that S6 removes, so nobody maintains it as a feature
-- [ ] It states that the bootstrap runs on every start and is therefore idempotent - unlike the SQL bootstrap, which runs only on an empty volume
-- [ ] It states that the declared CPU limit is the contract S9a carries into Kubernetes `limits`
-- [ ] It states that the smoke proves two outcomes per run: an archive with the right frame count, and a rejection with the safe reason
-- [ ] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
+- [x] The bucket layout and both prefixes are documented, with the 7-day expiry stated as a product rule from `docs/foudation.md`
+- [x] Seeding is documented as a stand-in that S6 removes, so nobody maintains it as a feature
+- [x] It states that the bootstrap runs on every start and is therefore idempotent - unlike the SQL bootstrap, which runs only on an empty volume
+- [x] It states that the declared CPU limit is the contract S9a carries into Kubernetes `limits`
+- [x] It states that the smoke proves two outcomes per run: an archive with the right frame count, and a rejection with the safe reason
+- [x] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
+
+The S9a sentence was already written under "Worker sizing" by T6 and is kept there. The run command is now `docker compose up --build -d --wait`: in the foreground, `up` never returns, so the smoke line after it could not run.
 
 ---
 
