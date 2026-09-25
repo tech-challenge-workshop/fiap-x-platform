@@ -163,7 +163,7 @@ Every ambiguity is resolved or recorded here - nothing is left silently unclear.
 
 Each requirement gets a unique ID for tracking across design, tasks, and validation.
 
-`RM-` is shared with `processing-worker`, which owns `RM-07` through `RM-18`. The numbering is continuous across the two repositories so a single slice reads as one set of requirements; `RM-19` was added here after the Worker's range was fixed.
+`RM-` is shared with `processing-worker`, which owns `RM-07` through `RM-18` and `RM-20`. The numbering is continuous across the two repositories so a single slice reads as one set of requirements; `RM-19` was added here after the Worker's first range was fixed, and the Worker's `RM-20` after that.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
@@ -200,7 +200,11 @@ How we know the feature is successful:
 
 S3 (`durable-persistence`) is merged, and this branch was rebased onto it on 2026-09-24: the Compose topology it extends includes PostgreSQL, and the smoke it extends already reaches `COMPLETED` through a durable Catalog.
 
-Two findings of the S1–S3 verification bear on whether this smoke can be trusted, and neither is fixed by this slice. They are tracked in the gap analysis under "Validar depois":
+`fix/pre-s4-hardening` merged on 2026-09-25 (`fiap-x-platform#5`, `processing-catalog#6`, `notification-service#6`), and this branch was rebased onto it the same day. It changed what this slice extends:
 
-- **V3** — the Catalog can handle `ProcessingCompleted` before `ProcessingStarted` commits and dead-letter it. An 8-second fixture extracts fast enough to hit that window, so a red smoke must be read for this cause before it is blamed on the media path.
-- **V11** — the CI `integration` job skips itself when `SERVICES_READ_TOKEN` is absent and still reports success. Until that changes, this smoke is proved only by running it locally.
+- **V2 resolved (AD-012)** — `rabbitmq/definitions.json` now declares every traffic queue and its `.dlq` as quorum queues under a dead-letter policy with `delivery-limit: 5`. This slice does not touch the broker; a rejected or poisoned job in the smoke lands in a DLQ where it can be inspected.
+- **V3 resolved (AD-013)** — the Catalog applies lifecycle events under a row lock and tolerates their order, so a fast extraction of the 8-second fixture cannot strand a request in `PROCESSING`. A red smoke points at the media path. Proved by 10 consecutive green smoke runs on the hardened stack.
+
+One finding still bears on this smoke and is not fixed by this slice:
+
+- **V11** — the CI `integration` job skips itself when `SERVICES_READ_TOKEN` is absent and still reports success; it did exactly that on `fiap-x-platform#5`. Until that changes, this smoke is proved only by running it locally.
