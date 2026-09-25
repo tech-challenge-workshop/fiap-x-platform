@@ -36,7 +36,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 | --- | --- | --- |
 | Quick | After tasks touching a script or a document only | `node --check scripts/<changed>.mjs` and the relative-link check from the `docs-links` job in `.github/workflows/ci.yml` |
 | Full | After tasks touching `compose.yaml` or the bootstrap | `docker compose config -q` then `docker compose up --build -d --wait` |
-| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
+| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
 
 ---
 
@@ -443,13 +443,16 @@ T17
 **Why**: Mutant M7 (thread count decoupled from `cpus`) passed both the Build gate and CI. The check existed and nothing ran it.
 
 **Done when**:
-- [ ] The Build gate command includes `node scripts/check-worker-sizing.mjs` after `docker compose config -q`
-- [ ] The CI `topology` job runs the check and fails the job on a mismatch
-- [ ] Verified by a deliberate mismatch in a scratch copy: the check exits non-zero
-- [ ] Quick gate passes, and the workflow file still parses (`docker compose config` unaffected)
+- [x] The Build gate command includes `node scripts/check-worker-sizing.mjs` after `docker compose config -q`
+- [x] The CI `topology` job runs the check and fails the job on a mismatch
+- [x] Verified by a deliberate mismatch in a scratch copy: the check exits non-zero
+- [x] Quick gate passes, and the workflow file still parses (`docker compose config` unaffected)
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25).** The `topology` job runs `node scripts/check-worker-sizing.mjs` after `actions/setup-node`; a non-zero exit fails the step and the job. M7 (`FFMPEG_THREADS=4`) in a scratch copy holding only `compose.yaml` and the script, which is what the `topology` checkout has without the sibling repositories: exit 1, `worker cpus is 2 but FFMPEG_THREADS is 4; both must come from WORKER_CPUS`. The workflow parses with `yaml.safe_load`, and `docker compose config -q` still exits 0.
 
 ---
 

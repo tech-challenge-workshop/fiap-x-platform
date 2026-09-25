@@ -33,6 +33,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check the Worker's CPU limit matches its thread count
+        run: node scripts/check-worker-sizing.mjs
       - name: Check the smoke script parses
         run: node --check scripts/smoke-local-integration.mjs
 
