@@ -90,6 +90,22 @@
 - **Date**: 2026-09-20
 - **Status**: active
 
+### AD-012
+- **Decision**: The broker's definitions own every queue that carries traffic and its `<queue>.dlq`, declared before any service connects, with the `/` vhost defaulting to **quorum** queues. The `dead-letter` policy matches the queues by the names the services actually use (`video-validation`, `processing`, `notification.terminal` and the five lifecycle queues) and sets `delivery-limit: 5`. Services classify their own failures: a message that is wrong (a domain rule it breaks, a body that is not JSON) is rejected without requeue and dead-lettered; anything else is requeued after a pause.
+- **Reason**: The S1–S3 verification found the policy matched event names no queue uses, so every rejection on a real queue was discarded, and that a publish to a queue its consumer had not yet declared was confirmed and dropped. A quorum queue's delivery limit is the only broker-side bound on a message that kills its consumer. Tested on RabbitMQ 4: a plain `durable: true` redeclaration of a quorum queue is accepted, `nack` without requeue reaches the DLQ, and a crash loop is dead-lettered at the limit — but **an explicit requeue does not count toward the limit**, which is why the services must classify and pause rather than rely on it.
+- **Trade-off**: A transient failure is retried indefinitely, one attempt per pause, so a bug misclassified as transient loops slowly instead of reaching the DLQ; the log names the event on every retry. Quorum queues cost more disk and memory than classic ones, irrelevant at this volume. The topology is rebuilt from the file on every broker start, so a queue created by hand does not survive a restart.
+- **Scope**: `fiap-x-platform` broker definitions; consumer error handling in all services (`processing-catalog` implements it; the Worker and Notification still requeue without a pause).
+- **Date**: 2026-09-24
+- **Status**: active
+
+### AD-013
+- **Decision**: In `processing-catalog`, a lifecycle event is applied under a row lock (`SELECT … FOR UPDATE` inside the unit of work), and the state machine tolerates the order in which `ProcessingStarted` and `ProcessingCompleted` arrive: completion is accepted from `QUEUED`, a start that finds the request already `PROCESSING` or terminal changes nothing, and a completion that restates the stored archive key changes nothing and publishes nothing. Each of these no-ops still records the event as processed.
+- **Reason**: The two events travel on different queues, so the Catalog can handle them in either order or at once. With the old strict machine a completion handled first was dead-lettered and the request stayed in `PROCESSING` forever; with the old read-outside-the-transaction pattern, a start committing after a completion moved a finished request back to `PROCESSING` with its terminal event already recorded. The race test fails 3 of 3 runs without the lock and passes with it.
+- **Trade-off**: `PROCESSING` can be skipped when the completion wins the race, so the state is no longer proof that a start was observed — the Worker still publishes it first, and a completion is taken as proof that processing began. This supersedes the S2 rule that a completion from `QUEUED` means a lost `ProcessingStarted`. Two events for the same request now serialize on the lock, which costs nothing at one row per request.
+- **Scope**: `processing-catalog` domain and application layers.
+- **Date**: 2026-09-24
+- **Status**: active
+
 ## Handoff
 
 - **Feature**: Platform repository extraction (AD-007)

@@ -91,6 +91,13 @@ services:
     # a second declaration whose arguments differ - which closed the Worker's
     # channel with PRECONDITION_FAILED the first time a service tried to own
     # the topology alone. A policy binds no declarer, so nothing can conflict.
+    #
+    # definitions.json also declares every queue that carries traffic, and its
+    # `.dlq`, before any service connects: a publish to a queue nobody has
+    # declared yet is confirmed and then dropped. Queues are quorum by vhost
+    # default, which a service's plain `durable: true` declaration accepts, so
+    # the policy's delivery limit can stop a message that keeps killing its
+    # consumer. No volume: the topology is rebuilt from the file on each start.
     volumes:
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/10-fiapx.conf:ro
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
