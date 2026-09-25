@@ -173,14 +173,15 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] `fixtures/sample-8s.mp4` exists: 8 seconds, 320×240, H.264 in MP4, a few hundred KB
-- [ ] `fixtures/README.md` carries the exact generating command verbatim, the declared duration, and the frame count that follows at 1 frame per second
-- [ ] The README states that the expected frame count in the smoke is derived from this file, so changing the fixture without changing the expectation fails the smoke rather than passing unnoticed
-- [ ] The design's revision is reflected: the fixture is committed rather than generated at seed time, because generating would require FFmpeg on the host
-- [ ] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
+- [x] `fixtures/sample-8s.mp4` exists: 8 seconds, 320×240, H.264 in MP4, a few hundred KB
+- [x] `fixtures/README.md` carries the exact generating command verbatim, the declared duration, and the frame count that follows at 1 frame per second
+- [x] The README states that the expected frame count in the smoke is derived from this file, so changing the fixture without changing the expectation fails the smoke rather than passing unnoticed
+- [x] The design's revision is reflected: the fixture is committed rather than generated at seed time, because generating would require FFmpeg on the host
+- [x] Quick gate passes: the relative-link check from the `docs-links` job in `.github/workflows/ci.yml`
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
 
 ---
 
