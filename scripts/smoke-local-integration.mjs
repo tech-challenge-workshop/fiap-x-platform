@@ -21,6 +21,7 @@ const FORMATO_INVALIDO_REASON = 'O arquivo enviado nao e um video MP4 ou MOV val
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
+const STORAGE_URL = process.env.STORAGE_URL ?? 'http://localhost:9000';
 
 const HEALTH_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS ?? 30000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 60000);
@@ -115,6 +116,27 @@ function countDeliveries(id) {
     "SELECT count(*) FROM notification.delivery_record WHERE processing_request_id = :'id';\n",
   );
   return Number(out.trim());
+}
+
+// The bucket must refuse a request that carries no credentials (RM-01 AC3).
+// The bootstrap asserts this once at start; this proves it from outside, at
+// the end state, so a bucket loosened afterwards turns the smoke red.
+function assertAnonymousRefused(url, status) {
+  if (status >= 200 && status < 300) {
+    throw new Error(`Anonymous access allowed: GET ${url} returned ${status}; the bucket must refuse requests without credentials`);
+  }
+  if (status !== 403) {
+    throw new Error(`Anonymous GET ${url} returned ${status}, expected 403`);
+  }
+}
+
+// A plain fetch carries no S3 signature, so it is an anonymous request.
+async function checkAnonymousAccess(videoKey) {
+  for (const url of [`${STORAGE_URL}/${BUCKET}/${videoKey}`, `${STORAGE_URL}/${BUCKET}/`]) {
+    const res = await fetch(url);
+    await res.arrayBuffer();
+    assertAnonymousRefused(url, res.status);
+  }
 }
 
 function sleep(ms) {
@@ -214,6 +236,8 @@ async function main() {
   await waitForApiHealth();
   const { videoKey, notAVideoKey } = seedSources();
   console.log(`Seeded source video at ${videoKey} and a non-video at ${notAVideoKey}`);
+  await checkAnonymousAccess(videoKey);
+  console.log(`Storage refused anonymous GET of ${BUCKET}/${videoKey} and of the ${BUCKET} listing (403)`);
   const id = await postProcessingRequest(videoKey);
   console.log(`Created processing request ${id}`);
   const rejectedId = await postProcessingRequest(notAVideoKey);

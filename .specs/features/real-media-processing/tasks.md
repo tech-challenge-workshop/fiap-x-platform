@@ -467,12 +467,17 @@ T17
 **Why**: Mutant M5b made the bucket public after the bootstrap's own check and survived: only the bootstrap asserted the posture, and only at bootstrap time.
 
 **Done when**:
-- [ ] An unauthenticated request for `sources/sample-8s.mp4` and for the bucket listing is refused (HTTP 403); any 2xx fails the smoke naming the URL
-- [ ] Verified negatively: with anonymous download enabled by hand on a running stack, the smoke exits 1 naming the exposure
-- [ ] Build gate passes
+- [x] An unauthenticated request for `sources/sample-8s.mp4` and for the bucket listing is refused (HTTP 403); any 2xx fails the smoke naming the URL
+- [x] Verified negatively: with anonymous download enabled by hand on a running stack, the smoke exits 1 naming the exposure
+- [x] Build gate passes
 
 **Tests**: integration
 **Gate**: build
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, local).** Right after seeding, the smoke sends two plain `fetch` requests with no S3 signature, to `http://localhost:9000/fiapx/sources/sample-8s.mp4` and to `http://localhost:9000/fiapx/` (`STORAGE_URL` overrides the host). It requires exactly 403. A 2xx fails with `Anonymous access allowed: GET <url> returned <status>`, and any other status fails naming it and 403.
+- Build gate green, including the new line `Storage refused anonymous GET of fiapx/sources/sample-8s.mp4 and of the fiapx listing (403)`.
+- Negative run (the end state M5b leaves): `mc anonymous set download local/fiapx` on the running stack gave exit 1, `Anonymous access allowed: GET http://localhost:9000/fiapx/sources/sample-8s.mp4 returned 200; the bucket must refuse requests without credentials`. With `anonymous set public`, the listing URL answers 200 as well, so the second request is a real signal. `anonymous set none` restored 403 on both, then `down -v`.
 
 ---
 
