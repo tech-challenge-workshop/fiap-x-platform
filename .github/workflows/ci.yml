@@ -37,6 +37,8 @@ jobs:
         run: node scripts/check-worker-sizing.mjs
       - name: Check the smoke script parses
         run: node --check scripts/smoke-local-integration.mjs
+      - name: Prove each smoke assertion rejects a bad input
+        run: node scripts/smoke-local-integration.mjs --self-test
 
   integration:
     needs: topology
