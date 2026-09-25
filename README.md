@@ -46,6 +46,10 @@ Each run creates two new requests and proves two outcomes, so neither can pass o
 
 - **An archive with the right frame count.** The fixture video must reach `COMPLETED`. The smoke then downloads the archive at the `zipStorageKey` the Catalog reports and counts its entries: 8 seconds at 1 frame per second gives 8. It fails naming which of three things it found: an archive that is absent, one that is unreadable, or one that is empty. A wrong count names both numbers.
 - **A rejection with the safe reason.** An object that is not a video must reach `FAILED` with `FORMATO_INVALIDO`. It must leave no archive, and the Notification Service must record exactly one delivery carrying the user-facing sentence.
+- **A private bucket.** An anonymous request for the seeded object and for the bucket listing must be refused with 403.
+- **No leftovers.** The smoke's own temporary directory must be gone after cleanup.
+
+`node scripts/smoke-local-integration.mjs --self-test` needs no stack: it feeds every assertion above a bad input and requires the specific failure, so an assertion that stops checking fails CI's `topology` job.
 
 Both assertions were verified by making them fail: a Worker that stores no archive, and a Worker that validates nothing, each turn the smoke red. The smoke seeds its own source objects, so it needs nothing but a running stack.
 
@@ -89,7 +93,7 @@ Each service evolves its own tables through its own migrations. This file only c
 
 ### Worker sizing
 
-`WORKER_CPUS` sets both the Worker's CPU limit (`cpus`) and its FFmpeg thread count (`FFMPEG_THREADS`). It defaults to 2; set it in `.env` or the shell to change both. FFmpeg reads the host's core count rather than the container's limit, so the two must agree (AD-006). `node scripts/check-worker-sizing.mjs` reads the rendered `docker compose config` and fails, naming both values, when they do not.
+`WORKER_CPUS` sets both the Worker's CPU limit (`cpus`) and its FFmpeg thread count (`FFMPEG_THREADS`). It defaults to 2; set it in `.env` or the shell to change both. FFmpeg reads the host's core count rather than the container's limit, so the two must agree (AD-006). `node scripts/check-worker-sizing.mjs` reads the rendered `docker compose config` and fails, naming both values, when they do not. It also fails when `WORKER_CPUS` exceeds the Docker engine's CPU count, because Docker refuses to start a container with a larger limit. It runs in the build gate and in CI.
 
 This declared value is the contract S9a carries into the Worker's Kubernetes `limits`.
 

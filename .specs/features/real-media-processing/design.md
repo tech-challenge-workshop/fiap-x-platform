@@ -113,7 +113,7 @@ The ordering is the load-bearing part. `minio-init` runs to completion **before*
 - **Notes**: Every step is idempotent, because unlike the PostgreSQL bootstrap this runs on every start rather than once per volume:
   - `mc alias set local http://minio:9000 <key> <secret>`
   - `mc mb --ignore-existing local/fiapx` — the flag is what makes a second run a no-op
-  - `mc anonymous get local/fiapx` must report `none`; the bootstrap **asserts** rather than sets, because MinIO buckets are already private and a `set` would be a write that could only ever loosen things
+  - `mc anonymous get local/fiapx` must report `private` (the pinned `mc` release's name for the state `mc anonymous set none` writes); the bootstrap **asserts** rather than sets, because MinIO buckets are already private and a `set` would be a write that could only ever loosen things
   - `mc ilm rule add --expire-days 7 --prefix "sources/" local/fiapx` and the same for `zips/`, each guarded by a check for an existing rule on that prefix so a re-run neither fails nor accumulates duplicates
 
 ### `fixtures/sample-8s.mp4` and its provenance
