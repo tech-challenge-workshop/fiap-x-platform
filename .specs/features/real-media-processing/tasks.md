@@ -310,15 +310,21 @@ The distinguishable error is `UnreadableArchiveError`. Checked by hand against t
 - Skill: NONE
 
 **Done when**:
-- [ ] The archive is downloaded and its entry count asserted equal to the fixture's duration in seconds at 1 frame per second
-- [ ] The three failure outcomes are reported distinctly: absent (the transfer fails), unreadable (no EOCD signature), empty (zero entries)
-- [ ] A count mismatch names both the expected and the actual number, so an off-by-one is legible
-- [ ] No downloaded artefact is left behind after the script exits
-- [ ] **Verified negatively**: with the Worker's frame packager replaced by one that stores nothing, the smoke exits non-zero and names the absent archive. An assertion that has never failed is not known to work - this is the concrete lesson from the previous slice, where a status-only smoke would have passed against a fully stubbed implementation
-- [ ] Build gate passes: `node clean-appledouble.mjs`, `docker compose config -q`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v`
+- [x] The archive is downloaded and its entry count asserted equal to the fixture's duration in seconds at 1 frame per second
+- [x] The three failure outcomes are reported distinctly: absent (the transfer fails), unreadable (no EOCD signature), empty (zero entries)
+- [x] A count mismatch names both the expected and the actual number, so an off-by-one is legible
+- [x] No downloaded artefact is left behind after the script exits
+- [x] **Verified negatively**: with the Worker's frame packager replaced by one that stores nothing, the smoke exits non-zero and names the absent archive. An assertion that has never failed is not known to work - this is the concrete lesson from the previous slice, where a status-only smoke would have passed against a fully stubbed implementation
+- [x] Build gate passes: `node clean-appledouble.mjs`, `docker compose config -q`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v`
 
 **Tests**: integration
 **Gate**: build
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, local; CI does not run the smoke, V11).**
+- Build gate green on the real Worker: `Archive zips/<id>/<attemptId>/frames.zip holds 8 frames, as 8 s at 1 frame/s requires`.
+- Negative run: the Worker was built from a scratch copy with `FRAME_PACKAGER` bound to `DeterministicFramePackager`, as a separate image through a Compose override outside both repositories. The request still reached `COMPLETED`, and the smoke exited 1 with: `Archive absent: fiapx/zips/edd8a9ac-…/075c63cc-…/frames.zip could not be transferred from storage (mc: <ERROR> Unable to read from … Object does not exist.)`. The Worker's tree was left clean and the scratch image removed.
+- The unreadable and empty outcomes are proven on `countZipEntries` itself (T8). No real Worker produces them end to end.
 
 ---
 
