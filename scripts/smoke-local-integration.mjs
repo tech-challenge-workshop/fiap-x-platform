@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +51,33 @@ function countZipEntries(path) {
   throw new UnreadableArchiveError(`${path} has no End of Central Directory record`);
 }
 
+// RM-06 AC4: the smoke leaves no downloaded artefact behind.
+function assertScratchRemoved(dir, stillExists) {
+  if (stillExists) throw new Error(`Downloaded artefact left behind: ${dir} still exists after cleanup`);
+}
+
+// Runs fn in a fresh temporary directory, removes the directory whatever the
+// outcome, and then checks it is gone. A leak is reported alongside, never
+// instead of, the failure that fn raised.
+function withScratchDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-'));
+  let result;
+  let failure;
+  try {
+    result = fn(dir);
+  } catch (err) {
+    failure = err;
+  }
+  rmSync(dir, { recursive: true, force: true });
+  try {
+    assertScratchRemoved(dir, existsSync(dir));
+  } catch (leak) {
+    throw failure ? new Error(`${failure.message}\n${leak.message}`) : leak;
+  }
+  if (failure) throw failure;
+  return result;
+}
+
 // Downloads the archive with mc (no SDK, no package.json) into a temporary
 // directory that is removed whatever the outcome, then asserts its entry
 // count. Absent, unreadable and empty are reported as three distinct causes.
@@ -66,8 +93,7 @@ function assertArchiveFrameCount(zipKey) {
     throw new Error(`Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (${cause})`);
   }
 
-  const dir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-'));
-  try {
+  return withScratchDir((dir) => {
     const path = join(dir, 'frames.zip');
     writeFileSync(path, transfer.stdout);
     let entries;
@@ -86,9 +112,7 @@ function assertArchiveFrameCount(zipKey) {
       throw new Error(`Archive frame count mismatch: ${BUCKET}/${zipKey} holds ${entries} entries, expected ${EXPECTED_FRAMES}`);
     }
     return entries;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 }
 
 function dockerCompose(args, input) {

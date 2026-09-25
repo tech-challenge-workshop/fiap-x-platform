@@ -492,12 +492,17 @@ T17
 **Why**: Mutant M10 (temp directory not removed) survived: the requirement had no observable check.
 
 **Done when**:
-- [ ] The smoke checks the directory is gone after cleanup, on success and on failure paths, and exits non-zero naming the path if it remains
-- [ ] Covered by the self-test from T16 or verified negatively by disabling the removal in a scratch copy
-- [ ] Quick gate passes
+- [x] The smoke checks the directory is gone after cleanup, on success and on failure paths, and exits non-zero naming the path if it remains
+- [x] Covered by the self-test from T16 or verified negatively by disabling the removal in a scratch copy
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, local).** The download now runs inside `withScratchDir`, which removes the directory whatever the outcome and then fails with `Downloaded artefact left behind: <dir> still exists after cleanup` if it survived. When the archive check has already failed, the leak is appended to that message instead of replacing it, so the check holds on the success path and on the unreadable, empty and mismatch paths. The absent path fails before any directory is created.
+- The real smoke was green against a live stack, and no `fiapx-smoke-*` remained in the temp directory.
+- Negative run (M10): with the `rmSync` line removed in a scratch copy, the smoke against the same stack exited 1 with `Downloaded artefact left behind: /var/folders/…/T/fiapx-smoke-MXhsfs still exists after cleanup`. The leaked directory and the scratch copy were removed. T16's self-test also exercises `withScratchDir` directly, so the same mutant fails without a stack.
 
 ---
 
