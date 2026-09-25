@@ -419,13 +419,16 @@ T17
 **Why**: Docker refuses to create a container whose `cpus` exceeds the engine's CPUs ("range of CPUs is from 0.01 to 10.00"), so "the stack SHALL still start" cannot hold. The Verifier reproduced it with `WORKER_CPUS=16` on a 10-CPU engine.
 
 **Done when**:
-- [ ] The edge case reads: WHEN the declared CPU limit exceeds the engine's CPU count THEN the sizing check SHALL fail before the stack starts, naming both values
-- [ ] The check reads the engine's CPU count from `docker info` (`NCPU`) and fails naming `WORKER_CPUS` and that count when the limit exceeds it
-- [ ] Verified: with `WORKER_CPUS` above the engine's count the check exits 1 naming both; with the default it still passes
-- [ ] Quick gate passes
+- [x] The edge case reads: WHEN the declared CPU limit exceeds the engine's CPU count THEN the sizing check SHALL fail before the stack starts, naming both values
+- [x] The check reads the engine's CPU count from `docker info` (`NCPU`) and fails naming `WORKER_CPUS` and that count when the limit exceeds it
+- [x] Verified: with `WORKER_CPUS` above the engine's count the check exits 1 naming both; with the default it still passes
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, 10-CPU engine).** The check reads `docker info --format '{{.NCPU}}'` after the pairing check. `WORKER_CPUS=16`: exit 1, `WORKER_CPUS is 16 but the Docker engine has only 10 CPUs; set WORKER_CPUS to at most 10`. `WORKER_CPUS=10` and the default 2: exit 0. With no reachable daemon (`DOCKER_HOST` pointing at a missing socket): exit 1, `docker info failed, so the engine's CPU count is unknown`, so it never passes silently.
 
 ---
 
