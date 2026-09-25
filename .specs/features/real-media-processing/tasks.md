@@ -256,13 +256,16 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] The smoke seeds (or requires a seeded key) and posts a request naming it
-- [ ] `zipStorageKey` is read from the Catalog status the smoke already polls
-- [ ] Each run creates a distinct request, so a second run cannot assert against the previous run's archive
-- [ ] Quick gate passes: `node --check scripts/smoke-local-integration.mjs`
+- [x] The smoke seeds (or requires a seeded key) and posts a request naming it
+- [x] `zipStorageKey` is read from the Catalog status the smoke already polls
+- [x] Each run creates a distinct request, so a second run cannot assert against the previous run's archive
+- [x] Quick gate passes: `node --check scripts/smoke-local-integration.mjs`
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
+
+The smoke runs the seed itself rather than requiring a seeded key, because the CI `integration` job starts the stack and runs the smoke without seeding. It also requires the reported `zipStorageKey` to sit under `zips/<this run's processingRequestId>/`, which is what makes an earlier run's archive unreachable.
 
 ---
 

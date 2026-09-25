@@ -1,3 +1,9 @@
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
@@ -24,13 +30,27 @@ async function waitForApiHealth() {
   throw new Error('API health check timed out');
 }
 
-async function postProcessingRequest() {
+// The seed is idempotent (fixed key), so running it here costs one upload
+// and means the smoke never depends on someone having seeded first.
+function seedSourceVideo() {
+  const result = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'seed-source-video.mjs')], {
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Seeding the source video failed:\n${(result.stderr || result.stdout).trim()}`);
+  }
+  const key = result.stdout.trim().split('\n')[0];
+  if (!key) throw new Error('Seed script printed no storage key');
+  return key;
+}
+
+async function postProcessingRequest(sourceStorageKey) {
   const res = await fetch(`${API_URL}/processing-requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ownerUserId: 'smoke-user',
-      sourceStorageKey: 'videos/smoke.mp4',
+      sourceStorageKey,
     }),
   });
 
@@ -77,10 +97,18 @@ async function waitForNotificationDelivery(id) {
 
 async function main() {
   await waitForApiHealth();
-  const id = await postProcessingRequest();
+  const sourceKey = seedSourceVideo();
+  console.log(`Seeded source video at ${sourceKey}`);
+  const id = await postProcessingRequest(sourceKey);
   console.log(`Created processing request ${id}`);
-  await waitForCatalogStatus(id);
-  console.log(`Catalog reached COMPLETED for ${id}`);
+  const completed = await waitForCatalogStatus(id);
+  // Every run creates a new request and the archive key is scoped to it, so a
+  // second run can never assert against the previous run's archive.
+  const zipKey = completed.zipStorageKey;
+  if (typeof zipKey !== 'string' || !zipKey.startsWith(`zips/${id}/`)) {
+    throw new Error(`Catalog reported zipStorageKey ${JSON.stringify(zipKey)}, expected a key under zips/${id}/`);
+  }
+  console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
   await waitForNotificationDelivery(id);
   console.log(`Notification delivered for ${id}`);
 }
