@@ -1,6 +1,10 @@
 // Puts the committed fixture in the bucket and prints its storage key on
 // stdout, so the smoke can consume it. A stand-in for the upload path (S6).
 //
+// It also seeds a non-video under an `.mp4` name, generated here rather than
+// committed, so the smoke can drive a request to FAILED by validation
+// rejection. stdout is exactly two lines: the video key, then that key.
+//
 // The transfer runs `mc` in the minio-init image rather than an SDK: this
 // repository has no package.json. The file is named explicitly rather than
 // the directory globbed, so exFAT `._*` sidecars are never uploaded. The key
@@ -14,6 +18,8 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE = 'fixtures/sample-8s.mp4';
 const BUCKET = 'fiapx';
 const KEY = 'sources/sample-8s.mp4';
+const NOT_A_VIDEO_KEY = 'sources/not-a-video.mp4';
+const NOT_A_VIDEO = 'This is plain text under an .mp4 name. The Worker must reject it.\n';
 const STORAGE = 'object storage (compose service "minio", http://minio:9000)';
 
 function fail(message, detail) {
@@ -24,11 +30,11 @@ function fail(message, detail) {
 
 // Runs mc against the stack without starting anything: --no-deps keeps
 // Compose from bringing a stopped minio up behind the developer's back.
-function mc(args, extraDockerArgs = []) {
+function mc(args, extraDockerArgs = [], input = undefined) {
   const result = spawnSync(
     'docker',
     ['compose', 'run', '--rm', '--no-deps', ...extraDockerArgs, '--entrypoint', 'mc', 'minio-init', ...args],
-    { cwd: REPO_ROOT, encoding: 'utf8' },
+    { cwd: REPO_ROOT, encoding: 'utf8', input },
   );
   if (result.error) fail(`could not run docker: ${result.error.message}`);
   return result;
@@ -61,4 +67,10 @@ if (copy.status !== 0) {
   fail(`upload to ${STORAGE} failed for ${BUCKET}/${KEY}`, copy.stdout + copy.stderr);
 }
 
+const pipe = mc(['pipe', '--quiet', `local/${BUCKET}/${NOT_A_VIDEO_KEY}`], ['-T'], NOT_A_VIDEO);
+if (pipe.status !== 0) {
+  fail(`upload to ${STORAGE} failed for ${BUCKET}/${NOT_A_VIDEO_KEY}`, pipe.stdout + pipe.stderr);
+}
+
 console.log(KEY);
+console.log(NOT_A_VIDEO_KEY);

@@ -342,15 +342,25 @@ The distinguishable error is `UnreadableArchiveError`. Checked by hand against t
 - Skill: NONE
 
 **Done when**:
-- [ ] The seed places a small text payload under `sources/` with an `.mp4` name, generated at seed time rather than committed
-- [ ] The smoke creates one request per seeded object and waits for both to settle
-- [ ] The rejected request is asserted `FAILED` with the exact safe reason the Catalog maps from `FORMATO_INVALIDO`, no object under its `zips/` prefix, and exactly one Notification delivery record for its terminal event
-- [ ] A request that settles `COMPLETED`, or stays non-terminal past the timeout, fails the smoke naming the observed status
-- [ ] **Verified negatively**: with the Worker bound back to `AcceptAllVideoValidator`, the smoke exits non-zero and names `COMPLETED` where `FAILED` was expected
-- [ ] Build gate passes: the same sequence as T9
+- [x] The seed places a small text payload under `sources/` with an `.mp4` name, generated at seed time rather than committed
+- [x] The smoke creates one request per seeded object and waits for both to settle
+- [x] The rejected request is asserted `FAILED` with the exact safe reason the Catalog maps from `FORMATO_INVALIDO`, no object under its `zips/` prefix, and exactly one Notification delivery record for its terminal event
+- [x] A request that settles `COMPLETED`, or stays non-terminal past the timeout, fails the smoke naming the observed status
+- [x] **Verified negatively**: with the Worker bound back to `AcceptAllVideoValidator`, the smoke exits non-zero and names `COMPLETED` where `FAILED` was expected
+- [x] Build gate passes: the same sequence as T9
 
 **Tests**: integration
 **Gate**: build
+**Status**: ✅ Complete
+
+**How the safe reason is asserted.** The Catalog's status view carries `failureCode`, not the sentence, because the sentence is derived when the terminal event is published and is never stored. The smoke therefore asserts `failureCode` `FORMATO_INVALIDO` on the Catalog. It asserts the exact sentence, `O arquivo enviado nao e um video MP4 ou MOV valido.`, on the Notification delivery record, which is where the terminal event delivers it. `GET /local/deliveries/:id` returns one record and cannot show a duplicate, so "exactly one" is a row count in `notification.delivery_record`, run through `psql` in the postgres container. The seed now prints two lines: the video key, then `sources/not-a-video.mp4`.
+
+**Evidence (2026-09-25, local; CI does not run the smoke, V11).**
+- Build gate green on the real Worker: `Catalog reached FAILED (FORMATO_INVALIDO)`, `No archive exists under zips/<id>/`, `Notification delivered once for <id>: O arquivo enviado nao e um video MP4 ou MOV valido.`, alongside the 8-frame archive from T9.
+- Negative run 1, with only `VIDEO_VALIDATOR` bound to `AcceptAllVideoValidator`: exit 1, `Request 6cd7f7a8-… for the non-video: expected FAILED (FORMATO_INVALIDO), observed FAILED (PROCESSAMENTO_FALHOU)`. The real packager still refuses the text file, so this binding alone cannot reach `COMPLETED`.
+- Negative run 2, with the pre-S4 binding restored (`AcceptAllVideoValidator` and `DeterministicFramePackager`): exit 1, `Request 886c4d46-… for the non-video: expected FAILED (FORMATO_INVALIDO), observed COMPLETED`. The rejection is asserted before the archive, so a Worker that validates nothing is named for that rather than for a missing archive.
+- Timeout branch: `POLL_TIMEOUT_MS=300` gives exit 1, `Request 8c782ec5-… is still RECEIVED after 300 ms; expected it to settle`.
+- Both negative Workers were built from a scratch copy, as a separate image through a Compose override outside both repositories. The image was removed afterwards, and `git -C ../processing-worker status --porcelain` is empty.
 
 ---
 
