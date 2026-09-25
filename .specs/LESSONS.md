@@ -50,6 +50,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: minio/bootstrap.sh:16 SPEC_DEVIATION; RM-19 AC2 failureReason
 - last seen: 2026-09-25T22:54:28Z
 
+### L-007 - Give every gate script a self-test that feeds its comparisons failing and boundary values, not only the smoke
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: N2 N2b N2c scripts/check-worker-sizing.mjs:38,52
+- last seen: 2026-09-25T23:25:58Z
+
+### L-008 - Route every smoke assertion through a self-tested helper; an inline check in main is unguarded
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: N6 N9 scripts/smoke-local-integration.mjs:308,325
+- last seen: 2026-09-25T23:25:58Z
+
+### L-009 - Prove the smoke's main path calls each assertion, not only that each assertion rejects bad input
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: N3w N5 N7 N8 scripts/smoke-local-integration.mjs:294,314,319,330
+- last seen: 2026-09-25T23:25:58Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

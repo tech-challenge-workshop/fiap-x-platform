@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 7,
+  "next_id": 10,
   "lessons": [
     {
       "id": "L-001",
@@ -112,6 +112,60 @@
       ],
       "created": "2026-09-25T22:54:28Z",
       "last_seen": "2026-09-25T22:54:28Z"
+    },
+    {
+      "id": "L-007",
+      "key": "surviving_mutant::give every gate script a self test that feeds its comparisons failing and boundary values not only the smoke",
+      "text": "Give every gate script a self-test that feeds its comparisons failing and boundary values, not only the smoke",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "N2 N2b N2c scripts/check-worker-sizing.mjs:38,52"
+      ],
+      "created": "2026-09-25T23:25:58Z",
+      "last_seen": "2026-09-25T23:25:58Z"
+    },
+    {
+      "id": "L-008",
+      "key": "surviving_mutant::route every smoke assertion through a self tested helper an inline check in main is unguarded",
+      "text": "Route every smoke assertion through a self-tested helper; an inline check in main is unguarded",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "N6 N9 scripts/smoke-local-integration.mjs:308,325"
+      ],
+      "created": "2026-09-25T23:25:58Z",
+      "last_seen": "2026-09-25T23:25:58Z"
+    },
+    {
+      "id": "L-009",
+      "key": "surviving_mutant::prove the smoke s main path calls each assertion not only that each assertion rejects bad input",
+      "text": "Prove the smoke's main path calls each assertion, not only that each assertion rejects bad input",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "N3w N5 N7 N8 scripts/smoke-local-integration.mjs:294,314,319,330"
+      ],
+      "created": "2026-09-25T23:25:58Z",
+      "last_seen": "2026-09-25T23:25:58Z"
     }
   ]
 }

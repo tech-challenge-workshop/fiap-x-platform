@@ -1,12 +1,16 @@
-# Real Media Processing Validation — platform
+# Real Media Processing Validation — platform (Round 2)
 
 **Date**: 2026-09-25
 **Spec**: `.specs/features/real-media-processing/spec.md`
-**Diff range**: `f225e2e..a787035` (`feat/real-media-processing`). The implementation commits are `83e33ba`..`a787035` (11 commits). `eb24e9e`..`6c9238d` are spec documents.
-**Verifier**: independent sub-agent (author ≠ verifier)
-**Environment**: Docker Desktop engine with 10 CPUs. The sibling repos were `processing-worker` `feat/real-media-processing@a0aaa4a`, `processing-catalog` `main@696029d` and `notification-service` `main@256f1a0`, all clean before and after. MinIO `RELEASE.2025-09-07T16-13-09Z` and mc `RELEASE.2025-08-13T08-35-41Z`.
+**Diff range**: `f225e2e..58b7cdd` (`feat/real-media-processing`). Round 1 covered `83e33ba..a787035`. This round re-derives the whole range. It adds the fix batch `87e6e00..e278149` (T12–T17) and the docs alignment commit `58b7cdd`.
+**Verifier**: independent sub-agent, round 2 (author ≠ verifier). I did not trust the round 1 report or the evidence text of T12–T17. Every claim below was re-run.
+**Environment**: Docker Desktop 29.6.2, engine with 10 CPUs (`docker info` NCPU=10). The sibling repos were `processing-worker` `feat/real-media-processing@a0aaa4a`, `processing-catalog` `main@696029d`, `notification-service` `main@256f1a0` and `fiap-x-api` `main@cb1dbab`, all clean before and after.
 
-**Result**: FAIL. Every acceptance criterion has `file:line` evidence, and the build gate is green, run twice. One spec edge case is demonstrably violated: a CPU limit above the engine's core count stops the stack from starting. The check that enforces RM-05 AC3 is not wired into any gate. Six of 19 mutants survived. Four are assertion mutants that a correct stack cannot kill. Two (M5b, M10) are behaviours that no gate observes.
+**Result**: FAIL. All 19 round-1 mutants are now killed, including the six that survived round 1. The build gate is green on both passes, and every AC and edge case has `file:line` evidence that I observed at runtime. However, 12 of the 17 new round-2 mutants survive. After excluding one equivalent mutant and two mutants of the test harness itself, 9 of them disable real enforcement and no gate notices:
+
+- **The sizing check's own logic is not discriminated.** Disabling its engine-CPU comparison (N2), shifting its boundary (N2b), or disabling the CPU/thread pairing comparison (N2c) passes the Build gate and CI. The script has no self-test, and every gate runs it only with a matching, in-range config. RM-05 AC3 and the corrected CPU edge case are enforced only by code nobody tests.
+- **Two smoke assertions are inline in `main()` and outside the self-test.** These are the RM-19 AC2 sentence check (N6) and the `zipStorageKey` scope check (N9).
+- **The self-test proves the helper functions, not that `main()` calls them.** Removing the call to the anonymous-access check (N3w), the rejection check (N5), the no-archive check (N7) or the single-delivery check (N8) leaves every gate green.
 
 ---
 
@@ -14,14 +18,13 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T1–T11 | ✅ Done | All 11 are marked `✅ Complete` in `tasks.md`, with every `Done when` box checked. There is one commit per task: T1 `83e33ba`, T2 `1ce4aa2`, T3 `7445cb1`, T4 `c85d425`, T5 `5daf13d`, T6 `c5cbb7a`, T7 `d26e51b`, T8 `349fbf8`, T9 `dcfdef8`, T11 `b7ab225` and T10 `a787035`. |
-
-The recorded deviations, and whether each still meets its AC's intent:
-
-- **T4, fixture committed rather than generated.** Meets the intent. `fixtures/README.md:20-22` records the command, pinned by digest. The Verifier's ffprobe reports `h264 320x240 30/1, duration=8.000000`, and the SHA-256 matches `fixtures/README.md:13`. The spec's assumption row (`spec.md:40`) still says "generated" and was never amended.
-- **T2, `private` instead of `none`.** Meets the intent. `mc anonymous get --json` returned `"permission":"private"`, and anonymous HTTP returned 403. The marker is at `minio/bootstrap.sh:16-18`. `tasks.md:122` still says `none`.
-- **T11, both pre-S4 stubs needed to reach `COMPLETED`.** Meets the intent, and the Verifier reproduced it (W3 below). It has one side effect: see M3.
-- **Catalog exposes `failureCode`, not `failureReason`.** Meets the intent. The sentence is asserted on the Notification delivery (`scripts/smoke-local-integration.mjs:248`). The spec text of RM-19 AC2 is now inaccurate: see the spec-precision gaps.
+| T1–T11 | ✅ Done | Re-verified by the gate run and the sensor below. |
+| T12 | ✅ Done, with a gap | `scripts/check-worker-sizing.mjs:45-54` reads `docker info` NCPU. I re-ran it: `WORKER_CPUS=16` gave exit 1, `WORKER_CPUS is 16 but the Docker engine has only 10 CPUs; set WORKER_CPUS to at most 10`. `WORKER_CPUS=11` gave exit 1. `WORKER_CPUS=10` and the default gave exit 0. A bad `DOCKER_HOST` gave exit 1, `docker info failed …`. The spec edge case (`spec.md:158`) matches. Gap: the comparison itself is unguarded (N2 and N2b survive). |
+| T13 | ✅ Done | `.github/workflows/ci.yml:36-37` runs the check in the `topology` job. `tasks.md:39` has it in the Build gate after `config -q`. In a CI-shaped copy (platform only, no siblings), `docker compose config` rendered, the check passed, and M7 made it exit 1. Gap: N2c survives. |
+| T14 | ✅ Done | `scripts/smoke-local-integration.mjs:179-195`, called at `:294`. M5b is now killed. Gap: removing the call (N3w) survives. |
+| T15 | ✅ Done | `scripts/smoke-local-integration.mjs:55-79` (`withScratchDir`). M10 is killed by both the smoke and the self-test. |
+| T16 | ⚠️ Done, but its claim is overstated | `--self-test` (`:358-442`) rejects 13 bad inputs and accepts 7 good inputs. M2, M3, M11 and M12 are killed. The claim that the self-test covers "every assertion above" (`README.md:52`) is not true: the sentence check (`:325`), the key-scope check (`:308`), the video `COMPLETED` check (`:302`) and all call sites in `main()` are outside it. The self-test is also absent from the Build gate row (`tasks.md:39`). |
+| T17 | ✅ Done | `spec.md:39-40` (fixture committed, 39,863 bytes) matches: SHA-256 `494956e2…7552` = `fixtures/README.md:13`. RM-19 AC2 is at `spec.md:128`. The `SPEC_DEVIATION` marker was removed from `minio/bootstrap.sh:14-17` in `58b7cdd`, and the text there now states the `private`/`none` naming. |
 
 ---
 
@@ -31,88 +34,162 @@ The recorded deviations, and whether each still meets its AC's intent:
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 storage healthy before Worker | readiness, then Worker | `compose.yaml:166` `mc ready local`, `compose.yaml:183-185` init waits `service_healthy`, `compose.yaml:69-70` worker waits `service_completed_successfully`. Observed start times: minio 22:29:20.97, init 22:29:26.60 to 26.77, worker 22:29:27.18. M6 and M6c were both killed | ✅ PASS |
-| AC2 bucket `fiapx` exists | bucket `fiapx` | `compose.yaml:180` `STORAGE_BUCKET=fiapx`, `minio/bootstrap.sh:12` `mc mb --ignore-existing`. Log: ``Bucket created successfully `local/fiapx` `` | ✅ PASS |
-| AC3 deny anonymous access | object reachable only with credentials | `minio/bootstrap.sh:19-23` asserts `"permission":"private"`, else exit 1. Verifier: anonymous `GET /fiapx/sources/sample-8s.mp4` gave 403 and `GET /fiapx/` gave 403. A bucket loosened by hand made `up` exit 1 with the Worker not started. M5a was killed; **M5b survived** | ⚠️ PASS (asserted once at bootstrap; no gate checks the end state) |
-| AC4 existing bucket unaltered | success, no change | `minio/bootstrap.sh:12`. The second `up` without `-v` exited 0, and its log shows `retention on sources/ already configured`, `retention on zips/ already configured` | ✅ PASS |
-| AC5 credentials via env | env only | `compose.yaml:62-65`, `:156-157`, `:179`. `git grep minioadmin a787035` finds only `compose.yaml` | ✅ PASS |
+| AC1 storage healthy before Worker | readiness, then Worker | `compose.yaml:166` `mc ready local`, `:183-185` init waits `service_healthy`, `:69-70` worker waits `service_completed_successfully`. M6 and M6c are killed by `up --wait` exit 1 | ✅ PASS |
+| AC2 bucket `fiapx` exists | bucket `fiapx` | `compose.yaml:180`, `minio/bootstrap.sh:12` `mc mb --ignore-existing`. Log: ``Bucket created successfully `local/fiapx` `` | ✅ PASS |
+| AC3 deny anonymous access | reachable only with credentials; 403 | At bootstrap: `minio/bootstrap.sh:18-22` requires `"permission":"private"`. At the end state: `scripts/smoke-local-integration.mjs:179-186` (`status !== 403` → throw), called at `:294`. I observed 403 with curl on the object, on `fiapx/` and on `not-a-video.mp4`. M5a and **M5b are both killed**. Self-test cases are at `:387-390` | ✅ PASS (wiring mutant N3w survives, see the sensor) |
+| AC4 existing bucket unaltered | success, no change | `minio/bootstrap.sh:12`, `:34-35`. The second `up` without `-v` gave exit 0, and its log shows `retention on sources/ already configured`, `retention on zips/ already configured` | ✅ PASS |
+| AC5 credentials via env | env only | `compose.yaml:62-65`, `:156-157`, `:179`. `git grep minioadmin 58b7cdd` matches only `compose.yaml`, plus the prose in the round-1 report | ✅ PASS |
 
 ### P2: Retention (RM-03)
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 7-day lifecycle | expire 7 days after creation | `minio/bootstrap.sh:38` `--expire-days 7`. The read-back at `minio/bootstrap.sh:43-49` requires 2 rules at 7 days. `mc ilm rule ls` shows `sources/ 7`, `zips/ 7` | ✅ PASS |
-| AC2 existing rule left in place | success, no duplicate | Guard at `minio/bootstrap.sh:34-36`. The second `up` still shows exactly 2 prefixes | ✅ PASS |
-| AC3 both prefixes | `sources/` and `zips/` | `minio/bootstrap.sh:31`. M4 (drop `zips/`) was killed: `up` exit 1, `expected 2 lifecycle rules at 7 days, found 1` | ✅ PASS |
+| AC1 7-day lifecycle | expire at 7 days | `minio/bootstrap.sh:37` `--expire-days 7`. The read-back at `:42-48` requires 2 rules, both at 7 days. `mc ilm rule ls` showed `sources/ 7` and `zips/ 7` | ✅ PASS |
+| AC2 existing rule left in place | success, no duplicate | `minio/bootstrap.sh:34-35` guard. After the second `up`, `ilm rule ls` still showed exactly 2 `Enabled` rules | ✅ PASS |
+| AC3 both prefixes | `sources/` and `zips/` | `minio/bootstrap.sh:30`. M4 is killed: `up` exit 1, `minio-init didn't complete successfully`, Worker not started | ✅ PASS |
 
 ### P3: A real video, seeded (RM-04)
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 readable MP4 under `sources/`, key printed | key on stdout | `scripts/seed-source-video.mjs:62-68` upload and `:75` print. The key is consumed at `scripts/smoke-local-integration.mjs:148` and the video reached 8 frames. M9 (wrong key printed) was killed: `expected COMPLETED, observed FAILED (FORMATO_INVALIDO)` | ✅ PASS |
-| AC2 twice leaves one object | exactly one | Fixed key at `scripts/seed-source-video.mjs:20`. After the seed plus the smoke's own seed, `mc ls sources/` shows one `sample-8s.mp4` | ✅ PASS |
-| AC3 unreachable, non-zero naming the service | exit ≠ 0, names service | `scripts/seed-source-video.mjs:53-59`. With minio stopped: exit 1, `object storage (compose service "minio", http://minio:9000) is unreachable` | ✅ PASS |
-| AC4 fixture states duration and fps | derivable count | `fixtures/README.md:9-11` (8 s, 30 fps, 8 frames at 1 fps) and `scripts/smoke-local-integration.mjs:11-15` | ✅ PASS |
+| AC1 readable MP4 under `sources/`, key printed | key on stdout | `scripts/seed-source-video.mjs:62-68`, `:75`. Output was `sources/sample-8s.mp4`, and the key reached 8 frames. M9 is killed: `expected COMPLETED, observed FAILED (FORMATO_INVALIDO)` | ✅ PASS |
+| AC2 twice leaves one object | exactly one | Fixed key at `scripts/seed-source-video.mjs:20`. After the standalone seed plus the smoke's own seed, `mc ls sources/` shows one `sample-8s.mp4` (39KiB) | ✅ PASS |
+| AC3 unreachable → non-zero naming the service | exit ≠ 0, service named | `scripts/seed-source-video.mjs:53-59`. With the stack down: exit 1, `object storage (compose service "minio", http://minio:9000) is unreachable` | ✅ PASS |
+| AC4 fixture states duration and fps | derivable count | `fixtures/README.md:9-11`, `scripts/smoke-local-integration.mjs:11-15`. The SHA-256 and size match | ✅ PASS |
 
 ### P4: The smoke proves a ZIP (RM-06)
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 download at `zipStorageKey`, readable | archive fetched and parsed | `scripts/smoke-local-integration.mjs:228-231` (key from the Catalog, scoped to `zips/<id>/`) and `:57-66` transfer | ✅ PASS |
-| AC2 entries = seconds × 1 | 8 | `scripts/smoke-local-integration.mjs:15`, `:84-86`. M1 (expects 7) was killed. W1 (Worker at fps=2) was killed: `holds 16 entries, expected 8` | ✅ PASS |
-| AC3 absent / unreadable / empty named distinctly | three messages | `scripts/smoke-local-integration.mjs:65` `Archive absent`, `:77` `Archive unreadable`, `:82` `Archive empty`. **All three were proved end to end by the Verifier**: W2 gave `Archive absent`, W5 gave `Archive unreadable`, and W4 gave `Archive empty`. M8 (parser returns 0) gave `Archive empty` | ✅ PASS |
-| AC4 no downloaded artefact left | nothing in tmp | `scripts/smoke-local-integration.mjs:68`, `:88-89` (`finally rmSync`). The real runs left 0 `fiapx-smoke-*`. **M10 survived**: the smoke was green and leaked 1 dir | ⚠️ PASS (code only; no gate observes it) |
+| AC1 download at `zipStorageKey`, readable | fetched and parsed | `scripts/smoke-local-integration.mjs:307-311` (key from the Catalog, scoped to `zips/<id>/`), `:113-127` (transfer and parse) | ✅ PASS (N9, the scope check disabled, survives) |
+| AC2 entries = 8 | 8 | `:13-15`, `:104-106`, with self-test cases at `:367-370`. M1, M2 and W1 are killed | ✅ PASS |
+| AC3 absent / unreadable / empty named | three distinct messages | `:85` `Archive absent`, `:97` `Archive unreadable`, `:102` `Archive empty`. End to end: W2 gave `Archive absent`, W5 gave `Archive unreadable` and W4 gave `Archive empty`. The self-test pins each exact message (`:371-376`). Nempty and N1a are killed | ✅ PASS |
+| AC4 no downloaded artefact left | dir gone after exit | `:62-79` (`rmSync` then `assertScratchRemoved(dir, existsSync(dir))`), with self-test cases at `:391`, `:397-406`. The real runs left 0 `fiapx-smoke-*`. M10, N4b and N4+M10 are killed | ✅ PASS |
 
 ### P6: The smoke proves a rejection (RM-19)
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 seed a non-video, second request | 2 requests | `scripts/seed-source-video.mjs:21-22`, `:70-73`, and `scripts/smoke-local-integration.mjs:219` | ✅ PASS |
-| AC2 `FAILED` + safe `FORMATO_INVALIDO` text | `FAILED`, reason `O arquivo enviado nao e um video MP4 ou MOV valido.` | `scripts/smoke-local-integration.mjs:235` (`status`, `failureCode` on the Catalog) and `:248` (exact sentence on the delivery) | ⚠️ PASS (recorded deviation: `failureReason` is not on the Catalog) |
-| AC3 no archive + exactly one delivery | 0 objects, 1 row | `scripts/smoke-local-integration.mjs:103-107`, `:242`, and `:112-118`, `:254` (`deliveries !== 1`, a row count in `notification.delivery_record`). M11 and M12 survived against a correct stack (see the sensor) | ✅ PASS |
-| AC4 `COMPLETED` or non-terminal fails, naming the status | exit ≠ 0 naming the status | `scripts/smoke-local-integration.mjs:235-236`, `:192`. W3 (pre-S4 Worker) gave exit 1 with `expected FAILED (FORMATO_INVALIDO), observed COMPLETED`. `POLL_TIMEOUT_MS=300` gave exit 1 with `is still RECEIVED after 300 ms` | ✅ PASS |
+| AC1 non-video seeded, second request | 2 requests | `scripts/seed-source-video.mjs:21-22`, `:70-73`, `scripts/smoke-local-integration.mjs:298` | ✅ PASS |
+| AC2 Catalog `FAILED`/`FORMATO_INVALIDO` and exact sentence on the delivery | `FAILED`, `FORMATO_INVALIDO`, `O arquivo enviado nao e um video MP4 ou MOV valido.` | Code: `:151-155` (`assertRejected`, self-tested at `:377-380`), called at `:314`. Sentence: `:325` (inline, **not self-tested**). Observed: `Notification delivered once for …: O arquivo enviado nao e um video MP4 ou MOV valido.` | ⚠️ PASS on a correct stack; **N6 (sentence check disabled) and N5 (call removed) survive** |
+| AC3 no archive + exactly one delivery | 0 objects, 1 row | `:139-147` and `:159-174` (self-tested at `:381-386`), called at `:319` and `:330`. M11 and M12 are killed | ⚠️ PASS; **N7 and N8 (calls removed) survive** |
+| AC4 `COMPLETED` or non-terminal → exit ≠ 0, naming the status | status named | `:151-155`, `:269`. The faithful pre-S4 W3 (accept-all validator plus key-only packager) gave exit 1, `expected FAILED (FORMATO_INVALIDO), observed COMPLETED`. A non-terminal request is named at `:269`: `M4` gave `is still RECEIVED after 60000 ms` | ✅ PASS |
 
 ### P5: CPU limit and thread count (RM-05)
 
 | Criterion | Spec-defined outcome | `file:line` + enforcement | Result |
 | --- | --- | --- | --- |
-| AC1 explicit CPU limit | declared `cpus` | `compose.yaml:53` `cpus: ${WORKER_CPUS:-2}`. The container shows `NanoCpus=2000000000` | ✅ PASS |
-| AC2 threads from the same limit | `FFMPEG_THREADS` = limit | `compose.yaml:59` `FFMPEG_THREADS=${WORKER_CPUS:-2}`. In the container, `printenv FFMPEG_THREADS` gives `2` | ✅ PASS |
-| AC3 disagreement fails naming both | exit ≠ 0, both values | `scripts/check-worker-sizing.mjs:38-40`. M7 was killed: `worker cpus is 2 but FFMPEG_THREADS is 4`. **However, no gate runs it**: it is absent from the Build gate (`tasks.md:39`) and from CI (`.github/workflows/ci.yml:14-37`, `:83-90`). M7 passes both | ❌ GAP (enforcement unwired) |
+| AC1 explicit CPU limit | declared `cpus` | `compose.yaml:53` `cpus: ${WORKER_CPUS:-2}`. Container `NanoCpus=2000000000` | ✅ PASS |
+| AC2 threads from the same limit | `FFMPEG_THREADS` = limit | `compose.yaml:59`. `printenv FFMPEG_THREADS` in the container gives `2` | ✅ PASS |
+| AC3 disagreement fails naming both | exit ≠ 0, both values | `scripts/check-worker-sizing.mjs:38-40`, now wired into `.github/workflows/ci.yml:36-37` and `tasks.md:39`. M7 is killed (full copy and CI-shaped copy): `worker cpus is 2 but FFMPEG_THREADS is 4; both must come from WORKER_CPUS` | ⚠️ PASS for config drift; **N2c (the comparison disabled) survives every gate** |
 
-**Status**: ❌ gaps present. There are 27 ACs. 26 have evidence and 1 is a wiring gap (RM-05 AC3). 2 pass only by code evidence or at bootstrap time, and 1 rests on a recorded deviation.
+**Status**: ❌ discrimination gaps present. 23 of 23 ACs have `file:line` evidence and a matching observed outcome. 4 ACs (RM-05 AC3, RM-19 AC2, RM-19 AC3, RM-01 AC3) rest on enforcement code whose removal or neutralisation no gate detects.
+
+---
+
+## Edge Cases
+
+- [x] **Bootstrap fails → Worker not started.** On a live stack I ran `worker` removed, then `mc anonymous set download`, then `up -d --wait`. Result: exit 1, `service "minio-init" didn't complete successfully: exit 1`, and `bucket local/fiapx allows anonymous access: {…"permission":"download"…}`. Worker containers: 0. On the same loosened bucket the smoke exits 1 with `Anonymous access allowed: GET …/sources/sample-8s.mp4 returned 200`.
+- [x] **Stale volume without the lifecycle rule.** `mc ilm rule rm --all --force`, then `up`: exit 0, both rules re-added (`Lifecycle configuration rule added` ×2), and the smoke passed.
+- [x] **Smoke run twice.** It ran three times on one stack, and again after the second `up`. All runs were green with distinct request ids. The key is scoped at `scripts/smoke-local-integration.mjs:308`. ⚠️ N9 (scope check reduced to a type check) survives, so nothing guards the scoping.
+- [x] **FFmpeg unavailable where the fixture is generated.** Moot after T4 (the fixture is committed). The zero-byte guard is at `scripts/seed-source-video.mjs:49`.
+- [x] **CPU limit above the engine's count → the sizing check fails first, naming both.** `scripts/check-worker-sizing.mjs:45-54`. `WORKER_CPUS=16` gave exit 1 naming 16 and 10. `WORKER_CPUS=11` gave exit 1. `WORKER_CPUS=10` gave exit 0. It runs before `up` in the Build gate (`tasks.md:39`) and in CI. ⚠️ N2 and N2b survive: no gate ever runs the check with a limit above NCPU, or at the boundary.
+
+---
+
+## Gate Check
+
+- **Gate command**:
+  - `node clean-appledouble.mjs` (workspace root).
+  - Then, in `fiap-x-platform`: `docker compose config -q && node scripts/check-worker-sizing.mjs && docker compose up --build -d --wait && node scripts/seed-source-video.mjs && node scripts/smoke-local-integration.mjs && node scripts/smoke-local-integration.mjs --self-test`.
+  - Then a second `up --build -d --wait` without `-v`, and the smoke again.
+  - Then `docker compose down -v`.
+- **Outcome**:
+  - The first pass: clean 0, config 0, sizing 0, up 0 (18 s), seed 0, smoke 0 (4 s), self-test 0.
+  - The second pass: up 0 (the bootstrap re-ran and reported `already configured` for both prefixes), smoke 0, and a third smoke 0.
+  - After the edge-case probes: `down -v` 0, with no `fiap-x-platform` volumes left.
+- **Summary lines**:
+  - `worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`
+  - `Storage refused anonymous GET of fiapx/sources/sample-8s.mp4 and of the fiapx listing (403)`
+  - `Catalog reached COMPLETED for 5d8b8985-… with archive zips/5d8b8985-…/b25feaa6-…/frames.zip`
+  - `Catalog reached FAILED (FORMATO_INVALIDO) for 43bd1096-…`
+  - `Archive zips/5d8b8985-…/…/frames.zip holds 8 frames, as 8 s at 1 frame/s requires`
+  - `No archive exists under zips/43bd1096-…/`
+  - `Notification delivered once for 43bd1096-…: O arquivo enviado nao e um video MP4 ou MOV valido.`
+  - `Self-test passed: 13 bad inputs rejected with the expected message, 7 good inputs accepted`
+- **CI-shaped check** (platform checkout only, no siblings): `docker compose config` rendered, sizing 0, `node --check` 0, self-test 0. M7 gave sizing exit 1.
+- **Before and after**: there are no unit tests. The smoke gains 2 assertions (anonymous 403 and temp-dir removal) and a 20-case self-test. The sizing check gains the NCPU comparison. Nothing was removed or weakened.
+- **CI**: the `integration` job still self-skips without `SERVICES_READ_TOKEN` (V11, out of scope), so the end-to-end smoke is proved only locally. The `topology` job now runs sizing and the self-test.
 
 ---
 
 ## Discrimination Sensor
 
-Each mutant ran in its own scratch copy of the platform, with the four siblings symlinked (`rsync --exclude .git` into the scratchpad). Each run was the full gate: `config -q`, `up --build -d --wait`, seed, smoke, sizing, then `down -v`. Each edit was applied by a script that aborts unless the pattern matches exactly once. The Worker faults are images derived from the built `fiap-x-platform-worker`, with a `sed` over `dist/` guarded by `grep -q`. They were run through a scratch `compose.yaml` that uses `image:` in place of `build:`. A control run of the unmutated copy was green.
+**Method.** The platform was `rsync`ed (`--exclude .git`) into a scratchpad copy named `fiap-x-platform`, with the four siblings symlinked beside it. The project name is therefore the same, and the built images were reused. A pristine copy was restored before every mutant. Each edit went through a helper that aborts unless the pattern occurs exactly once.
+
+- **Script mutants** ran against a live scratch stack: sizing, seed, smoke and `--self-test`.
+- **`compose.yaml` and bootstrap mutants** ran the full gate each time: `down -v`, then `config -q`, sizing, `up --build -d --wait`, seed, smoke and self-test.
+- **Worker faults** used throwaway images `FROM fiap-x-platform-worker`, with a guarded patch of `/app/dist/…`. The scratch `compose.yaml` pointed the worker at the patched image (`build:` → `image:`), and each ran the full gate.
+- **Control.** An unmutated control run was fully green.
+
+**Isolation.** The real tree's `git status --porcelain` was byte-identical before and after (empty), and HEAD is still `58b7cdd`. All siblings are clean at the same HEADs. The scratch copies, the 6 sensor images and every leaked `fiapx-smoke-*` directory were removed. No `git stash` was used.
+
+### Round-1 mutants (re-injected)
 
 | # | File:line | Mutation | Caught by | Killed? |
 | --- | --- | --- | --- | --- |
-| M1 | `scripts/smoke-local-integration.mjs:13` | `FIXTURE_SECONDS` 8 → 7 | smoke: `holds 8 entries, expected 7` | ✅ |
-| M2 | `scripts/smoke-local-integration.mjs:84` | count comparison disabled | nothing. Still green when paired with W1 (a 16-frame archive passes) | ❌ Survived |
-| M3 | `scripts/smoke-local-integration.mjs:235` | rejection check accepts `COMPLETED` | nothing on a correct stack. Paired with W3, it is killed only incidentally, by `Archive absent` for the *video* | ❌ Survived |
-| M4 | `minio/bootstrap.sh:31` | retention loop drops `zips/` | bootstrap read-back, `up` exit 1 | ✅ |
-| M5a | `minio/bootstrap.sh:19` | `mc anonymous set download` before the assertion | bootstrap assertion, `up` exit 1, Worker not started | ✅ |
-| M5b | `minio/bootstrap.sh:50` | `mc anonymous set download` after the checks (bucket ends public) | nothing: whole gate green | ❌ Survived |
-| M6 | `compose.yaml:69-70` | Worker no longer depends on `minio-init` | `up --wait`: `container minio-init exited (0)`, exit 1 | ✅ |
-| M6c | `compose.yaml:70` | condition becomes `service_started` | `up --wait`, exit 1 (same mechanism) | ✅ |
-| M7 | `compose.yaml:59` | `FFMPEG_THREADS=4`, decoupled from `cpus` | `check-worker-sizing.mjs` exit 1, naming both values. **The Build gate and CI would pass it** | ✅ (only with the sizing script) |
-| M8 | `scripts/smoke-local-integration.mjs:47` | EOCD parser returns 0 | smoke: `Archive empty` | ✅ |
-| M9 | `scripts/seed-source-video.mjs:75` | seed prints the wrong key | smoke: `expected COMPLETED, observed FAILED (FORMATO_INVALIDO)` | ✅ |
-| M10 | `scripts/smoke-local-integration.mjs:89` | temp dir not removed | nothing: green, and 1 `fiapx-smoke-*` leaked (removed by the Verifier) | ❌ Survived |
-| M11 | `scripts/smoke-local-integration.mjs:254` | `deliveries !== 1` → `< 1` | nothing on a correct stack | ❌ Survived |
-| M12 | `scripts/smoke-local-integration.mjs:106` | no-archive check disabled | nothing on a correct stack | ❌ Survived |
-| W1 | Worker `dist/media/ffmpeg-frame-extractor.js` | `fps=1` → `fps=2` | smoke: `holds 16 entries, expected 8` | ✅ |
-| W2 | Worker `dist/processing/media-frame-packager.js` | packager stores nothing (T9 reproduction) | smoke: `Archive absent … Object does not exist` | ✅ |
-| W3 | Worker packager + `ffprobe-video-validator.js` | pre-S4: accept all, store nothing (T11 reproduction) | smoke: `expected FAILED (FORMATO_INVALIDO), observed COMPLETED` | ✅ |
-| W4 | Worker packager | uploads a valid ZIP with 0 entries | smoke: `Archive empty … holds 0 entries, expected 8` | ✅ |
-| W5 | Worker packager | uploads non-ZIP bytes | smoke: `Archive unreadable … no End of Central Directory record` | ✅ |
+| M1 | `scripts/smoke-local-integration.mjs:13` | `FIXTURE_SECONDS` 8 → 7 | smoke `holds 8 entries, expected 7`; self-test `frame count 7: accepted` | ✅ |
+| M2 | `:104` | count comparison → `if (false)` | self-test `frame count 16: accepted`, `frame count 7: accepted` (the smoke alone is green) | ✅ |
+| M3 | `:151` | `assertRejected` returns early on `COMPLETED` | self-test `rejected request observed COMPLETED: accepted` | ✅ |
+| M4 | `minio/bootstrap.sh:30` | retention loop drops `zips/` | `up` exit 1 (minio-init), Worker not started, smoke timeout | ✅ |
+| M5a | `minio/bootstrap.sh:18` | `mc anonymous set download` before the assertion | `up` exit 1; smoke `Anonymous access allowed … 200` | ✅ |
+| M5b | `minio/bootstrap.sh:49` (end) | `mc anonymous set download` after all checks | smoke exit 1: `Anonymous access allowed: GET …/sources/sample-8s.mp4 returned 200` | ✅ (survived in round 1) |
+| M6 | `compose.yaml:69-70` | Worker no longer depends on `minio-init` | `up --wait` exit 1: `container …minio-init-1 exited (0)` | ✅ (incidental mechanism, as in round 1) |
+| M6c | `compose.yaml:70` | condition → `service_started` | `up --wait` exit 1, same mechanism | ✅ |
+| M7 | `compose.yaml:59` | `FFMPEG_THREADS=4` | sizing exit 1 in the full copy and the CI-shaped copy: `worker cpus is 2 but FFMPEG_THREADS is 4` | ✅ (now in the Build gate and CI) |
+| M8 | `scripts/smoke-local-integration.mjs:48` | EOCD parser returns 0 | smoke `Archive empty`; self-test | ✅ |
+| M9 | `scripts/seed-source-video.mjs:75` | seed prints the non-video key first | smoke `for the video: expected COMPLETED, observed FAILED (FORMATO_INVALIDO)` | ✅ |
+| M10 | `scripts/smoke-local-integration.mjs:71` | `rmSync` removed | smoke `Downloaded artefact left behind: …/fiapx-smoke-1hY83Z still exists after cleanup`; self-test | ✅ (survived in round 1) |
+| M11 | `:160` | `deliveries !== 1` → `< 1` | self-test `2 deliveries: accepted` | ✅ |
+| M12 | `:140` | no-archive check → `if (false)` | self-test `archive present for the rejected request: accepted` | ✅ |
+| W1 | Worker `dist/media/ffmpeg-frame-extractor.js` | `fps=1` → `fps=2` | smoke `holds 16 entries, expected 8` | ✅ |
+| W2 | Worker `dist/processing/media-frame-packager.js` | upload removed (stores nothing) | smoke `Archive absent … Object does not exist.` | ✅ |
+| W3 | Worker packager + `dist/validation/ffprobe-video-validator.js` | pre-S4: validator accepts all, packager returns the key only | smoke `for the non-video: expected FAILED (FORMATO_INVALIDO), observed COMPLETED` | ✅ |
+| W4 | Worker packager | uploads a valid 0-entry ZIP | smoke `Archive empty … holds 0 entries, expected 8` | ✅ |
+| W5 | Worker packager | uploads non-ZIP bytes | smoke `Archive unreadable … no End of Central Directory record` | ✅ |
 
-**Sensor depth**: expanded (19 mutations: 14 platform, 5 injected Worker faults).
-**Isolation**: the real tree's `git status --porcelain` was byte-identical before and after (empty), with HEAD `a787035`. All three sibling repos are clean at the same HEADs. The scratch copies, the 5 scratch images and the leaked temp dir were removed.
-**Result**: 13/19 killed, 6 survived. The system and configuration faults were killed (M1, M4–M9, W1–W5), except M5b and M10. M2, M3, M11 and M12 delete the smoke's own assertions. A correct stack cannot kill them, and this repository re-proves them only through one-off manual negative runs (T9 and T11). **Result: FAIL ❌**
+**Round-1 set: 19/19 killed.** A first W3 variant, which kept the real packager, was also killed but by `observed FAILED (PROCESSAMENTO_FALHOU)`. It was replaced by the faithful pre-S4 binding above.
+
+### Round-2 mutants (new, aimed at T12–T16)
+
+| # | File:line | Mutation | Caught by | Killed? |
+| --- | --- | --- | --- | --- |
+| N1a | `scripts/smoke-local-integration.mjs:376` | self-test expected message for `archive empty` weakened to the generic mismatch text | self-test `archive empty: rejected with "Archive empty…", expected "Archive frame count mismatch…"` | ✅ |
+| N1b | `:421` | self-test accepts any thrown message (`err.message !== expected` → `false`) | nothing | ❌ Survived (mutant of the test harness itself; informational) |
+| N1b+Nempty | `:421` + `:101-103` | N1b plus the empty branch deleted (a 0-entry archive is reported as a generic mismatch) | nothing: the gate is green and RM-06 AC3 "say which" is violated | ❌ Survived (second-order; shows discrimination rests on the exact-message compare) |
+| Nempty | `:101-103` | empty branch deleted | self-test `archive empty: rejected with "Archive frame count mismatch…"` | ✅ |
+| N2 | `scripts/check-worker-sizing.mjs:52` | NCPU comparison → `if (false)` | nothing: sizing, smoke and self-test all 0 | ❌ Survived |
+| N2b | `scripts/check-worker-sizing.mjs:52` | `cpuCount > engineCpus` → `>=` (rejects the valid `WORKER_CPUS=10` on 10 CPUs) | nothing | ❌ Survived |
+| N2c | `scripts/check-worker-sizing.mjs:38` | pairing comparison → `if (false)` | nothing | ❌ Survived |
+| N3 | `scripts/smoke-local-integration.mjs:180,183` | anonymous check accepts 200 | self-test `anonymous GET of the object answered 200: accepted` (and the listing) | ✅ |
+| N3w | `:294` | call to `checkAnonymousAccess` removed | nothing | ❌ Survived |
+| N4 | `:73` | `assertScratchRemoved(dir, existsSync(dir))` → `(dir, false)` | nothing: `rmSync` still removes the dir | ➖ Equivalent alone |
+| N4+M10 | `:71` + `:73` | leak check neutralised and removal deleted | self-test `8-frame archive, scratch directory removed: rejected a good input with "…fiapx-smoke-tkPqEs still exists"` (the smoke alone is green and leaks) | ✅ |
+| N4b | `:56` | `assertScratchRemoved` → never throws | self-test `temp directory remaining: accepted` | ✅ |
+| N5 | `:314` | call to `assertRejected` removed | nothing | ❌ Survived |
+| N6 | `:325` | RM-19 AC2 sentence/status check on the delivery → `if (false)` | nothing | ❌ Survived |
+| N7 | `:319` | call to `assertNoArchive` removed | nothing | ❌ Survived |
+| N8 | `:330` | call to `assertSingleDelivery` removed | nothing | ❌ Survived |
+| N9 | `:308` | `zipStorageKey` scope check reduced to a type check | nothing | ❌ Survived |
+
+**Round-2 set: 17 mutants, 5 killed and 12 survived.** Not every survivor is a real gap:
+
+- **N4** is equivalent.
+- **N1b and N1b+Nempty** mutate the self-test itself, so no checker can kill them alone. They are recorded, not counted.
+- **The 9 non-equivalent survivors are N2, N2b, N2c, N3w, N5, N6, N7, N8 and N9.**
+
+**Sensor depth**: expanded, 36 mutations (14 platform and 5 Worker faults from round 1, plus 17 new).
+**Result**: 24/36 killed. There are 9 non-equivalent, non-meta survivors. **FAIL ❌**
 
 ---
 
@@ -120,98 +197,78 @@ Each mutant ran in its own scratch copy of the platform, with the four siblings 
 
 | Principle | Status |
 | --- | --- |
-| Minimum code / surgical / no scope creep | ✅ Each change touches one of 11 files. Nothing is outside the slice |
-| Matches patterns | ✅ Healthcheck, named-volume and credential-comment conventions. Scripts are dependency-free `node:` only, and `node --check` passes for all four |
-| Spec-anchored outcome check | ✅ 8 frames, 7 days, both prefixes, `private`, `FORMATO_INVALIDO`, the exact sentence and `=== 1` are all exact values |
-| Every check maps to a requirement | ✅ `SPEC_DEVIATION` is marked at `minio/bootstrap.sh:16` |
-| Documented guidelines | `.specs/features/real-media-processing/tasks.md` Test Coverage Matrix. The README relative links all resolve |
-
----
-
-## Edge Cases
-
-- [x] Bootstrap fails, so the Worker does not start. The Verifier loosened the bucket with `mc anonymous set download`: `up --wait` exited 1 with `service "minio-init" didn't complete successfully`, and the Worker was `running=false`.
-- [x] Stale volume without the lifecycle rule. The Verifier ran `mc ilm rule rm --all`: the next `up` re-added both rules (`minio/bootstrap.sh:34-39`). It was not tested with a stale rule of a *different* expiry on the same prefix. In that case the guard skips the rule and the read-back at `minio/bootstrap.sh:46` fails the start, which surfaces the problem rather than fixing it.
-- [x] Smoke run twice. The requests were distinct and each key is scoped to `zips/<id>/` (`scripts/smoke-local-integration.mjs:229`). Three runs on one stack were all green.
-- [x] FFmpeg unavailable where the fixture is generated. This is moot after the T4 deviation. The zero-byte guard at `scripts/seed-source-video.mjs:49` keeps its intent.
-- [ ] **Fewer cores than the declared CPU limit: the stack SHALL still start.** Violated. `WORKER_CPUS=16` on the 10-CPU engine made `up` exit 1 with `Error response from daemon: range of CPUs is from 0.01 to 10.00, as there are only 10 CPUs available`. The default of 2 will fail the same way on a 1-CPU engine. Nothing in the slice handles or documents it.
-
----
-
-## Gate Check
-
-- **Gate command**: `node clean-appledouble.mjs` (workspace root), then `docker compose config -q && docker compose up --build -d --wait && node scripts/seed-source-video.mjs && node scripts/smoke-local-integration.mjs && node scripts/check-worker-sizing.mjs`, then a second `up --build -d --wait` without `-v`, then `docker compose down -v`.
-- **Outcome**: clean 0, config 0, up 0 (19 s), seed 0 (two keys), smoke 0 (5 s), sizing 0, second up 0 (bootstrap re-ran and reported `already configured`), smoke after the second up 0, down -v 0.
-- **Smoke summary lines**:
-  - `Catalog reached COMPLETED for c121e5c6-… with archive zips/c121e5c6-…/411acf56-…/frames.zip`
-  - `Catalog reached FAILED (FORMATO_INVALIDO) for b2c2819b-…`
-  - `Archive zips/c121e5c6-…/411acf56-…/frames.zip holds 8 frames, as 8 s at 1 frame/s requires`
-  - `No archive exists under zips/b2c2819b-…/`
-  - `Notification delivered once for b2c2819b-…: O arquivo enviado nao e um video MP4 ou MOV valido.`
-  - `worker cpus 2 matches FFMPEG_THREADS 2`
-- **Before and after**: no unit tests exist. The smoke's assertions grew from 2 (status and delivery) to 11 (key scope, 3 archive causes, count, rejection status and code, no-archive, sentence, row count, timeout). There is 1 new check script.
-- **CI**: the `integration` job still self-skips without `SERVICES_READ_TOKEN` (V11, out of scope). The `topology` job does not run `check-worker-sizing.mjs`.
+| Minimum code / surgical / no scope creep | ✅ T12–T17 touch only the sizing script, the smoke, `ci.yml`, the spec/tasks/design text and the README |
+| Matches patterns | ✅ Dependency-free `node:` scripts; failure messages keep the existing `check-worker-sizing:` and named-cause styles |
+| Spec-anchored outcome check | ✅ Every asserted value is exact: 8, 7 days, `private`, 403, `FORMATO_INVALIDO`, the exact sentence, `=== 1`, NCPU |
+| Every check maps to a requirement | ✅ The self-test cases map to RM-06 AC2–AC4, RM-19 AC2–AC3 and RM-01 AC3 |
+| Tests non-shallow / discriminating | ❌ The sizing script has no negative test in any gate (N2, N2b, N2c). Two inline smoke assertions and every `main()` call site are unguarded (N3w, N5–N9) |
+| Documentation accuracy | ⚠️ `README.md:52` says the self-test covers "every assertion above". It covers the helpers, not the delivery sentence (`:325`), the key scope (`:308`), or the calls in `main()` |
+| Documented guidelines | The `tasks.md` Test Coverage Matrix and Gate Check Commands. The Build gate row (`tasks.md:39`) omits `--self-test`, so under the documented Build gate M2, M3, M11 and M12 would still pass; only CI's `topology` job kills them |
 
 ---
 
 ## Fix Plans
 
-### Fix 1: The CPU-limit edge case is violated (Major)
+### Fix 1: Give the sizing check a self-test (Major; RM-05 AC3 and the CPU edge case)
 
-- **Root cause**: Docker rejects `cpus` greater than the engine's CPU count. The spec edge case assumes it does not.
-- **Fix task**: amend the spec edge case (`spec.md:158`) to the real behaviour, a named failure, and make it true in `scripts/check-worker-sizing.mjs`. Read `docker info --format '{{.NCPU}}'` and fail naming `WORKER_CPUS` and the engine CPU count when the limit exceeds it. Add one line to the README "Worker sizing" section.
-- **Done when**: `WORKER_CPUS=16` on a 10-CPU engine makes the check exit 1 naming 16 and 10, and the spec matches.
+- **Root cause**: the check's comparisons (`scripts/check-worker-sizing.mjs:38`, `:52`) are exercised only with a matching config inside the engine's range, so disabling or shifting them changes no gate outcome (N2, N2b, N2c).
+- **Fix task**: factor the decision into a pure function of `(cpus, threads, engineCpus)`, and add `--self-test`. It must reject 2/4 (pairing) and 16 on 10 CPUs, and 11 on 10 CPUs (boundary), each by its exact message. It must accept 2/2 on 10 CPUs and 10/10 on 10 CPUs. Run it in CI's `topology` job and in the Build gate.
+- **Done when**: N2, N2b and N2c each turn the self-test red.
 
-### Fix 2: No gate runs the sizing check (Major)
+### Fix 2: Bring the inline smoke assertions under the self-test (Major; RM-19 AC2, the "smoke twice" edge case)
 
-- **Root cause**: `scripts/check-worker-sizing.mjs` is not in the Build gate (`tasks.md:39`) or in `.github/workflows/ci.yml`.
-- **Fix task**: add `node scripts/check-worker-sizing.mjs` to the `topology` job after `docker compose config`, and to the Build gate row in `tasks.md`.
-- **Done when**: M7 (`FFMPEG_THREADS=4`) turns CI's `topology` job red.
+- **Fix task**: move the delivery status and sentence check (`scripts/smoke-local-integration.mjs:325-329`) and the `zipStorageKey` scope check (`:308-310`) into helpers, and add bad-input cases for each: a wrong sentence, a `COMPLETED` delivery, a key under another request's prefix, and a non-string key. Also cover the video `COMPLETED` check at `:302`.
+- **Done when**: N6 and N9 turn the self-test red.
 
-### Fix 3: The private posture is not checked at the end state (Minor)
+### Fix 3: Prove that `main()` calls each assertion (Minor)
 
-- **Fix task**: have the smoke issue an unauthenticated `GET http://localhost:9000/fiapx/<videoKey>` and require 403, so RM-01 AC3 is proved from outside after bootstrap.
-- **Done when**: M5b turns the smoke red.
+- **Root cause**: the self-test calls the helpers directly, so removing a call site in `main()` (N3w, N5, N7, N8) is invisible.
+- **Fix task**: pick one and record it:
+  - Drive `main()`'s sequence from a single table of (observation → assertion) that the self-test iterates.
+  - Or add a self-test case that runs `main()` against injected fakes for fetch, docker and psql, returning each bad observation.
+  - Or accept the residual explicitly in the spec with a rationale.
+- **Done when**: N3w, N5, N7 and N8 are killed, or the accepted residual is written down.
 
-### Fix 4: The smoke's artefact cleanup is unobserved (Minor)
+### Fix 4: Put the self-test in the documented Build gate (Minor)
 
-- **Fix task**: after `assertArchiveFrameCount`, assert that the `mkdtemp` path no longer exists.
-- **Done when**: M10 turns the smoke red.
-
-### Fix 5: The smoke's negative proofs are one-off (Minor)
-
-- **Fix task**: version the negative runs (a pre-S4 or stub-packager Worker override, as the Verifier built with `dist` patches) as a script that requires a red smoke with the named cause.
-- **Done when**: M2, M3, M11 and M12 are each killed by some checked-in run. M3 in particular is currently caught only by the archive check on the *other* request.
+- **Fix task**: add `node scripts/smoke-local-integration.mjs --self-test`, and the sizing self-test from Fix 1, to `tasks.md:39`. Correct `README.md:52` to what the self-test actually covers.
+- **Done when**: M2 fails the Build gate as documented, not only CI.
 
 ---
 
 ## Spec-Precision Gaps
 
-1. RM-19 AC2 names `failureReason` on the request, but the Catalog exposes only `failureCode`. The smoke splits the assertion across the Catalog code and the Notification sentence. The spec should say so.
-2. `spec.md:40` still says the fixture is generated at seed time, and `:39-43` stay `Confirmed? n`. The design revision was never written back.
-3. `tasks.md:122` still says `none`, while the code asserts `private`. The code carries the `SPEC_DEVIATION`; the task text does not.
-4. `spec.md:158` (fewer cores) states behaviour the engine does not allow. See Fix 1.
-5. RM-06 AC4 ("no downloaded artefact") has no observable outcome defined for a check. See Fix 4.
+1. **The CPU edge case says "SHALL fail before the stack starts"** (`spec.md:158`). This holds only because of gate order: the check is a separate script, and a bare `docker compose up` still fails with the daemon's own message. The spec should name the gate, or say "when the sizing check runs".
+2. **P5 AC3 says "the topology check"** (`spec.md:146`). The enforcing artefact is `scripts/check-worker-sizing.mjs` in CI `topology` and the Build gate. This is acceptable, but the term is not defined in the spec.
+3. **Three assumption rows remain `Confirmed? n`** (`spec.md:41-43`: the CPU default, MinIO credentials and the bucket layout). They are implemented as stated, but they were never confirmed.
+4. **RM-01 AC3 asserts 403 exactly** (`scripts/smoke-local-integration.mjs:183`). The spec says only "refused". The stricter assertion is fine; recorded for precision.
+
+Round-1 gaps 1–5 are closed: RM-19 AC2 text, fixture rows, T2 `private`, the CPU edge case, and RM-06 AC4 now observable.
 
 ---
 
 ## Requirement Traceability Update
 
-The Verifier does not edit `spec.md`. The statuses it recommends are:
+The Verifier does not edit `spec.md`. Recommended statuses:
 
-- RM-01, RM-02, RM-03, RM-04 and RM-06: ✅ Verified. RM-01 AC3 and RM-06 AC4 carry the minor follow-ups (Fixes 3 and 4).
-- RM-19: ✅ Verified, with the recorded deviation and spec-text drift.
-- RM-05: ❌ Needs Fix (Fixes 1 and 2).
+- RM-01, RM-02, RM-03, RM-04 and RM-06: ✅ Verified. For RM-01 and RM-06, N3w and N9 are Minor follow-ups.
+- RM-05: ❌ Needs Fix (Fix 1). The check is wired, but its logic is not discriminated.
+- RM-19: ❌ Needs Fix (Fix 2). The AC2 sentence check is undiscriminated; see Fix 3 for the call sites.
 
 ---
 
 ## Summary
 
-**Overall**: ❌ Not Ready. The fixes are small.
-**Spec-anchored check**: 26/27 ACs evidenced, 1 wiring gap (RM-05 AC3). 1 edge case is violated. There are 5 spec-precision gaps.
-**Sensor**: 13/19 killed. The survivors are M2, M3, M5b, M10, M11 and M12.
-**Gate**: green on both passes. The bootstrap is idempotent.
+**Overall**: ❌ Not Ready (round 2 of at most 3).
+**Spec-anchored check**: 23/23 ACs have evidence and matching observed outcomes. All 5 edge cases hold at runtime. 4 spec-precision notes.
+**Sensor**: 24/36 killed. All 19 round-1 mutants are killed, and all six round-1 survivors are closed. 12 of the 17 new mutants survive: 9 real, 1 equivalent, and 2 in the test harness itself.
+**Gate**: green on both passes. The bootstrap is idempotent, the sizing check is in CI and in the Build gate, and the self-test is in CI.
 
-**What works**: the storage, the private bucket, 7-day retention on both prefixes, and bootstrap ordering, which `up --wait` enforces. The seed is idempotent and names an unreachable service. The smoke proves an 8-frame archive and names the absent, unreadable and empty cases, all three observed end to end. It proves a `FORMATO_INVALIDO` rejection with no archive and exactly one delivery.
+**What works**:
+- The private bucket is now proved from outside at the end state (M5b killed).
+- The cleanup is observed (M10 killed).
+- The round-1 assertion mutants (M2, M3, M11, M12) are killed permanently by a CI self-test that pins exact messages.
+- The sizing check refuses a limit above NCPU, naming both values.
+- The pre-S4 Worker turns the smoke red with `observed COMPLETED`.
 
-**Next steps**: Fixes 1 and 2 are required before PASS. Fixes 3–5 are recommended, then re-verify.
+**Next steps**: Fixes 1 and 2 are required. Fix 3 must be fixed, or accepted in writing. Fix 4 is a text fix. Then re-verify (round 3).
