@@ -41,8 +41,12 @@ function engineCapacityProblem(cpus, engineCpus) {
   return undefined;
 }
 
-function main() {
-  const rendered = spawnSync('docker', ['compose', 'config', '--format', 'json'], {
+// Dependencies are injected so the self-test can drive this exact function
+// with simulated docker output: removing any check below then fails it, not
+// only a change to the two comparison functions.
+function main({ exec = spawnSync, fail: stop = fail, log = console.log } = {}) {
+  const fail = stop;
+  const rendered = exec('docker', ['compose', 'config', '--format', 'json'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
   });
@@ -60,7 +64,7 @@ function main() {
   const pairing = pairingProblem(cpus, threads);
   if (pairing) fail(pairing);
 
-  const engine = spawnSync('docker', ['info', '--format', '{{.NCPU}}'], { encoding: 'utf8' });
+  const engine = exec('docker', ['info', '--format', '{{.NCPU}}'], { encoding: 'utf8' });
   if (engine.error) fail(`could not run docker info: ${engine.error.message}`);
   if (engine.status !== 0) fail(`docker info failed, so the engine's CPU count is unknown:\n${engine.stderr.trim()}`);
   const engineCpus = Number(engine.stdout.trim());
@@ -70,7 +74,7 @@ function main() {
   const capacity = engineCapacityProblem(cpus, engineCpus);
   if (capacity) fail(capacity);
 
-  console.log(`worker cpus ${cpus} matches FFMPEG_THREADS ${threads}, within the engine's ${engineCpus} CPUs`);
+  log(`worker cpus ${cpus} matches FFMPEG_THREADS ${threads}, within the engine's ${engineCpus} CPUs`);
 }
 
 // Values are shaped as `docker compose config --format json` renders them:
@@ -101,6 +105,41 @@ function selfTest() {
     ['cpus 9 on a 10-CPU engine (engine - 1)', () => engineCapacityProblem(9, 10)],
     ['cpus 10 on a 10-CPU engine (equal)', () => engineCapacityProblem(10, 10)],
   ];
+
+  // The whole main path, driven with simulated docker output. `stop` throws so
+  // a failure ends the run exactly as process.exit would.
+  class Stopped extends Error {}
+  const runMain = (cpus, threads, ncpu) => {
+    const exec = (_cmd, args) =>
+      args[0] === 'info'
+        ? { status: 0, stdout: `${ncpu}\n`, stderr: '' }
+        : {
+            status: 0,
+            stdout: JSON.stringify({ services: { worker: { cpus, environment: { FFMPEG_THREADS: threads } } } }),
+            stderr: '',
+          };
+    try {
+      main({ exec, fail: (message) => { throw new Stopped(message); }, log: () => {} });
+      return undefined;
+    } catch (error) {
+      if (error instanceof Stopped) return error.message;
+      throw error;
+    }
+  };
+  rejections.push(
+    ['main: threads 4 with cpus 2', () => runMain(2, '4', 10),
+      'worker cpus is 2 but FFMPEG_THREADS is 4; both must come from WORKER_CPUS'],
+    ['main: threads 0', () => runMain(2, '0', 10),
+      'FFMPEG_THREADS must be a positive integer, got "0" (cpus is 2)'],
+    ['main: cpus 11 on a 10-CPU engine', () => runMain(11, '11', 10),
+      'WORKER_CPUS is 11 but the Docker engine has only 10 CPUs; set WORKER_CPUS to at most 10'],
+    ['main: engine CPU count unreadable', () => runMain(2, '2', 'n/a'),
+      'docker info reported the engine\'s CPU count as "n/a", expected a positive integer'],
+  );
+  acceptances.push(
+    ['main: cpus 2 with threads 2 on a 10-CPU engine', () => runMain(2, '2', 10)],
+    ['main: cpus 10 with threads 10 on a 10-CPU engine', () => runMain(10, '10', 10)],
+  );
 
   const failures = [];
   for (const [name, run, expected] of rejections) {

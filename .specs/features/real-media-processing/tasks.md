@@ -586,7 +586,7 @@ An unmutated control copy exited 0. The scratch copies and the directories M10 l
 Added by the orchestrator from the platform Verifier's round-2 FAIL (24 of 36 mutants killed; every round-1 survivor now killed, but 9 new mutants disable enforcement unseen). This is the last fix round before escalating to the user.
 
 ```
-T18
+T18 -> T22
 T19 -> T20
 T21
 ```
@@ -735,12 +735,33 @@ An unmutated control copy exited 0. The scratch copies were removed.
 
 ---
 
+### T22: Drive the sizing check's main path from its self-test
+
+**What**: `main()` takes its `docker` runner, failure handler and logger as injectable dependencies, and the self-test runs the real `main()` with simulated `docker compose config` / `docker info` output.
+**Where**: `scripts/check-worker-sizing.mjs`
+**Depends on**: T18
+**Reuses**: T18's self-test cases and messages
+**Requirement**: RM-05 AC3, the CPU edge case
+
+**Why**: Added by the orchestrator after the round-2 fix batch reported its own residual: the two call sites in `main()` (`if (pairing) fail(...)`, `if (capacity) fail(...)`) were outside the self-test, so deleting either would pass every gate. The same shape as round-2 mutants N3w/N5/N7/N8 on the smoke.
+
+**Done when**:
+- [x] The self-test drives `main()` itself with simulated docker output, rejecting a pairing mismatch, a non-positive thread count, a limit above the engine (engine + 1) and an unreadable engine count with their exact messages, and accepting matching values at and below the engine count
+- [x] Verified in scratch copies: deleting `if (pairing) fail(pairing);`, deleting `if (capacity) fail(capacity);`, and replacing the pairing computation with `undefined` each make `--self-test` exit 1; an unmutated control exits 0
+- [x] Quick gate passes: `node --check`, `--self-test` (`12 bad inputs rejected with the expected message, 7 good inputs accepted`), and the real check (`worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`)
+
+**Tests**: integration
+**Gate**: quick
+**Status**: ✅ Complete
+
+---
+
 ## Phase Execution Map
 
 Phases run in sequence; tasks within a phase run in order.
 
 ```
-Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10) then Phase 5 (T12 T13 T14 T15 T16 T17) then Phase 6 (T18 T19 T20 T21)
+Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10) then Phase 5 (T12 T13 T14 T15 T16 T17) then Phase 6 (T18 T19 T20 T21 T22)
 ```
 
 Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the Verifier re-runs after T17.
@@ -776,6 +797,7 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T19: Delivery-sentence and key-scope helpers | 3 helpers + their self-test cases | ✅ Granular |
 | T20: Smoke as one list of steps | 1 step list + its self-test | ✅ Granular (cohesive - the self-test is what proves the list) |
 | T21: Self-tests in the gate, README reach | 1 gate line + 1 document | ✅ Granular |
+| T22: Sizing main path under the self-test | 1 function | ✅ Granular |
 
 ---
 
@@ -804,6 +826,7 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T19 | None | — | ✅ Match |
 | T20 | T19 | T19 → T20 | ✅ Match |
 | T21 | None | — | ✅ Match |
+| T22 | T18 | T18 → T22 | ✅ Match |
 
 No task depends on a later phase.
 
@@ -834,5 +857,6 @@ No task depends on a later phase.
 | T19 | Smoke assertions | integration | integration | ✅ OK |
 | T20 | Smoke assertions | integration | integration | ✅ OK |
 | T21 | Documentation + gate | none | none | ✅ OK |
+| T22 | Scripts | integration | integration | ✅ OK |
 
 The seven `Tests: none` tasks all sit on layers the matrix marks `none`: this repository has no test runner, and its scripts and documents are verified by the topology run and the link check rather than by unit tests. T4, T5, T7 and T8 are each proved by T9, which fails when the fixture, the seed, the key or the count is wrong - and which is itself verified by a deliberate red run.
