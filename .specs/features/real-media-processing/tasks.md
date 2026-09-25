@@ -36,7 +36,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 | --- | --- | --- |
 | Quick | After tasks touching a script or a document only | `node --check scripts/<changed>.mjs` and the relative-link check from the `docs-links` job in `.github/workflows/ci.yml` |
 | Full | After tasks touching `compose.yaml` or the bootstrap | `docker compose config -q` then `docker compose up --build -d --wait` |
-| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
+| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `node scripts/smoke-local-integration.mjs --self-test`, `docker compose down -v` |
 
 ---
 
@@ -720,12 +720,18 @@ An unmutated control copy exited 0. The scratch copies were removed.
 **Why**: Under the documented Build gate, M2, M3, M11 and M12 would pass (only CI ran the self-test), and the README claimed the self-test covered "every assertion above" when it did not.
 
 **Done when**:
-- [ ] The Build gate row runs `node scripts/check-worker-sizing.mjs --self-test` and `node scripts/smoke-local-integration.mjs --self-test`
-- [ ] The README's description of both self-tests matches what they check, with no overstatement
-- [ ] `validate_tasks.py` reports 0 errors
+- [x] The Build gate row runs `node scripts/check-worker-sizing.mjs --self-test` and `node scripts/smoke-local-integration.mjs --self-test`
+- [x] The README's description of both self-tests matches what they check, with no overstatement
+- [x] `validate_tasks.py` reports 0 errors
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25).** The Build gate row runs `node scripts/check-worker-sizing.mjs --self-test` after the sizing check (added in T18). It also runs `node scripts/smoke-local-integration.mjs --self-test` after the smoke. Under the documented gate, M2, M3, M11 and M12 are therefore caught locally, not only in CI.
+- The README no longer says the self-test covers "every assertion above". It names the nine required steps and says each step's check is fed a bad and a good observation. It says each helper is also called directly. It also states the limit: the self-test does not reach the stack, so only the real run proves that an observation fetched the right thing. A new paragraph under "Worker sizing" lists the values the sizing self-test rejects and accepts. It states that reading `docker compose config` and `docker info` is outside that self-test.
+- The Task Granularity Check, the Diagram-Definition Cross-Check and the Test Co-location Validation tables gain rows for T18–T21. The count after the co-location table now reads seven `Tests: none` tasks (T4, T5, T7, T8, T10, T17 and T21).
+- `validate_tasks.py`: 0 errors. The docs-links check: `all relative links resolve`.
 
 ---
 
@@ -766,6 +772,10 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T15: Leftover-artefact assertion | 1 assertion | ✅ Granular |
 | T16: Smoke self-test | 1 mode + 1 workflow step | ✅ Granular (cohesive - CI is what makes the self-test permanent) |
 | T17: Deviations written back | 2 documents | ✅ Granular |
+| T18: Sizing self-test | 2 pure functions + 1 mode + 1 workflow step | ✅ Granular (cohesive - CI is what makes the self-test permanent) |
+| T19: Delivery-sentence and key-scope helpers | 3 helpers + their self-test cases | ✅ Granular |
+| T20: Smoke as one list of steps | 1 step list + its self-test | ✅ Granular (cohesive - the self-test is what proves the list) |
+| T21: Self-tests in the gate, README reach | 1 gate line + 1 document | ✅ Granular |
 
 ---
 
@@ -790,6 +800,10 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T15 | None | — | ✅ Match |
 | T16 | T14, T15 | T14 → T16, T15 → T16 | ✅ Match |
 | T17 | None | — | ✅ Match |
+| T18 | None | — | ✅ Match |
+| T19 | None | — | ✅ Match |
+| T20 | T19 | T19 → T20 | ✅ Match |
+| T21 | None | — | ✅ Match |
 
 No task depends on a later phase.
 
@@ -816,5 +830,9 @@ No task depends on a later phase.
 | T15 | Smoke assertions | integration | integration | ✅ OK |
 | T16 | Smoke assertions + CI | integration | integration | ✅ OK |
 | T17 | Documentation | none | none | ✅ OK |
+| T18 | Scripts + CI | integration | integration | ✅ OK |
+| T19 | Smoke assertions | integration | integration | ✅ OK |
+| T20 | Smoke assertions | integration | integration | ✅ OK |
+| T21 | Documentation + gate | none | none | ✅ OK |
 
-The five `Tests: none` tasks all sit on layers the matrix marks `none`: this repository has no test runner, and its scripts and documents are verified by the topology run and the link check rather than by unit tests. T4, T5, T7 and T8 are each proved by T9, which fails when the fixture, the seed, the key or the count is wrong - and which is itself verified by a deliberate red run.
+The seven `Tests: none` tasks all sit on layers the matrix marks `none`: this repository has no test runner, and its scripts and documents are verified by the topology run and the link check rather than by unit tests. T4, T5, T7 and T8 are each proved by T9, which fails when the fixture, the seed, the key or the count is wrong - and which is itself verified by a deliberate red run.
