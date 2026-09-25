@@ -581,12 +581,108 @@ An unmutated control copy exited 0. The scratch copies and the directories M10 l
 
 ---
 
+### Phase 6: Verifier fixes (round 2)
+
+Added by the orchestrator from the platform Verifier's round-2 FAIL (24 of 36 mutants killed; every round-1 survivor now killed, but 9 new mutants disable enforcement unseen). This is the last fix round before escalating to the user.
+
+```
+T18
+T19 -> T20
+T21
+```
+
+---
+
+### Phase 6: Verifier fixes (round 2)
+
+### T18: Give the sizing check a self-test on its comparisons
+
+**What**: `node scripts/check-worker-sizing.mjs --self-test` feeds the check's pure comparison functions failing and boundary values and requires the specific failure message for each; the Build gate and CI's `topology` job run it.
+**Where**: `scripts/check-worker-sizing.mjs`, `.github/workflows/ci.yml`
+**Depends on**: None
+**Reuses**: The smoke's `--self-test` pattern (T16): pure functions, exact messages, good inputs must pass
+**Requirement**: RM-05 AC3, the CPU edge case
+
+**Why**: Round-2 mutants N2 (engine-CPU comparison disabled), N2b (`>` → `>=`) and N2c (cpus/threads comparison disabled) passed the Build gate and CI.
+
+**Done when**:
+- [ ] The cpus/threads comparison and the engine-CPU comparison are pure functions called by the check's main path
+- [ ] The self-test rejects, with the exact message: threads ≠ cpus; non-integer or non-positive threads; cpus above the engine count (including engine + 1); and accepts cpus equal to the engine count and below it
+- [ ] Verified in scratch copies: N2, N2b and N2c each make the self-test exit non-zero
+- [ ] The Build gate row and CI's `topology` job run `--self-test`
+- [ ] Quick gate passes
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T19: Route the inline smoke checks through self-tested helpers
+
+**What**: Move the delivery-sentence check (RM-19 AC2) and the archive-key-scope check (the "smoke twice" edge case) out of `main()` into helpers, and add their failing cases to the smoke's self-test.
+**Where**: `scripts/smoke-local-integration.mjs`
+**Depends on**: None
+**Reuses**: The existing assertion helpers and self-test cases
+**Requirement**: RM-19 AC2, RM-06 (smoke-twice edge case)
+
+**Why**: Round-2 mutants N6 (sentence check disabled) and N9 (key-scope check weakened) survived: the checks were inline in `main()`, where no self-test reaches.
+
+**Done when**:
+- [ ] The self-test rejects a delivery with a different sentence and an archive key outside `zips/<processingRequestId>/`, each with its exact message
+- [ ] Verified in scratch copies: N6 and N9 make the self-test exit non-zero
+- [ ] Quick gate passes (`node --check`, `--self-test`)
+
+**Tests**: integration
+**Gate**: quick
+
+---
+
+### T20: Prove the smoke's main path runs every assertion
+
+**What**: `main()` runs its checks from one declared, ordered list of named steps, and the self-test fails when a required assertion is missing from that list.
+**Where**: `scripts/smoke-local-integration.mjs`
+**Depends on**: T19
+**Reuses**: The helpers from T14–T16 and T19
+**Requirement**: RM-06, RM-19
+
+**Why**: Round-2 mutants N3w, N5, N7 and N8 removed a call from `main()` and survived, because the self-test calls helpers directly.
+
+**Done when**:
+- [ ] Every assertion `main()` performs is a named step in one exported list, and `main()` performs no assertion outside it
+- [ ] The self-test checks the list contains every required step (anonymous access, archive count, rejection, no archive, single delivery, delivery sentence, key scope, no leftovers) and fails naming any that is missing
+- [ ] Verified in scratch copies: N3w, N5, N7 and N8 (a step removed from the list) make the self-test exit non-zero
+- [ ] Build gate passes, including a real smoke run
+
+**Tests**: integration
+**Gate**: build
+
+---
+
+### T21: Put the self-tests in the documented Build gate and state their reach exactly
+
+**What**: The Build gate row includes both `--self-test` runs, and the README describes precisely what each self-test covers.
+**Where**: `.specs/features/real-media-processing/tasks.md` (Gate Check Commands), `README.md`
+**Depends on**: None
+**Requirement**: RM-05, RM-06
+
+**Why**: Under the documented Build gate, M2, M3, M11 and M12 would pass (only CI ran the self-test), and the README claimed the self-test covered "every assertion above" when it did not.
+
+**Done when**:
+- [ ] The Build gate row runs `node scripts/check-worker-sizing.mjs --self-test` and `node scripts/smoke-local-integration.mjs --self-test`
+- [ ] The README's description of both self-tests matches what they check, with no overstatement
+- [ ] `validate_tasks.py` reports 0 errors
+
+**Tests**: none
+**Gate**: quick
+
+---
+
 ## Phase Execution Map
 
 Phases run in sequence; tasks within a phase run in order.
 
 ```
-Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10) then Phase 5 (T12 T13 T14 T15 T16 T17)
+Phase 1 (T1 T2 T3) then Phase 2 (T4 T5) then Phase 3 (T6) then Phase 4 (T7 T8 T9 T11 T10) then Phase 5 (T12 T13 T14 T15 T16 T17) then Phase 6 (T18 T19 T20 T21)
 ```
 
 Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the Verifier re-runs after T17.
