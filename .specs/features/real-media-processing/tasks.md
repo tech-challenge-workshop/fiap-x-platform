@@ -199,14 +199,15 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] Transfers the fixture with `mc` in a container rather than an SDK, naming the file explicitly rather than globbing the directory - exFAT sidecars would otherwise be uploaded
-- [ ] Prints the resulting storage key on stdout, so the smoke can consume it
-- [ ] Uses a fixed key, so running twice leaves exactly one object without a delete-then-write
-- [ ] Exits non-zero naming the unreachable service when the stack is down, rather than reporting success
-- [ ] Quick gate passes: `node --check scripts/seed-source-video.mjs`
+- [x] Transfers the fixture with `mc` in a container rather than an SDK, naming the file explicitly rather than globbing the directory - exFAT sidecars would otherwise be uploaded
+- [x] Prints the resulting storage key on stdout, so the smoke can consume it
+- [x] Uses a fixed key, so running twice leaves exactly one object without a delete-then-write
+- [x] Exits non-zero naming the unreachable service when the stack is down, rather than reporting success
+- [x] Quick gate passes: `node --check scripts/seed-source-video.mjs`
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
 
 ---
 
