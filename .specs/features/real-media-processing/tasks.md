@@ -406,8 +406,6 @@ T17
 
 ---
 
-### Phase 5: Verifier fixes (round 1)
-
 ### T12: Make the sizing check refuse a limit the engine cannot grant
 
 **What**: Correct the edge case that was never true, and make the sizing check fail fast, naming both values, when `WORKER_CPUS` exceeds the engine's CPU count.
@@ -614,6 +612,12 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T9: Assert the count + prove it fails | 1 assertion | ✅ Granular |
 | T10: Documentation | 1 document | ✅ Granular |
 | T11: Rejection path in the smoke | 1 seed step + 1 assertion | ✅ Granular (cohesive - the assertion is unverifiable without its seed) |
+| T12: Engine-CPU sizing check + edge case | 1 script + 1 spec line | ✅ Granular (cohesive - the check enforces the corrected edge case) |
+| T13: Sizing check in gate and CI | 1 workflow step + 1 gate line | ✅ Granular |
+| T14: Anonymous-access assertion | 1 assertion | ✅ Granular |
+| T15: Leftover-artefact assertion | 1 assertion | ✅ Granular |
+| T16: Smoke self-test | 1 mode + 1 workflow step | ✅ Granular (cohesive - CI is what makes the self-test permanent) |
+| T17: Deviations written back | 2 documents | ✅ Granular |
 
 ---
 
@@ -632,6 +636,12 @@ Phase 5 (6 tasks) is one batch and was added after the first Verifier run; the V
 | T9 | T8 | T8 → T9 | ✅ Match |
 | T10 | T11 | T11 → T10 | ✅ Match |
 | T11 | T9 | T9 → T11 | ✅ Match |
+| T12 | None | — | ✅ Match |
+| T13 | T12 | T12 → T13 | ✅ Match |
+| T14 | None | — | ✅ Match |
+| T15 | None | — | ✅ Match |
+| T16 | T14, T15 | T14 → T16, T15 → T16 | ✅ Match |
+| T17 | None | — | ✅ Match |
 
 No task depends on a later phase.
 
@@ -652,5 +662,11 @@ No task depends on a later phase.
 | T9 | Smoke assertions | integration | integration | ✅ OK |
 | T10 | Documentation | none | none | ✅ OK |
 | T11 | Scripts + smoke assertions | integration | integration | ✅ OK |
+| T12 | Scripts + spec | integration | integration | ✅ OK |
+| T13 | CI + gate | integration | integration | ✅ OK |
+| T14 | Smoke assertions | integration | integration | ✅ OK |
+| T15 | Smoke assertions | integration | integration | ✅ OK |
+| T16 | Smoke assertions + CI | integration | integration | ✅ OK |
+| T17 | Documentation | none | none | ✅ OK |
 
 The five `Tests: none` tasks all sit on layers the matrix marks `none`: this repository has no test runner, and its scripts and documents are verified by the topology run and the link check rather than by unit tests. T4, T5, T7 and T8 are each proved by T9, which fails when the fixture, the seed, the key or the count is wrong - and which is itself verified by a deliberate red run.

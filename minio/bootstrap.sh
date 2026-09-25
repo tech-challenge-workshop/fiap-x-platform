@@ -13,9 +13,8 @@ mc mb --ignore-existing "$bucket"
 
 # Assert, never set: a MinIO bucket starts private, and a `set` could only
 # ever loosen it. This also catches a volume someone loosened by hand.
-# SPEC_DEVIATION: tasks.md T2 names the expected state `none`.
-# Reason: `none` is what `mc anonymous set` writes; `mc anonymous get` on the
-# pinned mc release reports that same state as `private`.
+# `private` is how `mc anonymous get` on the pinned mc release reports a
+# closed bucket; `none` is what `mc anonymous set` writes for the same state.
 policy_json="$(mc anonymous get --json "$bucket")"
 if [[ "$policy_json" != *'"permission":"private"'* ]]; then
   echo "bucket $bucket allows anonymous access: $policy_json" >&2
