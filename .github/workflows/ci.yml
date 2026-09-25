@@ -35,6 +35,8 @@ jobs:
           node-version: 22
       - name: Check the Worker's CPU limit matches its thread count
         run: node scripts/check-worker-sizing.mjs
+      - name: Prove each sizing comparison rejects a bad value
+        run: node scripts/check-worker-sizing.mjs --self-test
       - name: Check the smoke script parses
         run: node --check scripts/smoke-local-integration.mjs
       - name: Prove each smoke assertion rejects a bad input

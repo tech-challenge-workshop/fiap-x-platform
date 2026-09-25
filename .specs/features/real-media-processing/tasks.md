@@ -36,7 +36,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 | --- | --- | --- |
 | Quick | After tasks touching a script or a document only | `node --check scripts/<changed>.mjs` and the relative-link check from the `docs-links` job in `.github/workflows/ci.yml` |
 | Full | After tasks touching `compose.yaml` or the bootstrap | `docker compose config -q` then `docker compose up --build -d --wait` |
-| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
+| Build | After phase completion | `node clean-appledouble.mjs` from the workspace root, then `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/seed-source-video.mjs`, `node scripts/smoke-local-integration.mjs`, `docker compose down -v` |
 
 ---
 
@@ -606,14 +606,28 @@ T21
 **Why**: Round-2 mutants N2 (engine-CPU comparison disabled), N2b (`>` → `>=`) and N2c (cpus/threads comparison disabled) passed the Build gate and CI.
 
 **Done when**:
-- [ ] The cpus/threads comparison and the engine-CPU comparison are pure functions called by the check's main path
-- [ ] The self-test rejects, with the exact message: threads ≠ cpus; non-integer or non-positive threads; cpus above the engine count (including engine + 1); and accepts cpus equal to the engine count and below it
-- [ ] Verified in scratch copies: N2, N2b and N2c each make the self-test exit non-zero
-- [ ] The Build gate row and CI's `topology` job run `--self-test`
-- [ ] Quick gate passes
+- [x] The cpus/threads comparison and the engine-CPU comparison are pure functions called by the check's main path
+- [x] The self-test rejects, with the exact message: threads ≠ cpus; non-integer or non-positive threads; cpus above the engine count (including engine + 1); and accepts cpus equal to the engine count and below it
+- [x] Verified in scratch copies: N2, N2b and N2c each make the self-test exit non-zero
+- [x] The Build gate row and CI's `topology` job run `--self-test`
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25, 10-CPU engine).** The two comparisons are now `pairingProblem(cpus, threads)` and `engineCapacityProblem(cpus, engineCpus)`. Each returns the failure message or `undefined`, and neither touches Docker. `main()` calls both and exits 1 with the message they return. The `docker info` call stays in `main()`, so `--self-test` runs with `DOCKER_HOST` pointing at a missing socket.
+- The self-test feeds values shaped as `docker compose config --format json` renders them (`cpus` a number, `FFMPEG_THREADS` a string). It runs 8 bad inputs, each of which must return its exact message: threads 4 and 1 with cpus 2; threads 1.5, `two`, 0 and -1; cpus 16 and 11 (engine + 1) on 10 CPUs. It runs 5 good inputs, each of which must return nothing: 2/2 and 10/10; cpus 2, 9 (engine - 1) and 10 (equal) on 10 CPUs. Output: `check-worker-sizing self-test passed: 8 bad inputs rejected with the expected message, 5 good inputs accepted`, exit 0.
+- The real check is unchanged in behaviour: the default gives exit 0 (`worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`), `WORKER_CPUS=11` gives exit 1 naming 11 and 10, and `WORKER_CPUS=10` gives exit 0.
+- CI's `topology` job runs `--self-test` after the check. The Build gate row runs it after the check.
+
+Mutants were applied to a scratch copy of the script, never to this tree, through a helper that aborts unless the pattern occurs exactly once. Each self-test exited 1, naming the case that caught it:
+- N2 (engine comparison → `if (false)`): `cpus 16 on a 10-CPU engine: accepted` and `cpus 11 … (engine + 1): accepted`
+- N2b (`>` → `>=`): `cpus 10 on a 10-CPU engine (equal): rejected a good input`
+- N2c (pairing comparison → `if (false)`): `threads 4 with cpus 2: accepted` and `threads 1 with cpus 2: accepted`
+- Also killed: the boundary moved to `> engineCpus + 1` (engine + 1 accepted), the positive-integer check loosened to `threadCount < 0`, and the pairing loosened to `cpus < threads`.
+
+An unmutated control copy exited 0. The scratch copies were removed.
 
 ---
 
