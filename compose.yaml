@@ -58,8 +58,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
       interval: 5s
@@ -159,6 +159,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  minio-init:
+    # One-shot: exits 0 once the bucket exists and is private. The Worker
+    # waits for it to complete, so it never starts against a missing bucket.
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    entrypoint: ["/bin/bash", "/bootstrap.sh"]
+    environment:
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - MC_HOST_local=http://minioadmin:minioadmin@minio:9000
+      - STORAGE_BUCKET=fiapx
+    volumes:
+      - ./minio/bootstrap.sh:/bootstrap.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
 volumes:
   postgres-data:
