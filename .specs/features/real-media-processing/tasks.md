@@ -119,7 +119,7 @@ T11 -> T10
 
 **Done when**:
 - [x] Uses `mc mb --ignore-existing`, so a second run is a no-op rather than a failure - unlike the SQL bootstrap, this runs on **every** start, which is the same trap that made `CREATE ROLE` fail on a second database
-- [x] Asserts `mc anonymous get` reports `none` and exits non-zero otherwise; it never **sets** the policy, because a set could only loosen it
+- [x] Asserts `mc anonymous get` reports `private` (how the pinned `mc` names a closed bucket; `none` is the value `mc anonymous set` writes) and exits non-zero otherwise; it never **sets** the policy, because a set could only loosen it
 - [x] The Worker declares `depends_on` with `condition: service_completed_successfully`, so it can never start against a missing bucket
 - [x] A failed bootstrap exits non-zero and keeps the Worker from starting
 - [x] Verified by bringing the stack up **twice** without `down -v` between runs
@@ -346,7 +346,7 @@ The distinguishable error is `UnreadableArchiveError`. Checked by hand against t
 - [x] The smoke creates one request per seeded object and waits for both to settle
 - [x] The rejected request is asserted `FAILED` with the exact safe reason the Catalog maps from `FORMATO_INVALIDO`, no object under its `zips/` prefix, and exactly one Notification delivery record for its terminal event
 - [x] A request that settles `COMPLETED`, or stays non-terminal past the timeout, fails the smoke naming the observed status
-- [x] **Verified negatively**: with the Worker bound back to `AcceptAllVideoValidator`, the smoke exits non-zero and names `COMPLETED` where `FAILED` was expected
+- [x] **Verified negatively**: with the pre-S4 Worker binding restored (both stubs, `AcceptAllVideoValidator` and `DeterministicFramePackager`), the smoke exits non-zero and names `COMPLETED` where `FAILED` was expected. The validator stub alone reaches `FAILED (PROCESSAMENTO_FALHOU)`, because the real packager refuses a text file
 - [x] Build gate passes: the same sequence as T9
 
 **Tests**: integration
@@ -559,14 +559,27 @@ An unmutated control copy exited 0. The scratch copies and the directories M10 l
 **Requirement**: RM-02, RM-04, RM-19
 
 **Done when**:
-- [ ] The fixture assumption says it is committed, with the generating command in `fixtures/README.md`, and states its real size
-- [ ] RM-19 AC2 names where the safe reason is observable: `failureCode` on the Catalog, the exact sentence on the Notification delivery record
-- [ ] T2's text says `mc anonymous get` must report `private`, which is how the pinned `mc` names a closed bucket
-- [ ] The T11 negative is described as binding the pre-S4 Worker (both stubs)
-- [ ] `validate_spec.py` and `validate_tasks.py` report 0 errors
+- [x] The fixture assumption says it is committed, with the generating command in `fixtures/README.md`, and states its real size
+- [x] RM-19 AC2 names where the safe reason is observable: `failureCode` on the Catalog, the exact sentence on the Notification delivery record
+- [x] T2's text says `mc anonymous get` must report `private`, which is how the pinned `mc` names a closed bucket
+- [x] The T11 negative is described as binding the pre-S4 Worker (both stubs)
+- [x] `validate_spec.py` and `validate_tasks.py` report 0 errors
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
+
+**Evidence (2026-09-25).** The following were updated:
+- `spec.md`:
+  - The two fixture assumption rows: committed, with the command in `fixtures/README.md`, 39,863 bytes, confirmed `y`.
+  - RM-19 AC2: `failureCode` on the Catalog, and the exact sentence on the Notification delivery record.
+  - P6's Independent Test: the pre-S4 binding with both stubs.
+  - Traceability coverage: T1-T17.
+- `tasks.md`:
+  - T2's criterion now reads `private`.
+  - T11's negative criterion names both stubs.
+
+`validate_spec.py`: 0 errors, 0 warnings. `validate_tasks.py`: 0 errors; its 11 warnings are the pre-existing `Tests: none` and multi-file `Where` notices.
 
 ---
 
