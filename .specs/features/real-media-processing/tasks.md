@@ -92,14 +92,15 @@ T11 -> T10
 - Skill: NONE
 
 **Done when**:
-- [ ] The service exposes the S3 API and reports healthy using `mc ready local` rather than a TCP probe - a listening server that is not yet serving would let the bootstrap start too early
-- [ ] Data lives in a named volume, so `down -v` starts the next run empty
-- [ ] Credentials appear only in the `environment` block, with the same comment the PostgreSQL service carries: nothing here reaches a deployed environment (AD-005)
-- [ ] The Worker receives the endpoint, bucket and credentials as environment variables
-- [ ] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
+- [x] The service exposes the S3 API and reports healthy using `mc ready local` rather than a TCP probe - a listening server that is not yet serving would let the bootstrap start too early
+- [x] Data lives in a named volume, so `down -v` starts the next run empty
+- [x] Credentials appear only in the `environment` block, with the same comment the PostgreSQL service carries: nothing here reaches a deployed environment (AD-005)
+- [x] The Worker receives the endpoint, bucket and credentials as environment variables
+- [x] Full gate passes: `docker compose config -q` then `docker compose up --build -d --wait`
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
 
 ---
 
