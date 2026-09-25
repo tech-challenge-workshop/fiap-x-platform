@@ -171,7 +171,7 @@ Each requirement gets a unique ID for tracking across design, tasks, and validat
 | RM-02 | P1: Object storage in the local topology | Execute | Implementing |
 | RM-03 | P2: Retention that the product rule requires | Execute | Implementing |
 | RM-04 | P3: A real video, seeded | Execute | Implementing |
-| RM-05 | P5: CPU limit and thread count set together | Design | Pending |
+| RM-05 | P5: CPU limit and thread count set together | Execute | Implementing |
 | RM-06 | P4: The smoke proves a ZIP, not a status | Design | Pending |
 | RM-19 | P6: The smoke proves a rejection, across every service | Design | Pending |
 

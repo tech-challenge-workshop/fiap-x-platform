@@ -44,11 +44,19 @@ services:
 
   worker:
     build: ../processing-worker
+    # WORKER_CPUS (from .env or the shell) drives both the CPU limit and
+    # FFmpeg's thread count, because FFmpeg reads the host's core count, not
+    # the cgroup's (AD-006). Compose cannot compute, so the default appears in
+    # both places and scripts/check-worker-sizing.mjs fails if the rendered
+    # values disagree. Top-level `cpus`, not deploy.resources.limits, which
+    # Compose ignores outside Swarm.
+    cpus: ${WORKER_CPUS:-2}
     ports:
       - "3002:3002"
     environment:
       - PORT=3002
       - RABBITMQ_URL=amqp://rabbitmq:5672
+      - FFMPEG_THREADS=${WORKER_CPUS:-2}
       # Local development credentials only. Nothing here reaches a deployed
       # environment: AD-005 keeps secrets in Kubernetes secrets.
       - STORAGE_ENDPOINT=http://minio:9000

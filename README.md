@@ -55,6 +55,12 @@ This costs you the local data, which is the intent — the volume holds nothing 
 
 Each service evolves its own tables through its own migrations. This file only creates the empty schemas and denies each role access to the other's, which is the boundary `docs/foudation.md` requires.
 
+### Worker sizing
+
+`WORKER_CPUS` sets both the Worker's CPU limit (`cpus`) and its FFmpeg thread count (`FFMPEG_THREADS`). It defaults to 2; set it in `.env` or the shell to change both. FFmpeg reads the host's core count rather than the container's limit, so the two must agree (AD-006). `node scripts/check-worker-sizing.mjs` reads the rendered `docker compose config` and fails, naming both values, when they do not.
+
+This declared value is the contract S9a carries into the Worker's Kubernetes `limits`.
+
 ## Layout
 
 | Path | Contents |
