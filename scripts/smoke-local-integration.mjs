@@ -14,6 +14,10 @@ const FIXTURE_SECONDS = 8;
 const FRAMES_PER_SECOND = 1;
 const EXPECTED_FRAMES = FIXTURE_SECONDS * FRAMES_PER_SECOND;
 
+// processing-catalog src/domain/failure-reason.ts: the user-facing text the
+// Catalog maps from FORMATO_INVALIDO and carries on the terminal event.
+const FORMATO_INVALIDO_REASON = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
+
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
@@ -86,6 +90,33 @@ function assertArchiveFrameCount(zipKey) {
   }
 }
 
+function dockerCompose(args, input) {
+  const result = spawnSync('docker', ['compose', ...args], { cwd: REPO_ROOT, encoding: 'utf8', input });
+  if (result.error) throw new Error(`Could not run docker: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(`docker compose ${args[0]} failed: ${(result.stderr || result.stdout).trim()}`);
+  }
+  return result.stdout;
+}
+
+// A rejected request must leave nothing under its archive prefix.
+function assertNoArchive(id) {
+  const prefix = `local/${BUCKET}/zips/${id}/`;
+  const listing = dockerCompose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'ls', '--recursive', prefix]).trim();
+  if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
+}
+
+// The HTTP view returns one record, so it cannot show a duplicate; the count
+// comes from the Notification schema. The id travels as a psql variable,
+// never as SQL text.
+function countDeliveries(id) {
+  const out = dockerCompose(
+    ['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`],
+    "SELECT count(*) FROM notification.delivery_record WHERE processing_request_id = :'id';\n",
+  );
+  return Number(out.trim());
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -104,18 +135,19 @@ async function waitForApiHealth() {
   throw new Error('API health check timed out');
 }
 
-// The seed is idempotent (fixed key), so running it here costs one upload
-// and means the smoke never depends on someone having seeded first.
-function seedSourceVideo() {
+// The seed is idempotent (fixed keys), so running it here costs two uploads
+// and means the smoke never depends on someone having seeded first. It prints
+// the video's key, then the key of an object that is not a video.
+function seedSources() {
   const result = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'seed-source-video.mjs')], {
     encoding: 'utf8',
   });
   if (result.status !== 0) {
-    throw new Error(`Seeding the source video failed:\n${(result.stderr || result.stdout).trim()}`);
+    throw new Error(`Seeding the source objects failed:\n${(result.stderr || result.stdout).trim()}`);
   }
-  const key = result.stdout.trim().split('\n')[0];
-  if (!key) throw new Error('Seed script printed no storage key');
-  return key;
+  const [videoKey, notAVideoKey] = result.stdout.trim().split('\n');
+  if (!videoKey || !notAVideoKey) throw new Error(`Seed script printed ${JSON.stringify(result.stdout)}, expected two storage keys`);
+  return { videoKey, notAVideoKey };
 }
 
 async function postProcessingRequest(sourceStorageKey) {
@@ -140,8 +172,12 @@ async function postProcessingRequest(sourceStorageKey) {
   return body.processingRequestId;
 }
 
-async function waitForCatalogStatus(id) {
+// Waits until the request is terminal and returns it whichever way it ended;
+// the caller decides which ending was expected. A request still in flight at
+// the deadline fails naming the status it was last seen in.
+async function waitForTerminalStatus(id) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
+  let observed;
   while (Date.now() < deadline) {
     const res = await fetch(`${CATALOG_URL}/processing-requests/${id}`);
     if (!res.ok) {
@@ -149,10 +185,15 @@ async function waitForCatalogStatus(id) {
     }
 
     const body = await res.json();
-    if (body.status === 'COMPLETED') return body;
+    if (body.status === 'COMPLETED' || body.status === 'FAILED') return body;
+    observed = body.status;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error('Catalog status did not reach COMPLETED');
+  throw new Error(`Request ${id} is still ${observed} after ${POLL_TIMEOUT_MS} ms; expected it to settle`);
+}
+
+function describe(request) {
+  return request.failureCode ? `${request.status} (${request.failureCode})` : request.status;
 }
 
 async function waitForNotificationDelivery(id) {
@@ -171,11 +212,17 @@ async function waitForNotificationDelivery(id) {
 
 async function main() {
   await waitForApiHealth();
-  const sourceKey = seedSourceVideo();
-  console.log(`Seeded source video at ${sourceKey}`);
-  const id = await postProcessingRequest(sourceKey);
+  const { videoKey, notAVideoKey } = seedSources();
+  console.log(`Seeded source video at ${videoKey} and a non-video at ${notAVideoKey}`);
+  const id = await postProcessingRequest(videoKey);
   console.log(`Created processing request ${id}`);
-  const completed = await waitForCatalogStatus(id);
+  const rejectedId = await postProcessingRequest(notAVideoKey);
+  console.log(`Created processing request ${rejectedId} for the non-video`);
+
+  const completed = await waitForTerminalStatus(id);
+  if (completed.status !== 'COMPLETED') {
+    throw new Error(`Request ${id} for the video: expected COMPLETED, observed ${describe(completed)}`);
+  }
   // Every run creates a new request and the archive key is scoped to it, so a
   // second run can never assert against the previous run's archive.
   const zipKey = completed.zipStorageKey;
@@ -183,10 +230,31 @@ async function main() {
     throw new Error(`Catalog reported zipStorageKey ${JSON.stringify(zipKey)}, expected a key under zips/${id}/`);
   }
   console.log(`Catalog reached COMPLETED for ${id} with archive ${zipKey}`);
+
+  const rejected = await waitForTerminalStatus(rejectedId);
+  if (rejected.status !== 'FAILED' || rejected.failureCode !== 'FORMATO_INVALIDO') {
+    throw new Error(`Request ${rejectedId} for the non-video: expected FAILED (FORMATO_INVALIDO), observed ${describe(rejected)}`);
+  }
+  console.log(`Catalog reached FAILED (FORMATO_INVALIDO) for ${rejectedId}`);
+
   const frames = assertArchiveFrameCount(zipKey);
   console.log(`Archive ${zipKey} holds ${frames} frames, as ${FIXTURE_SECONDS} s at ${FRAMES_PER_SECOND} frame/s requires`);
+  assertNoArchive(rejectedId);
+  console.log(`No archive exists under zips/${rejectedId}/`);
+
   await waitForNotificationDelivery(id);
   console.log(`Notification delivered for ${id}`);
+  const delivery = await waitForNotificationDelivery(rejectedId);
+  if (delivery.status !== 'FAILED' || delivery.failureReason !== FORMATO_INVALIDO_REASON) {
+    throw new Error(
+      `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(FORMATO_INVALIDO_REASON)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
+    );
+  }
+  const deliveries = countDeliveries(rejectedId);
+  if (deliveries !== 1) {
+    throw new Error(`Delivery for ${rejectedId}: expected exactly 1 record, found ${deliveries}`);
+  }
+  console.log(`Notification delivered once for ${rejectedId}: ${delivery.failureReason}`);
 }
 
 main().catch((err) => {
