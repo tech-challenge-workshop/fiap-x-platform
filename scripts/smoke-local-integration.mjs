@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +12,30 @@ const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003'
 const HEALTH_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS ?? 30000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 60000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 1000);
+
+// Thrown when a file carries no End of Central Directory record: the archive
+// is unreadable, which is a different failure from a readable empty one.
+class UnreadableArchiveError extends Error {}
+
+const EOCD_SIGNATURE = 0x06054b50;
+const EOCD_SIZE = 22;
+const MAX_ZIP_COMMENT = 0xffff;
+
+// Counts an archive's entries from its End of Central Directory record, so
+// the repository stays dependency-free. The record is the last 22 bytes plus
+// an optional comment of up to 64 KiB, so the scan goes backwards from the end
+// and stops once no comment could be that long. Total entries is the 16-bit
+// field at offset 10.
+function countZipEntries(path) {
+  const bytes = readFileSync(path);
+  const lowest = Math.max(0, bytes.length - EOCD_SIZE - MAX_ZIP_COMMENT);
+  for (let offset = bytes.length - EOCD_SIZE; offset >= lowest; offset -= 1) {
+    if (bytes.readUInt32LE(offset) === EOCD_SIGNATURE) {
+      return bytes.readUInt16LE(offset + 10);
+    }
+  }
+  throw new UnreadableArchiveError(`${path} has no End of Central Directory record`);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -283,13 +283,16 @@ The smoke runs the seed itself rather than requiring a seeded key, because the C
 - Skill: NONE
 
 **Done when**:
-- [ ] Scans backwards for the `0x06054b50` signature and reads the 16-bit total-entries field at offset 10
-- [ ] Throws a distinguishable error when no signature is found, so "unreadable" is separable from "empty"
-- [ ] Keeps the repository dependency-free - no `package.json` is introduced to unzip a file
-- [ ] Quick gate passes: `node --check scripts/smoke-local-integration.mjs`
+- [x] Scans backwards for the `0x06054b50` signature and reads the 16-bit total-entries field at offset 10
+- [x] Throws a distinguishable error when no signature is found, so "unreadable" is separable from "empty"
+- [x] Keeps the repository dependency-free - no `package.json` is introduced to unzip a file
+- [x] Quick gate passes: `node --check scripts/smoke-local-integration.mjs`
 
 **Tests**: none
 **Gate**: quick
+**Status**: ✅ Complete
+
+The distinguishable error is `UnreadableArchiveError`. Checked by hand against the function's own text: a Worker archive gives 8, an empty ZIP gives 0, and a text file and a 1-byte file both throw `UnreadableArchiveError`.
 
 ---
 
