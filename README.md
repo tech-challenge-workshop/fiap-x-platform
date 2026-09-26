@@ -24,7 +24,7 @@ Every dependency runs locally as a container and is reached through a standard p
 | Capability | Component | Protocol |
 | --- | --- | --- |
 | Identity | Keycloak | OIDC/JWKS |
-| Object storage | MinIO | S3 API |
+| Object storage | RustFS | S3 API |
 | Database | PostgreSQL | SQL |
 | Messaging | RabbitMQ | AMQP |
 | Email | Mailpit | SMTP |
@@ -55,7 +55,7 @@ Both assertions were verified by making them fail: a Worker that stores no archi
 
 ### Object storage
 
-MinIO serves the S3 API on `localhost:9000`, with its console on `localhost:9001`. One private bucket, `fiapx`, holds two prefixes:
+RustFS serves the S3 API on `localhost:9000` (development credentials `fiapx-dev` / `fiapx-dev-secret`). The topology's own scripts talk to it with plain `aws-cli`, never a vendor CLI, so the server can be swapped behind the protocol ([AD-014](.specs/STATE.md)). One private bucket, `fiapx`, holds two prefixes:
 
 | Prefix | Holds |
 | --- | --- |
@@ -64,7 +64,7 @@ MinIO serves the S3 API on `localhost:9000`, with its console on `localhost:9001
 
 Objects under both prefixes expire **7 days** after creation. That is a product rule from [`docs/foudation.md`](docs/foudation.md), not a housekeeping choice, and the bucket's own lifecycle rules enforce it. No job deletes anything.
 
-`minio/bootstrap.sh` runs in the one-shot `minio-init` service **on every start**, and the Worker does not start until it has succeeded. That is the opposite of the database bootstrap below, which runs only on an empty volume. So every step is idempotent: it creates the bucket only if it is missing, asserts that the bucket is private without ever setting a policy, and adds each retention rule only when its prefix has none. A volume left over from an earlier run is therefore brought up to date instead of failing.
+`storage/bootstrap.sh` runs in the one-shot `storage-init` service (`amazon/aws-cli`) **on every start**, and the Worker does not start until it has succeeded. That is the opposite of the database bootstrap below, which runs only on an empty volume. So every step is idempotent: it creates the bucket only if it is missing, fails if the bucket has any bucket policy (the only way the S3 API grants anonymous access) without ever setting one, and writes the two retention rules only when one is missing — refusing, rather than overwriting, any lifecycle rule it does not own. A volume left over from an earlier run is therefore brought up to date instead of failing.
 
 ### Seeding a source video
 
@@ -110,7 +110,7 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 | `compose.yaml` | Local runtime topology |
 | `scripts/` | Local integration smoke test, source seeding, Worker sizing check |
 | `fixtures/` | The committed source video and its provenance |
-| `minio/` | The object storage bootstrap |
+| `storage/` | The object storage bootstrap |
 
 ## Decisions
 

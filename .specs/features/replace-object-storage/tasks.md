@@ -124,12 +124,15 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-01
 
 **Done when**:
-- [ ] AD-014 records the decision, the evidence (registry probes and the spike) and the trade-off
-- [ ] README and the S4 living docs describe RustFS/aws-cli; S4's `validation.md` and `tasks.md` evidence stay untouched as history
-- [ ] Relative links still resolve
+- [x] AD-014 records the decision, the evidence (registry probes and the spike) and the trade-off
+- [x] README and the S4 living docs describe RustFS/aws-cli; S4's `validation.md` and `tasks.md` evidence stay untouched as history
+- [x] Relative links still resolve
 
 **Tests**: none
 **Gate**: quick
+
+**Evidence (2026-09-26)**: AD-014 added to `.specs/STATE.md`, and AD-005's status notes the amendment. README's stack table, object-storage section and layout table describe RustFS, `storage/` and `storage-init`. S4's spec credentials row is updated; S4's design keeps its MinIO mechanics as history under a superseding note at the top and in its Tech Decisions row. S4's `validation.md` and `tasks.md` are untouched.
+**Status**: ✅ Complete
 
 ---
 
