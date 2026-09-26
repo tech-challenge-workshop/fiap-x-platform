@@ -386,12 +386,23 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] Each of these fails the self-test: `SMOKE_STEPS.slice(0, 6)` in `main()`, a filter that drops one step, and two steps reordered
-- [ ] The real run is green
-- [ ] Quick gate passes
+- [x] Each of these fails the self-test: `SMOKE_STEPS.slice(0, 6)` in `main()`, a filter that drops one step, and two steps reordered
+- [x] The real run is green
+- [x] Quick gate passes
 
 **Tests**: self-test
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** Before the executor existed, the spawned "dry run" ran the live smoke and printed report lines instead of step names; the `api health` cases failed too.
+- **Change.** `main()` is the one line `await runSteps(SMOKE_STEPS, {}, executorFor(process.env))`. `runSteps` hands each step to an executor. `runStep` (observe, check, report) is the live one and the default. `executorFor` returns a printer of `step.name` when `SMOKE_DRY_RUN=1`.
+- **Self-test.** It spawns the script with `SMOKE_DRY_RUN=1` and requires exit 0 and stdout lines equal to `REQUIRED_STEPS`, in order. From 23/132/47 to `24 required steps present, 134 bad inputs rejected with the expected message, 48 good inputs accepted, main() ran every step in order in a dry run`.
+- **Deviation.** `api health` is a step `main()` runs, but it had no check and was not in `REQUIRED_STEPS`, so the dry run could never equal the list. `waitForApiHealth` now returns the answering status; the step stores it; and `assertApiHealthy` requires 200 (bad 503, near-miss 204). `api health` heads `REQUIRED_STEPS`. The rule that every required step has a check is kept, with no exemption.
+- **Literal negatives** (scratch copies), each failing the self-test once, on the dry-run comparison, with exit 1:
+  - `SMOKE_STEPS.slice(0, 6)` in `main()`;
+  - a filter dropping `single delivery`;
+  - `no internal fields` moved before `cross-owner download 404`.
+- **Real run.** Green.
 
 ---
 

@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getToken } from './get-token.mjs';
 
-const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+const SELF = fileURLToPath(import.meta.url);
+const SCRIPTS_DIR = dirname(SELF);
 const REPO_ROOT = join(SCRIPTS_DIR, '..');
 const BUCKET = 'fiapx';
 
@@ -290,18 +291,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Polls until the API answers its health route with a 2xx, and returns that
+// status for the check to judge.
 async function waitForApiHealth() {
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${API_URL}/health`);
-      if (res.ok) return;
+      if (res.ok) return res.status;
     } catch {
       // keep polling
     }
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error('API health check timed out');
+}
+
+function assertApiHealthy(status) {
+  if (status !== 200) throw new Error(`API health answered ${status}, expected 200`);
 }
 
 // AUTH-17 AC1: a call without a token must be refused with 401. A 2xx means
@@ -764,7 +771,10 @@ function observedFor(ctx, key, idKey) {
 export const SMOKE_STEPS = [
   {
     name: 'api health',
-    observe: () => waitForApiHealth(),
+    observe: async (ctx) => {
+      ctx.health = await waitForApiHealth();
+    },
+    check: (ctx) => assertApiHealthy(observed(ctx, 'health')),
   },
   {
     name: 'anonymous refused',
@@ -1006,16 +1016,29 @@ export const SMOKE_STEPS = [
   },
 ];
 
-async function runSteps(steps, ctx) {
-  for (const step of steps) {
-    if (step.observe) await step.observe(ctx);
-    if (step.check) step.check(ctx);
-    if (step.report) console.log(step.report(ctx));
-  }
+// Runs one step against the live stack: observe, then check, then report.
+async function runStep(step, ctx) {
+  if (step.observe) await step.observe(ctx);
+  if (step.check) step.check(ctx);
+  if (step.report) console.log(step.report(ctx));
 }
 
+// GATE-11: with SMOKE_DRY_RUN=1 each step prints its name and observes
+// nothing, so the self-test can see which steps main() runs, and in which
+// order, without a stack.
+function executorFor(env) {
+  if (env.SMOKE_DRY_RUN === '1') return async (step) => console.log(step.name);
+  return runStep;
+}
+
+async function runSteps(steps, ctx, execute = runStep) {
+  for (const step of steps) await execute(step, ctx);
+}
+
+// One line, shared by the live run and the dry run: any change to the list
+// it runs shows in the dry run too.
 async function main() {
-  await runSteps(SMOKE_STEPS, {});
+  await runSteps(SMOKE_STEPS, {}, executorFor(process.env));
 }
 
 // A minimal archive for the self-test: some bytes, then an End of Central
@@ -1028,9 +1051,11 @@ function syntheticZip(entries) {
   return Buffer.concat([Buffer.from('local file headers and central directory'), eocd]);
 }
 
-// The steps --self-test requires by name. Removing one from SMOKE_STEPS, or
-// its check, fails the self-test naming it.
+// The steps --self-test requires by name, in the order main() must run them.
+// Removing one from SMOKE_STEPS, or its check, fails the self-test naming it,
+// and so does main() running any other list (GATE-11).
 const REQUIRED_STEPS = [
+  'api health',
   'anonymous refused',
   'old create gone',
   'upload confirmed',
@@ -1384,6 +1409,7 @@ async function selfTest() {
   const goneDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
   rmSync(goneDir, { recursive: true, force: true });
   const good = {
+    health: 200,
     videoKey,
     anonymous: { [objectUrl]: 403, [listingUrl]: 403 },
     anonymousApi: { [uploadsCall]: 401, [confirmCall]: 401, [readCall]: 401 },
@@ -1417,6 +1443,8 @@ async function selfTest() {
     lifecycle: lifecycleOf(ownedRules),
   };
   const stepRejections = [
+    ['api health', { health: 503 }, 'API health answered 503, expected 200'],
+    ['api health', { health: 204 }, 'API health answered 204, expected 200'],
     ['anonymous access', { anonymous: { [objectUrl]: 200, [listingUrl]: 403 } },
       `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
     ['anonymous refused', { anonymousApi: { [uploadsCall]: 401, [confirmCall]: 201, [readCall]: 401 } },
@@ -1539,6 +1567,14 @@ async function selfTest() {
   }], {})]);
 
   const failures = [];
+  // GATE-11: main() itself, spawned in dry-run mode, must print exactly the
+  // required steps in order, so a main() that slices, filters or reorders the
+  // list fails here even though every step still exists.
+  const dryRun = spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: { ...process.env, SMOKE_DRY_RUN: '1' } });
+  const printed = dryRun.stdout.split('\n').filter((line) => line !== '');
+  if (dryRun.status !== 0 || JSON.stringify(printed) !== JSON.stringify(REQUIRED_STEPS)) {
+    failures.push(`dry run of main() exited ${dryRun.status} and printed ${JSON.stringify(printed)}, expected ${JSON.stringify(REQUIRED_STEPS)}; stderr: ${dryRun.stderr.trim()}`);
+  }
   for (const step of REQUIRED_STEPS) {
     if (!SMOKE_STEPS.some((candidate) => candidate.name === step && typeof candidate.check === 'function')) {
       failures.push(`required step "${step}" is missing from SMOKE_STEPS, or has no check`);
@@ -1569,7 +1605,7 @@ async function selfTest() {
     return;
   }
   console.log(
-    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
+    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run`,
   );
 }
 
