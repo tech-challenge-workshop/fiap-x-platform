@@ -47,6 +47,8 @@ jobs:
         run: node scripts/smoke-local-integration.mjs --self-test
       - name: Prove each bootstrap scenario rejects a bad outcome
         run: node scripts/check-storage-bootstrap.mjs --self-test
+      - name: Prove each identity check rejects a bad observation
+        run: node scripts/check-identity.mjs --self-test
       - name: Prove the database-script drift check fails on a changed script
         run: node scripts/generate-db-script.mjs --self-test
 

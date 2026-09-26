@@ -495,18 +495,31 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] The real run passes on the stack
-- [ ] Each literal negative, on scratch copies, fails its named check:
+- [x] The real run passes on the stack
+- [x] Each literal negative, on scratch copies, fails its named check:
   - `KC_HOSTNAME` dropped;
   - `registrationAllowed: true`;
   - `tmpfs` dropped;
   - `api`'s `depends_on: identity` dropped;
   - `get-token` printing `token: <jwt>`
-- [ ] The spawned run exits non-zero naming `identity`
-- [ ] Full gate passes
+- [x] The spawned run exits non-zero naming `identity`
+- [ ] Full gate passes (not run in T11: it ends in `down -v`, and the stack stays up for T12; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete (full gate pending, see above)
+**Evidence**:
+- **Red first.** A scratch copy whose six checks return without judging fails the self-test with 20 failures, one per bad input, and exits 1.
+- **Self-test.** `6 required checks present, 20 bad inputs rejected with the expected message, 6 good inputs accepted, spawned failure exited non-zero`. Each check has a bad input and at least one near-miss (trailing slash on `iss`, `registrationAllowed` absent or `"false"`, tmpfs on the parent directory, `service_started`, a token of two segments). The spawn sets `IDENTITY_URL=http://127.0.0.1:9` and requires a non-zero exit and a stderr line starting `check-identity: sub pinned failed: the identity service (compose service "identity", http://127.0.0.1:9) is unreachable`. It needs no stack; CI's `topology` job runs it.
+- **Real run.** `6 identity checks passed` on the stack.
+- **Literal negatives.** Each uses an override file or scratch copy in the scratchpad, never the real `compose.yaml`, realm or script:
+  - `KC_HOSTNAME` dropped (`environment: !override`, identity recreated): `in-network iss failed: … carries iss "http://identity:8080/realms/fiapx"`;
+  - a scratch realm with `registrationAllowed: true` mounted over the import: `registration disabled failed: realm fiapx has registrationAllowed true`;
+  - `tmpfs: !reset []`: `h2 on tmpfs failed: … no tmpfs at /opt/keycloak/data/h2 (tmpfs mounts: {})`;
+  - api's `depends_on` without identity (`COMPOSE_FILE` with the override, identity and api recreated): `api after identity failed: … condition undefined`;
+  - a scratch `get-token.mjs` printing `token: <jwt>`, run through `GET_TOKEN_UNDER_TEST`: `get-token cli failed: … printed "token: <jwt>\n" on stdout, expected exactly one JWT line`.
+
+  Each run failed only its named check and exited 1. The stack was then restored with `docker compose up -d --wait --force-recreate identity api` and the real run was green again.
 
 ---
 
