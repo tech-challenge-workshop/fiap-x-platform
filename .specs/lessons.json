@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 20,
+  "next_id": 23,
   "lessons": [
     {
       "id": "L-001",
@@ -346,6 +346,60 @@
       ],
       "created": "2026-09-26T06:41:54Z",
       "last_seen": "2026-09-26T06:41:54Z"
+    },
+    {
+      "id": "L-020",
+      "key": "surviving_mutant::when scenarios enumerate the variations of one owned rule apply the same variations to every owned rule or the other predicates go unguarded",
+      "text": "When scenarios enumerate the variations of one owned rule, apply the same variations to every owned rule, or the other predicates go unguarded.",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "platform-gate-hardening"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "storage/bootstrap.sh:49 (storage)"
+      ],
+      "created": "2026-09-26T17:47:51Z",
+      "last_seen": "2026-09-26T17:47:51Z"
+    },
+    {
+      "id": "L-021",
+      "key": "spec_precision_gap::a check s failure message that quotes observed output must redact secrets the output may contain",
+      "text": "A check's failure message that quotes observed output must redact secrets the output may contain.",
+      "signal": "spec_precision_gap",
+      "scope": "gate",
+      "status": "candidate",
+      "features": [
+        "platform-gate-hardening"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/check-identity.mjs:94 (gate)"
+      ],
+      "created": "2026-09-26T17:47:51Z",
+      "last_seen": "2026-09-26T17:47:51Z"
+    },
+    {
+      "id": "L-022",
+      "key": "surviving_mutant::an observation that echoes its query argument proves wiring not the query read the id from the result when it carries one",
+      "text": "An observation that echoes its query argument proves wiring, not the query; read the id from the result when it carries one.",
+      "signal": "surviving_mutant",
+      "scope": "smoke",
+      "status": "candidate",
+      "features": [
+        "platform-gate-hardening"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/smoke-local-integration.mjs:170 (smoke)"
+      ],
+      "created": "2026-09-26T17:47:51Z",
+      "last_seen": "2026-09-26T17:47:51Z"
     }
   ]
 }

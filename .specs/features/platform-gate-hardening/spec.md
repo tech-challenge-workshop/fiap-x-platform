@@ -203,23 +203,23 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Execute | Implementing (T1 ✅) |
-| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Execute | Implementing (T2 ✅) |
-| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Execute | Implementing (T3 ✅) |
-| GATE-04 | P2: Database script drift check (V10, V37) | Execute | Implementing (T4 ✅) |
-| GATE-05 | P2: Script includes spec B's index | Execute | Implementing (T4 ✅) |
-| GATE-06 | P3: Storage-write check reads every script (V37) | Execute | Implementing (T5 ✅) |
-| GATE-07 | P4: Download tied to the request's archive (V35) | Execute | Implementing (T7 ✅) |
-| GATE-08 | P4: Deliveries counted by the right id (V16) | Execute | Implementing (T6 ✅) |
-| GATE-09 | P4: Exact delivery sentence (V17) | Execute | Implementing (T7 ✅) |
-| GATE-10 | P4: Exactly one object at the exact key (V18) | Execute | Implementing (T6 ✅) |
-| GATE-11 | P5: `main()` runs every step (V14) | Execute | Implementing (T8 ✅) |
-| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅, T4 ✅, T5 ✅, T9 ✅, T10 ✅, T11 ✅) |
-| GATE-13 | P6: `sub` stable across an identity recreate (V24) | Execute | Implementing (T11 ✅ check, T14 ✅ before/after the recreate) |
-| GATE-14 | P6: `check-identity.mjs` (V25) | Execute | Implementing (T11 ✅) |
-| GATE-15 | P7: Spec B's fixes on the real stack | Execute | Implementing (T12 ✅) |
-| GATE-16 | P8: Processing failure end to end (V8) | Execute | Implementing (T13 ✅) |
-| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Execute | Implementing (T14 ✅) |
+| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Validate | Implementing (open: V42, expire rules lack disabled/narrowed scenarios) |
+| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Validate | Verified |
+| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Validate | Verified |
+| GATE-04 | P2: Database script drift check (V10, V37) | Validate | Verified |
+| GATE-05 | P2: Script includes spec B's index | Validate | Verified |
+| GATE-06 | P3: Storage-write check reads every script (V37) | Validate | Verified |
+| GATE-07 | P4: Download tied to the request's archive (V35) | Validate | Verified |
+| GATE-08 | P4: Deliveries counted by the right id (V16) | Validate | Implementing (open: V44, count and listing echo their query id) |
+| GATE-09 | P4: Exact delivery sentence (V17) | Validate | Verified |
+| GATE-10 | P4: Exactly one object at the exact key (V18) | Validate | Verified |
+| GATE-11 | P5: `main()` runs every step (V14) | Validate | Verified |
+| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Validate | Verified |
+| GATE-13 | P6: `sub` stable across an identity recreate (V24) | Validate | Verified |
+| GATE-14 | P6: `check-identity.mjs` (V25) | Validate | Implementing (open: V43, get-token failure message quotes the token; V44, start order read from config) |
+| GATE-15 | P7: Spec B's fixes on the real stack | Validate | Verified |
+| GATE-16 | P8: Processing failure end to end (V8) | Validate | Implementing (open: V44, failureReason not read through the API) |
+| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Validate | Verified |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
