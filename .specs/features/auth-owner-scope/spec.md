@@ -102,6 +102,7 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 
 - IF the provider is healthy but the realm import failed THEN the stack SHALL NOT report the API as started against a provider without the realm.
 - WHEN the stack restarts THEN the realm SHALL be reloaded from the file, and a change made by hand in the provider's console SHALL NOT survive.
+- WHEN the stack restarts THEN each demo user's `sub` SHALL be unchanged, so requests created before the restart keep their owner. (Added after the design spike showed that users without a pinned `id` get a new `sub` on every re-import.)
 - IF a token expires during a long smoke run THEN the smoke SHALL obtain a new one rather than fail on expiry.
 
 ---
