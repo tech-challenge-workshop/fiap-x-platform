@@ -146,6 +146,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: scripts/smoke-local-integration.mjs:170 (smoke)
 - last seen: 2026-09-26T17:47:51Z
 
+### L-023 - A skip-path guard must treat failure() as a gate: a job-level if that evaluates false skips the job, and a skipped required check counts as success; allow-list which step may carry each expression.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: ci-governance
+- evidence: scripts/check-ci-governance.mjs:133 (ci)
+- last seen: 2026-09-26T22:31:31Z
+
+### L-024 - When a check is promoted to required, guard its neutering (continue-on-error, exit 0) with the same regression check as the job it was modelled on.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: ci-governance
+- evidence: .github/workflows/ci.yml:125 (ci)
+- last seen: 2026-09-26T22:31:31Z
+
+### L-025 - A replace transform needs a shrinking-list test case; an append implementation passes every growing-list case.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: ci-governance
+- evidence: scripts/apply-required-checks.mjs (ci)
+- last seen: 2026-09-26T22:31:31Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

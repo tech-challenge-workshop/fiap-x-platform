@@ -193,7 +193,7 @@ Also add the real workflow check to `topology`.
 
 **Tests**: integration
 **Gate**: build
-**Status**: ⚠️ Complete except `--apply`, pending the user's go-ahead for the GitHub change. `--live` and the build gate follow the apply.
+**Status**: ✅ Complete (applied 2026-09-26 with the user's go-ahead; `--live` passes)
 **Evidence**:
 - **Red first.** The self-test was written against stubs (the ruleset returned as read, no changes, no output): 10 failures. The checks that hold for an identity transformation (other rules byte-identical, strict policy kept) and the mode dispatch were already green against the stub.
 - **Self-test.** `every other rule byte-identical, the checks list replaced exactly, a strict policy kept, a ruleset without the rule refused, 3 change sets computed, --dry-run wrote nothing, --apply wrote only the differing ruleset, a failed PUT stopped naming the repository, a duplicate ruleset refused, 3 spawned runs without a mode or authentication exited 1`. The ruleset is injected in the shape `gh api` returns, read-only fields included; the PUT body carries only `name`, `target`, `enforcement`, `bypass_actors`, `conditions` and `rules`, and each non-checks rule is compared as JSON text with the one read. The modes run against an injected fetch and PUT; nothing calls GitHub.

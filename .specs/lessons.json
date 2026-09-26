@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 23,
+  "next_id": 26,
   "lessons": [
     {
       "id": "L-001",
@@ -400,6 +400,60 @@
       ],
       "created": "2026-09-26T17:47:51Z",
       "last_seen": "2026-09-26T17:47:51Z"
+    },
+    {
+      "id": "L-023",
+      "key": "surviving_mutant::a skip path guard must treat failure as a gate a job level if that evaluates false skips the job and a skipped required check counts as success allow list which step may carry each expression",
+      "text": "A skip-path guard must treat failure() as a gate: a job-level if that evaluates false skips the job, and a skipped required check counts as success; allow-list which step may carry each expression.",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "ci-governance"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/check-ci-governance.mjs:133 (ci)"
+      ],
+      "created": "2026-09-26T22:31:31Z",
+      "last_seen": "2026-09-26T22:31:31Z"
+    },
+    {
+      "id": "L-024",
+      "key": "surviving_mutant::when a check is promoted to required guard its neutering continue on error exit 0 with the same regression check as the job it was modelled on",
+      "text": "When a check is promoted to required, guard its neutering (continue-on-error, exit 0) with the same regression check as the job it was modelled on.",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "ci-governance"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        ".github/workflows/ci.yml:125 (ci)"
+      ],
+      "created": "2026-09-26T22:31:31Z",
+      "last_seen": "2026-09-26T22:31:31Z"
+    },
+    {
+      "id": "L-025",
+      "key": "surviving_mutant::a replace transform needs a shrinking list test case an append implementation passes every growing list case",
+      "text": "A replace transform needs a shrinking-list test case; an append implementation passes every growing-list case.",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "ci-governance"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/apply-required-checks.mjs (ci)"
+      ],
+      "created": "2026-09-26T22:31:31Z",
+      "last_seen": "2026-09-26T22:31:31Z"
     }
   ]
 }
