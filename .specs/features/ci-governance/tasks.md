@@ -110,11 +110,11 @@ Also add the real workflow check to `topology`.
 - [x] The workflow parses (Python `yaml.safe_load`)
 - [x] The job's commands run locally, in order, against a fresh stack, with the port overrides this machine needs: the equivalent of the build gate. Record the result
 - [x] Removing one stack command makes the workflow check fail
-- [ ] CI evidence comes when the PR is opened: `integration` must run the stack and go green. Record it in the Status note after the push. This is not a local gate item
+- [x] CI evidence comes when the PR is opened: `integration` must run the stack and go green. Record it in the Status note after the push. This is not a local gate item
 
 **Tests**: integration
 **Gate**: build (workflow check + local stack run)
-**Status**: ✅ Complete locally; CI evidence pending the PR
+**Status**: ✅ Complete. CI evidence on PR fiap-x-platform#11 at `c6c5e47`: `integration` pass in 6m33s, running the stack; `topology` and `docs-links` pass
 **Evidence**:
 - **Change.** The `access` step, every `steps.access` condition and every `token:` are gone. The four services are checked out anonymously at their default branch, with the same `path:` as before. The eight stack commands run in order in `working-directory: fiap-x-platform`; logs are collected and uploaded `if: failure()`, and `docker compose down -v` runs `if: always()`. `timeout-minutes: 45`. `topology` now also runs the real check.
 - **Real check.** `integration job runs the 8 stack commands in order, with no skip path and no token`, exit 0. `yaml.safe_load` parses the file.
@@ -186,10 +186,10 @@ Also add the real workflow check to `topology`.
 **Done when**:
 
 - [x] `--dry-run` prints, for each repository, the checks it would add and changes nothing
-- [ ] **With the user's go-ahead:** `--apply` updates all five rulesets, and every other rule (deletion, non_fast_forward, linear history, pull_request) is unchanged. Compare the full JSON before and after
-- [ ] `--live` then passes
+- [x] **With the user's go-ahead:** `--apply` updates all five rulesets, and every other rule (deletion, non_fast_forward, linear history, pull_request) is unchanged. Compare the full JSON before and after
+- [x] `--live` then passes
 - [x] README updated, with 0 unresolved links
-- [ ] Build gate passes
+- [x] Build gate passes
 
 **Tests**: integration
 **Gate**: build
@@ -210,6 +210,10 @@ Also add the real workflow check to `topology`.
   Afterwards every ruleset still shows its 2026-09-20 `updated_at` and its old list.
 - **README.** A "CI and the required checks" section: `integration` always runs the stack, the workflow check, `ci/required-checks.json`, `--live`, and the apply script's two modes. The build gate gains step 14; the layout gains `ci/`. The `docs-links` script reports `0 unresolved link(s)`. Every other script's `--self-test` still passes.
 - **Finding, fixed by the user's decision (2026-09-26).** The `docs-links` job set `continue-on-error: true` and its script never exited non-zero, so requiring it only required that it ran. Both are fixed in a follow-up commit on this branch: the job no longer sets `continue-on-error`, and the script exits 1 on any unresolved link (negative: a README with `[broken](nope.md)` → exit 1, `1 unresolved link(s)`).
+
+---
+- **Applied 2026-09-26, with the user's go-ahead**, after `integration` was green on PR #11. `--apply` updated the 5 rulesets; `node scripts/check-ci-governance.mjs --live` then printed `the 5 "protect main" rulesets require exactly the checks in ci/required-checks.json` (exit 0). A before/after comparison of the full ruleset JSON (minus timestamps and links) shows every other rule identical; required now: services `quality, image`, platform `topology, docs-links, integration`.
+- **Found by the now-blocking `docs-links`:** the README linked the four services as `../<repo>`, broken for readers on GitHub; fixed in `c6c5e47` (GitHub URLs).
 
 ---
 
