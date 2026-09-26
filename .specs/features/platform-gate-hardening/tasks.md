@@ -503,11 +503,11 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
   - `api`'s `depends_on: identity` dropped;
   - `get-token` printing `token: <jwt>`
 - [x] The spawned run exits non-zero naming `identity`
-- [ ] Full gate passes (not run in T11: it ends in `down -v`, and the stack stays up for T12; runs at T14)
+- [x] Full gate passes (run at T14's build gate; not run in T11: it ends in `down -v`, and the stack stays up for T12; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
-**Status**: ✅ Complete (full gate pending, see above)
+**Status**: ✅ Complete (full gate green at T14)
 **Evidence**:
 - **Red first.** A scratch copy whose six checks return without judging fails the self-test with 20 failures, one per bad input, and exits 1.
 - **Self-test.** `6 required checks present, 20 bad inputs rejected with the expected message, 6 good inputs accepted, spawned failure exited non-zero`. Each check has a bad input and at least one near-miss (trailing slash on `iss`, `registrationAllowed` absent or `"false"`, tmpfs on the parent directory, `service_started`, a token of two segments). The spawn sets `IDENTITY_URL=http://127.0.0.1:9` and requires a non-zero exit and a stderr line starting `check-identity: sub pinned failed: the identity service (compose service "identity", http://127.0.0.1:9) is unreachable`. It needs no stack; CI's `topology` job runs it.
@@ -544,11 +544,11 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 - [x] The self-test requires both steps and rejects these: a `502`, a `400` with another message (near-miss), a retry `400`, a replay `201`, another id, and a grown total
 - [x] The real run is green
-- [ ] Full gate passes (not run in T12: it ends in `down -v`, and the stack stays up for T13; runs at T14)
+- [x] Full gate passes (run at T14's build gate; not run in T12: it ends in `down -v`, and the stack stays up for T13; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
-**Status**: ✅ Complete (full gate pending, see above)
+**Status**: ✅ Complete (full gate green at T14)
 **Evidence**:
 - **Red first.** With both names in `REQUIRED_STEPS` and the self-test cases written, before the steps existed, the self-test failed 16 times (dry run unequal to `REQUIRED_STEPS`, both steps missing, every bad and good input) and exited 1.
 - **Change.** `second key replays` runs right after `confirmation replay`: it confirms `ctx.videoUpload` with a fresh key and measures alice's total before and after its own call, so neither step's total sees the other's confirmation. Its check is `assertReplayed` with its own call name (`assertReplayed` takes the call as an optional fourth argument; the existing messages are unchanged). `invalid parts rejected` runs after `key reuse conflict`: `uploadInvalidParts` starts a 20971520-byte upload, PUTs 1 byte to part 1 and 4194304 bytes to part 2, and confirms twice with one fresh key. `assertInvalidPartsRejected` requires the upload started and both PUTs answered 200 (`assertUploaded`), then exactly `400 {"statusCode":400,"message":"Uploaded parts are invalid: every part except the last must be 16777216 bytes"}` (field order ignored, no extra field), then exactly `404 {"statusCode":404,"message":"Upload not found"}`. A 2xx first answer is named `Invalid parts accepted`.
@@ -582,11 +582,11 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 - [x] The self-test rejects `COMPLETED`, `FAILED (FORMATO_INVALIDO)` (the edge case), an archive key, two deliveries, and the `FORMATO_INVALIDO` sentence
 - [x] The real run is green
 - [x] Literal negative: with the valid fixture in its place, `processing failure` fails naming `COMPLETED`
-- [ ] Full gate passes (not run in T13: it ends in `down -v`, and the stack stays up; runs at T14)
+- [x] Full gate passes (run at T14's build gate; not run in T13: it ends in `down -v`, and the stack stays up; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
-**Status**: ✅ Complete (full gate pending, see above)
+**Status**: ✅ Complete (full gate green at T14)
 **Evidence**:
 - **Fixture.** `fixtures/corrupted-8s.mp4` was generated with the command now in `fixtures/README.md` (`python:3-alpine` in a container: walk the top-level boxes, zero the `mdat` payload `[i+8, i+size)`). 39,863 bytes; `shasum -a 256` gives `24123d94709fc8323c7245e759f4648e60d82427e014890bfe9175ea49259454`, as the spike recorded. The README records its properties, the command, and why it fails where it does (FFprobe reads `moov`: exit 0, mp4 family, 8 s, video stream, so validation accepts it; FFmpeg decodes the zeroed `mdat`: exit 69, 0 frames, so the Worker emits `PROCESSAMENTO_FALHOU`; the ZIP builder also refuses 0 files).
 - **Red first.** With the three names in `REQUIRED_STEPS` and the self-test cases written, before the steps and `assertProcessingFailed` existed, the self-test failed 30 times (dry run unequal to `REQUIRED_STEPS`, the three steps missing, every new bad and good input) and exited 1.
@@ -618,12 +618,32 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] Removing a step's name from the README fails the self-test
-- [ ] The full build gate is green, with `check-identity.mjs` passing before and after the recreate
-- [ ] The docs-links check reports 0 unresolved links
+- [x] Removing a step's name from the README fails the self-test
+- [x] The full build gate is green, with `check-identity.mjs` passing before and after the recreate
+- [x] The docs-links check reports 0 unresolved links
 
 **Tests**: self-test
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** `assertStepsDocumented` requires every name in `SMOKE_STEPS` to appear in `README.md` in backticks (a bare `no archive` is a near-miss, since the words occur in prose). Before the README changed, the self-test failed naming 23 of the 29 steps (`api health`, `old create gone`, `second key replays`, … `no leftovers`) and exited 1.
+- **Change.** The self-test reads `README.md` and adds two bad inputs (a README without a step; a step named without backticks) and one good input to the helper. `README.md` now carries a table of all 29 steps in run order with what each proves (the stale "twenty" is gone), the self-test's dry run, spawned failure and README check, the corrupted fixture, `check-identity` with its six checks, `check-storage-bootstrap` with its ten scenarios, `generate-db-script --check` in a new section, each with its `--self-test` and what it proves, and a new "The build gate" section listing steps 1-13 in this file's order, with step 10 as `docker compose up -d --wait --force-recreate identity storage-init api` and why it recreates. The Layout table names the new scripts, the corrupted fixture and `db/`. The Build row and step 10 of this file already read `--force-recreate identity storage-init api`; no change was needed there.
+- **Self-test.** From 29/166/57 to `29 required steps present, 168 bad inputs rejected with the expected message, 58 good inputs accepted, main() ran every step in order in a dry run, every step named in README.md, spawned failure exited non-zero`.
+- **Literal negatives** (README edited in place and restored byte for byte with `cmp`): the backticks removed from `second key replays` → ``Self-test failed: README.md does not name `second key replays`; …``, exit 1; the `bucket lifecycle` table row deleted → ``… does not name `bucket lifecycle`; …``, exit 1. Restored: green, and `git status` showed only `README.md` and the smoke changed.
+- **Build gate** (from `docker compose down -v`, sibling repositories on clean `main`, `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002`), every step exit 0:
+  1. `clean-appledouble.mjs`;
+  2. `config -q`;
+  3. sizing `worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`, self-test 12/7;
+  4. storage writes `6 scripts under scripts/ checked`, self-test 12/7;
+  5. `db/create-database.sql is exactly what the migrations generate`, self-test 4/1 plus the spawned `--check`;
+  6. `up --build -d --wait`;
+  7. `10 bootstrap scenarios passed; no fiapx-scenario-* bucket left`, self-test 10/33/17;
+  8. smoke green (29 steps, 27 report lines), self-test 29/168/58;
+  9. `6 identity checks passed`, self-test 6/20/6;
+  10. `up -d --wait --force-recreate identity storage-init api` (`storage-init` exited 0 again, `identity` and `api` healthy);
+  11. smoke green again (`alice lists 6 requests and bob 2`), `6 identity checks passed` again, so `sub pinned` held across the recreate;
+  12. `down -v`, no container left;
+  13. docs-links: `0 unresolved link(s)`.
 
 ---
 

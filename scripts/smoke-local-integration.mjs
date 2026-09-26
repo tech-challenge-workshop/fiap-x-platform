@@ -1243,6 +1243,16 @@ const REQUIRED_STEPS = [
   'no leftovers',
 ];
 
+// GATE-17: every step main() runs is named in README.md, in backticks, so a
+// step added or renamed without documentation fails the self-test naming it.
+const README_PATH = join(REPO_ROOT, 'README.md');
+function assertStepsDocumented(names, readme) {
+  const missing = names.filter((name) => !readme.includes(`\`${name}\``));
+  if (missing.length > 0) {
+    throw new Error(`README.md does not name ${missing.map((name) => `\`${name}\``).join(', ')}; every smoke step must appear there in backticks`);
+  }
+}
+
 // Runs one step's own check through runSteps, exactly as main() would after
 // its observe, against a context the self-test supplies.
 async function runStepCheck(name, ctx) {
@@ -1830,6 +1840,11 @@ async function selfTest() {
   for (const step of REQUIRED_STEPS) {
     acceptances.push([`step "${step}" given good observations`, () => runStepCheck(step, { ...good })]);
   }
+  rejections.push(['assertStepsDocumented given a README without a step', () => assertStepsDocumented(['lists disjoint', 'no leftovers'], 'Steps: `lists disjoint`.'),
+    'README.md does not name `no leftovers`; every smoke step must appear there in backticks']);
+  rejections.push(['assertStepsDocumented given a step named without backticks', () => assertStepsDocumented(['no archive'], 'no archive for the rejection'),
+    'README.md does not name `no archive`; every smoke step must appear there in backticks']);
+  acceptances.push(['assertStepsDocumented given a README naming every step', () => assertStepsDocumented(['no archive', 'no leftovers'], '`no archive` then `no leftovers`')]);
   acceptances.push(['runSteps observes before it checks', () => runSteps([{
     name: 'order',
     observe: (ctx) => { ctx.seen = true; },
@@ -1860,6 +1875,11 @@ async function selfTest() {
       failures.push(`required step "${step}" is missing from SMOKE_STEPS, or has no check`);
     }
   }
+  try {
+    assertStepsDocumented(SMOKE_STEPS.map((step) => step.name), readFileSync(README_PATH, 'utf8'));
+  } catch (err) {
+    failures.push(err.message);
+  }
   for (const [name, run, expected] of rejections) {
     try {
       await run();
@@ -1885,7 +1905,7 @@ async function selfTest() {
     return;
   }
   console.log(
-    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run, spawned failure exited non-zero`,
+    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run, every step named in README.md, spawned failure exited non-zero`,
   );
 }
 
