@@ -57,6 +57,9 @@ jobs:
         run: node scripts/check-ci-governance.mjs --self-test
       - name: Prove the link check fails on a broken link
         run: node scripts/check-docs-links.mjs --self-test
+      - name: Prove the required-checks applier replaces the list exactly
+        run: node scripts/apply-required-checks.mjs --self-test
+
 
   integration:
     needs: topology

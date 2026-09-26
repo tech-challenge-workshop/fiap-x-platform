@@ -1,7 +1,23 @@
 {
-  "tech-challenge-workshop/fiap-x-api": ["quality", "image"],
-  "tech-challenge-workshop/processing-catalog": ["quality", "image"],
-  "tech-challenge-workshop/processing-worker": ["quality", "image"],
-  "tech-challenge-workshop/notification-service": ["quality", "image"],
-  "tech-challenge-workshop/fiap-x-platform": ["topology", "docs-links", "integration"]
+  "tech-challenge-workshop/fiap-x-api": [
+    { "context": "quality", "integration_id": 15368 },
+    { "context": "image", "integration_id": 15368 }
+  ],
+  "tech-challenge-workshop/processing-catalog": [
+    { "context": "quality", "integration_id": 15368 },
+    { "context": "image", "integration_id": 15368 }
+  ],
+  "tech-challenge-workshop/processing-worker": [
+    { "context": "quality", "integration_id": 15368 },
+    { "context": "image", "integration_id": 15368 }
+  ],
+  "tech-challenge-workshop/notification-service": [
+    { "context": "quality", "integration_id": 15368 },
+    { "context": "image", "integration_id": 15368 }
+  ],
+  "tech-challenge-workshop/fiap-x-platform": [
+    { "context": "topology", "integration_id": 15368 },
+    { "context": "docs-links", "integration_id": 15368 },
+    { "context": "integration", "integration_id": 15368 }
+  ]
 }

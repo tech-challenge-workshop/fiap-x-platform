@@ -246,11 +246,12 @@ The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 
 
 Renaming one of the three conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
 
-The checks each repository's `protect main` ruleset must require are versioned in [`ci/required-checks.json`](ci/required-checks.json): `quality` and `image` for the four services, and `topology`, `docs-links` and `integration` for this repository. A job renamed in a workflow must be renamed there in the same change.
+The checks each repository's `protect main` ruleset must require are versioned in [`ci/required-checks.json`](ci/required-checks.json): `quality` and `image` for the four services, and `topology`, `docs-links` and `integration` for this repository. Each is a `{ "context", "integration_id" }` pair pinned to the GitHub Actions app (`15368`), which posts every one of them, so a check of the same name posted by another app does not satisfy the ruleset. A job renamed in a workflow must be renamed there in the same change.
 
-- `node scripts/check-ci-governance.mjs --live` reads the five rulesets through `gh api` and fails, naming the repository, when one is missing, inactive, not targeting the default branch alone, or requires a different set of checks: `<repo>: missing [..], unexpected [..]`. It needs `gh` authenticated, and fails saying so when it is not. It runs in the build gate, not in CI.
+- `node scripts/check-ci-governance.mjs --live` reads the five rulesets through `gh api` and fails, naming the repository, when one is missing, inactive, not targeting the default branch alone, or requires a different set of checks, compared as `context@integration_id` (`context@-` when a check is pinned to no app): `<repo>: missing [quality@15368], unexpected [quality@-]`. It needs `gh` authenticated, and fails saying so when it is not. It runs in the build gate, not in CI.
 - `node scripts/apply-required-checks.mjs --dry-run` prints, per repository, the checks it would add and remove, and changes nothing. `--apply` puts each differing ruleset back with only its required-checks list replaced; every other rule and the strict-policy flag are kept as read. Applying changes GitHub settings: run `--dry-run` first, `--apply` only with an explicit go-ahead, then `--live`.
-- Both have a `--self-test` that injects the rulesets and never calls GitHub.
+- Both have a `--self-test` that injects the rulesets and never calls GitHub. CI's `topology` job runs both.
+
 
 `docs-links` runs `node scripts/check-docs-links.mjs`, which prints each relative link in `README.md` or `docs/` that does not resolve, then `N unresolved link(s)`, and exits 1 when N is not zero. Requiring it keeps the links at zero on every merge. Its `--self-test` writes a broken and a good tree to a temporary directory and requires the exact report and exit code for each, including from a spawned run; CI's `topology` job runs it.
 

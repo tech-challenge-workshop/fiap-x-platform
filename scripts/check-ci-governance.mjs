@@ -27,9 +27,12 @@
 // Live check (`--live`, CIG-03). Reads CI_REQUIRED_CHECKS_PATH (default
 // ci/required-checks.json) and, through `gh api`, each repository's rulesets.
 // Each repository must have exactly one ruleset named `protect main`, active,
-// targeting only the default branch (`~DEFAULT_BRANCH`), whose required
-// status checks equal the file's list as a set. A difference is reported as
-// `<repo>: missing [..], unexpected [..]`. `gh` must be authenticated.
+// targeting only the default branch (`~DEFAULT_BRANCH`) with no exclusion,
+// whose required status checks equal the file's list as a set of
+// `context@integration_id` pairs (`context@-` when a check is pinned to no
+// app). A difference is reported as `<repo>: missing [..], unexpected [..]`.
+// `gh` must be authenticated.
+
 //
 // `--self-test` needs nothing external: it feeds the workflow check bad,
 // near-miss and good workflows and the live comparison injected rulesets, and
@@ -54,6 +57,8 @@ export const CHECKS_PATH = process.env.CI_REQUIRED_CHECKS_PATH
 export const RULESET_NAME = 'protect main';
 const DEFAULT_BRANCH = '~DEFAULT_BRANCH';
 const GH_UNAUTHENTICATED = 'gh is not authenticated; --live reads the rulesets';
+// The GitHub Actions app, which posts every required check (GRD-03).
+export const ACTIONS_APP_ID = 15368;
 
 const SMOKE = 'node scripts/smoke-local-integration.mjs';
 const IDENTITY = 'node scripts/check-identity.mjs';
@@ -293,24 +298,35 @@ function main() {
 
 }
 
-// The versioned required checks: repository -> non-empty list of check names.
+// A required check as `context@integration_id`, or `context@-` when it is
+// pinned to no app: a check posted by another app is a different check.
+export const checkLabel = (check) => `${check.context}@${check.integration_id ?? '-'}`;
+
+const isPair = (check) =>
+  check !== null && typeof check === 'object' && !Array.isArray(check)
+  && JSON.stringify(Object.keys(check).sort()) === '["context","integration_id"]'
+  && typeof check.context === 'string' && check.context !== ''
+  && Number.isInteger(check.integration_id) && check.integration_id > 0;
+
+// The versioned required checks: repository -> non-empty list of distinct
+// { context, integration_id } pairs.
 export function readRequiredChecks(path = CHECKS_PATH) {
   const checks = JSON.parse(readFileSync(path, 'utf8'));
   if (checks === null || typeof checks !== 'object' || Array.isArray(checks) || Object.keys(checks).length === 0) {
     throw new Error(`${path} must map each repository to its required checks`);
   }
   for (const [repo, list] of Object.entries(checks)) {
-    const valid = Array.isArray(list) && list.length > 0 && list.every((c) => typeof c === 'string' && c !== '');
-    if (!valid || new Set(list).size !== list.length) {
-      throw new Error(`${path}: ${repo} must list its required checks as distinct non-empty names`);
+    const valid = Array.isArray(list) && list.length > 0 && list.every(isPair);
+    if (!valid || new Set(list.map((check) => check.context)).size !== list.length) {
+      throw new Error(`${path}: ${repo} must list its required checks as distinct {context, integration_id} pairs`);
     }
   }
   return checks;
 }
 
-const requiredContexts = (ruleset) => {
+const requiredChecks = (ruleset) => {
   const rule = (ruleset.rules ?? []).find((r) => r.type === 'required_status_checks');
-  return (rule?.parameters?.required_status_checks ?? []).map((check) => check.context);
+  return (rule?.parameters?.required_status_checks ?? []).map(checkLabel);
 };
 
 // Every problem with one repository's `protect main` ruleset, given the full
@@ -332,9 +348,11 @@ export function rulesetProblems(repo, expected, rulesets) {
       `${repo}: ruleset "${RULESET_NAME}" targets ${ruleset.target} ${JSON.stringify({ include, exclude })}, not the default branch alone (${DEFAULT_BRANCH})`,
     );
   }
-  const live = requiredContexts(ruleset);
-  const missing = expected.filter((check) => !live.includes(check));
-  const unexpected = [...new Set(live)].filter((check) => !expected.includes(check));
+  const live = requiredChecks(ruleset);
+  const wanted = expected.map(checkLabel);
+  const missing = wanted.filter((check) => !live.includes(check));
+  const unexpected = [...new Set(live)].filter((check) => !wanted.includes(check));
+
   if (missing.length > 0 || unexpected.length > 0) {
     problems.push(`${repo}: missing [${missing.join(', ')}], unexpected [${unexpected.join(', ')}]`);
   }
@@ -476,11 +494,21 @@ const GATED = replaceOnce(
 );
 const GATED_MESSAGE = `step "Start the stack and wait for every health check" must not be conditioned on "steps.access.outputs.available == 'true'"`;
 
+// A required check as the ruleset stores it, from `context@integration_id`,
+// or `context` alone for a check pinned to no app.
+const checkOf = (label) => {
+  const [context, id] = label.split('@');
+  return id === undefined ? { context } : { context, integration_id: Number(id) };
+};
+// The versioned shape: each context pinned to the GitHub Actions app.
+const pinned = (...contexts) => contexts.map((context) => ({ context, integration_id: ACTIONS_APP_ID }));
+
 // A `protect main` ruleset as `gh api repos/<repo>/rulesets/<id>` returns it,
-// requiring `contexts`; `change` edits the copy before it is returned.
+// requiring `labels` (see checkOf); `change` edits the copy before it is
+// returned.
 const WORKER = 'tech-challenge-workshop/processing-worker';
 const PLATFORM = 'tech-challenge-workshop/fiap-x-platform';
-function liveRuleset(contexts, change = () => {}) {
+function liveRuleset(labels, change = () => {}) {
   const ruleset = {
     id: 23709809,
     name: 'protect main',
@@ -499,7 +527,7 @@ function liveRuleset(contexts, change = () => {}) {
         parameters: {
           strict_required_status_checks_policy: false,
           do_not_enforce_on_create: false,
-          required_status_checks: contexts.map((context) => ({ context })),
+          required_status_checks: labels.map(checkOf),
         },
       },
     ],
@@ -509,36 +537,46 @@ function liveRuleset(contexts, change = () => {}) {
   return ruleset;
 }
 
-// The required checks the spec decides (CIG-04 AC1, AC2); the versioned file
-// must say exactly this.
+// The required checks the spec decides (CIG-04 AC1, AC2; GRD-03 AC1); the
+// versioned file must say exactly this.
 const DECIDED_CHECKS = {
-  'tech-challenge-workshop/fiap-x-api': ['quality', 'image'],
-  'tech-challenge-workshop/processing-catalog': ['quality', 'image'],
-  'tech-challenge-workshop/processing-worker': ['quality', 'image'],
-  'tech-challenge-workshop/notification-service': ['quality', 'image'],
-  'tech-challenge-workshop/fiap-x-platform': ['topology', 'docs-links', 'integration'],
+  'tech-challenge-workshop/fiap-x-api': pinned('quality', 'image'),
+  'tech-challenge-workshop/processing-catalog': pinned('quality', 'image'),
+  'tech-challenge-workshop/processing-worker': pinned('quality', 'image'),
+  'tech-challenge-workshop/notification-service': pinned('quality', 'image'),
+  'tech-challenge-workshop/fiap-x-platform': pinned('topology', 'docs-links', 'integration'),
 };
 
 function liveSelfTest(failures) {
-  const want = ['quality', 'image'];
+  const want = pinned('quality', 'image');
+  const good = ['quality@15368', 'image@15368'];
   const rejections = [
-    ['a missing check', [liveRuleset(['quality'])], [`${WORKER}: missing [image], unexpected []`]],
-    ['an extra check', [liveRuleset(['quality', 'image', 'lint'])], [`${WORKER}: missing [], unexpected [lint]`]],
+    ['a missing check', [liveRuleset(['quality@15368'])], [`${WORKER}: missing [image@15368], unexpected []`]],
+    ['an extra check', [liveRuleset([...good, 'lint@15368'])], [`${WORKER}: missing [], unexpected [lint@15368]`]],
+    ['a context without integration_id', [liveRuleset(['quality', 'image@15368'])],
+      [`${WORKER}: missing [quality@15368], unexpected [quality@-]`]],
+    ['every context without integration_id, as the rulesets are today', [liveRuleset(['quality', 'image'])],
+      [`${WORKER}: missing [quality@15368, image@15368], unexpected [quality@-, image@-]`]],
+    ['a context pinned to another app (near-miss)', [liveRuleset(['quality@15368', 'image@15369'])],
+      [`${WORKER}: missing [image@15368], unexpected [image@15369]`]],
     ['a ruleset on refs/heads/main instead of the default branch (near-miss)',
-      [liveRuleset(want, (r) => { r.conditions.ref_name.include = ['refs/heads/main']; })],
+      [liveRuleset(good, (r) => { r.conditions.ref_name.include = ['refs/heads/main']; })],
       [`${WORKER}: ruleset "protect main" targets branch {"include":["refs/heads/main"],"exclude":[]}, not the default branch alone (~DEFAULT_BRANCH)`]],
+    ['M15: the default branch with a non-empty exclude (near-miss)',
+      [liveRuleset(good, (r) => { r.conditions.ref_name.exclude = ['refs/heads/release'] ; })],
+      [`${WORKER}: ruleset "protect main" targets branch {"include":["~DEFAULT_BRANCH"],"exclude":["refs/heads/release"]}, not the default branch alone (~DEFAULT_BRANCH)`]],
     ['a ruleset on tags (near-miss)',
-      [liveRuleset(want, (r) => { r.target = 'tag'; })],
+      [liveRuleset(good, (r) => { r.target = 'tag'; })],
       [`${WORKER}: ruleset "protect main" targets tag {"include":["~DEFAULT_BRANCH"],"exclude":[]}, not the default branch alone (~DEFAULT_BRANCH)`]],
-    ['an inactive ruleset', [liveRuleset(want, (r) => { r.enforcement = 'evaluate'; })],
+    ['an inactive ruleset', [liveRuleset(good, (r) => { r.enforcement = 'evaluate'; })],
       [`${WORKER}: ruleset "protect main" is "evaluate", not "active"`]],
-    ['no ruleset named protect main (near-miss name)', [liveRuleset(want, (r) => { r.name = 'protect-main'; })],
+    ['no ruleset named protect main (near-miss name)', [liveRuleset(good, (r) => { r.name = 'protect-main'; })],
       [`${WORKER}: no ruleset named "protect main"`]],
-    ['two rulesets named protect main', [liveRuleset(want), liveRuleset(want)],
+    ['two rulesets named protect main', [liveRuleset(good), liveRuleset(good)],
       [`${WORKER}: 2 rulesets are named "protect main"; expected exactly one`]],
     ['no required_status_checks rule',
-      [liveRuleset(want, (r) => { r.rules = r.rules.filter((rule) => rule.type !== 'required_status_checks'); })],
-      [`${WORKER}: missing [quality, image], unexpected []`]],
+      [liveRuleset(good, (r) => { r.rules = r.rules.filter((rule) => rule.type !== 'required_status_checks'); })],
+      [`${WORKER}: missing [quality@15368, image@15368], unexpected []`]],
   ];
   for (const [name, rulesets, expected] of rejections) {
     const problems = rulesetProblems(WORKER, want, rulesets);
@@ -547,9 +585,9 @@ function liveSelfTest(failures) {
     }
   }
   const acceptances = [
-    ['an exact match', [liveRuleset(want)]],
+    ['an exact match', [liveRuleset(good)]],
     ['an exact match in another order, beside an unrelated ruleset',
-      [liveRuleset(['image', 'quality']), liveRuleset(['release'], (r) => { r.name = 'protect tags'; r.target = 'tag'; })]],
+      [liveRuleset(['image@15368', 'quality@15368']), liveRuleset(['release'], (r) => { r.name = 'protect tags'; r.target = 'tag'; })]],
   ];
   for (const [name, rulesets] of acceptances) {
     const problems = rulesetProblems(WORKER, want, rulesets);
@@ -558,17 +596,42 @@ function liveSelfTest(failures) {
 
   // Across repositories: only the one that differs is named (the spec's
   // independent test removes `image` from one repository's versioned list).
-  const fetched = {
-    [WORKER]: [liveRuleset(['quality', 'image'])],
-    [PLATFORM]: [liveRuleset(['topology', 'docs-links', 'integration'])],
-  };
-  const oneDrifted = liveProblems({ [WORKER]: ['quality'], [PLATFORM]: ['topology', 'docs-links', 'integration'] }, fetched);
-  const oneDriftedExpected = [`${WORKER}: missing [], unexpected [image]`];
+  const platform = ['topology@15368', 'docs-links@15368', 'integration@15368'];
+  const fetched = { [WORKER]: [liveRuleset(good)], [PLATFORM]: [liveRuleset(platform)] };
+  const oneDrifted = liveProblems({ [WORKER]: pinned('quality'), [PLATFORM]: pinned('topology', 'docs-links', 'integration') }, fetched);
+  const oneDriftedExpected = [`${WORKER}: missing [], unexpected [image@15368]`];
   if (JSON.stringify(oneDrifted) !== JSON.stringify(oneDriftedExpected)) {
     failures.push(`live, one repository drifted: got ${JSON.stringify(oneDrifted)}, expected ${JSON.stringify(oneDriftedExpected)}`);
   }
-  const noneDrifted = liveProblems({ [WORKER]: ['quality', 'image'], [PLATFORM]: ['topology', 'docs-links', 'integration'] }, fetched);
+  const noneDrifted = liveProblems({ [WORKER]: want, [PLATFORM]: pinned('topology', 'docs-links', 'integration') }, fetched);
   if (noneDrifted.length > 0) failures.push(`live, every repository matches: rejected with ${JSON.stringify(noneDrifted)}`);
+
+  // The file reader accepts only distinct {context, integration_id} pairs.
+  const dir = mkdtempSync(join(tmpdir(), 'required-checks-'));
+  const badFiles = [
+    ['the old list of names', { [WORKER]: ['quality', 'image'] }],
+    ['a context without integration_id', { [WORKER]: [{ context: 'quality' }, ...pinned('image')] }],
+    ['an integration_id given as a string (near-miss)', { [WORKER]: [{ context: 'quality', integration_id: '15368' }, ...pinned('image')] }],
+    ['an empty context', { [WORKER]: [{ context: '', integration_id: ACTIONS_APP_ID }] }],
+    ['a context listed twice with different apps (near-miss)', { [WORKER]: [...pinned('quality'), { context: 'quality', integration_id: 1 }] }],
+    ['an extra key', { [WORKER]: [{ context: 'quality', integration_id: ACTIONS_APP_ID, app: 'actions' }] }],
+  ];
+  try {
+    for (const [name, content] of badFiles) {
+      const path = join(dir, 'checks.json');
+      writeFileSync(path, JSON.stringify(content));
+      const expected = `${path}: ${WORKER} must list its required checks as distinct {context, integration_id} pairs`;
+      let message;
+      try {
+        readRequiredChecks(path);
+      } catch (error) {
+        message = error.message;
+      }
+      if (message !== expected) failures.push(`the checks file with ${name}: got ${JSON.stringify(message)}, expected ${JSON.stringify(expected)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 
   // The versioned file says what the spec decided.
   let versioned;
@@ -580,7 +643,7 @@ function liveSelfTest(failures) {
   if (JSON.stringify(versioned) !== JSON.stringify(DECIDED_CHECKS)) {
     failures.push(`${CHECKS_PATH} holds ${JSON.stringify(versioned)}, expected ${JSON.stringify(DECIDED_CHECKS)}`);
   }
-  return { rejected: rejections.length, accepted: acceptances.length + 1 };
+  return { rejected: rejections.length, accepted: acceptances.length + 1, badFiles: badFiles.length };
 }
 
 function selfTest() {
@@ -765,7 +828,7 @@ function selfTest() {
   }
   console.log(
     `check-ci-governance self-test passed: ${rejections.length} bad workflows rejected with the expected message, ${acceptances.length} good workflows accepted, spawned gated copy exited non-zero; ` +
-      `${liveCounts.rejected} bad rulesets rejected with the expected message, ${liveCounts.accepted} good ruleset sets accepted, one drifted repository named alone, the versioned file matches the spec, spawned --live without gh authentication exited 1`,
+      `${liveCounts.rejected} bad rulesets rejected with the expected message, ${liveCounts.accepted} good ruleset sets accepted, ${liveCounts.badFiles} malformed checks files refused, one drifted repository named alone, the versioned file matches the spec, spawned --live without gh authentication exited 1`,
   );
 }
 

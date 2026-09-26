@@ -140,13 +140,37 @@ T7
 
 **Done when**:
 
-- [ ] Self-tests reject a missing `integration_id`, a wrong one, and a non-empty `exclude` (M15). The shrinking-list case produces exactly the versioned list (M17)
-- [ ] Red-first: `--live` fails today, naming every context without `@15368`
-- [ ] `--dry-run` shows each context gaining `integration_id` 15368. Record its output. **Do not run `--apply`**
-- [ ] Quick gate passes
+- [x] Self-tests reject a missing `integration_id`, a wrong one, and a non-empty `exclude` (M15). The shrinking-list case produces exactly the versioned list (M17)
+- [x] Red-first: `--live` fails today, naming every context without `@15368`
+- [x] `--dry-run` shows each context gaining `integration_id` 15368. Record its output. **Do not run `--apply`**
+- [x] Quick gate passes
 
 **Tests**: self-test + integration
 **Gate**: quick
+
+**Status**: ✅ Complete (2026-09-26). `check-ci-governance` live self-test 8 → 12 bad rulesets rejected (a context without `integration_id`, all of them as today, another app's id, M15's non-empty `exclude`), plus 6 malformed checks files refused; `apply-required-checks` self-test gains the shrinking list from `[quality, lint]` and `[quality@15368, lint@15368]`, 3 → 5 change sets, and a second apply that changes nothing. All seen red first. Mutants on scratch copies: dropping `exclude.length !== 0` (M15) and appending instead of replacing (M17) each fail their self-test. `topology` runs `apply-required-checks.mjs --self-test`. `--apply` was not run, so `--live` stays red until T7's go-ahead.
+
+Red-first `--live` (exit 1):
+
+```
+check-ci-governance: tech-challenge-workshop/fiap-x-api: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/processing-catalog: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/processing-worker: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/notification-service: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/fiap-x-platform: missing [topology@15368, docs-links@15368, integration@15368], unexpected [topology@-, docs-links@-, integration@-]
+```
+
+`--dry-run` (exit 0, nothing written):
+
+```
+tech-challenge-workshop/fiap-x-api: ruleset "protect main" (23709829) would add [quality@15368, image@15368], remove [quality@-, image@-]; it would then require [quality@15368, image@15368]
+tech-challenge-workshop/processing-catalog: ruleset "protect main" (23709816) would add [quality@15368, image@15368], remove [quality@-, image@-]; it would then require [quality@15368, image@15368]
+tech-challenge-workshop/processing-worker: ruleset "protect main" (23709809) would add [quality@15368, image@15368], remove [quality@-, image@-]; it would then require [quality@15368, image@15368]
+tech-challenge-workshop/notification-service: ruleset "protect main" (23709823) would add [quality@15368, image@15368], remove [quality@-, image@-]; it would then require [quality@15368, image@15368]
+tech-challenge-workshop/fiap-x-platform: ruleset "protect main" (23709782) would add [topology@15368, docs-links@15368, integration@15368], remove [topology@-, docs-links@-, integration@-]; it would then require [topology@15368, docs-links@15368, integration@15368]
+dry run: nothing was changed
+```
+
 
 ---
 

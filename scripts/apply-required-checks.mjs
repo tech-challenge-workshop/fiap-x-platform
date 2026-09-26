@@ -1,5 +1,8 @@
 // Makes each repository's `protect main` ruleset require exactly the checks in
-// ci/required-checks.json (CIG-04).
+// ci/required-checks.json (CIG-04), each pinned to the app that posts it
+// (`integration_id`, GRD-03). Checks are printed as `context@integration_id`,
+// and `context@-` for one pinned to no app.
+
 //
 //   --dry-run   reads each ruleset through `gh api` and prints the checks it
 //               would add and remove; changes nothing.
@@ -23,7 +26,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RULESET_NAME, fetchProtectMain, gh, ghAuthenticated, readRequiredChecks } from './check-ci-governance.mjs';
+import { ACTIONS_APP_ID, RULESET_NAME, checkLabel, fetchProtectMain, gh, ghAuthenticated, readRequiredChecks } from './check-ci-governance.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const USAGE = 'usage: node scripts/apply-required-checks.mjs --dry-run | --apply';
@@ -40,8 +43,10 @@ const WRITABLE = ['name', 'target', 'enforcement', 'bypass_actors', 'conditions'
 const RULE = 'required_status_checks';
 const list = (items) => `[${items.join(', ')}]`;
 
-// The PUT body for `ruleset` requiring exactly `checks`: every field and rule
-// as read, except the required_status_checks list. `ruleset` is not changed.
+// The PUT body for `ruleset` requiring exactly `checks`, each a { context,
+// integration_id } pair: every field and rule as read, except the
+// required_status_checks list, which is replaced, never merged. `ruleset` is
+// not changed.
 export function withRequiredChecks(ruleset, checks) {
   if (!ruleset.rules.some((rule) => rule.type === RULE)) {
     throw new Error(`ruleset "${ruleset.name}" (${ruleset.id}) has no ${RULE} rule to replace`);
@@ -50,21 +55,30 @@ export function withRequiredChecks(ruleset, checks) {
   for (const field of WRITABLE) body[field] = structuredClone(ruleset[field]);
   body.rules = body.rules.map((rule) =>
     rule.type === RULE
-      ? { ...rule, parameters: { ...rule.parameters, required_status_checks: checks.map((context) => ({ context })) } }
+      ? {
+        ...rule,
+        parameters: {
+          ...rule.parameters,
+          required_status_checks: checks.map(({ context, integration_id }) => ({ context, integration_id })),
+        },
+      }
       : rule,
   );
   return body;
 }
 
 const liveChecks = (ruleset) =>
-  (ruleset.rules.find((rule) => rule.type === RULE)?.parameters?.required_status_checks ?? []).map((check) => check.context);
+  (ruleset.rules.find((rule) => rule.type === RULE)?.parameters?.required_status_checks ?? []).map(checkLabel);
 
-// The checks to add and to remove so that `ruleset` requires `checks`.
+// The checks to add and to remove so that `ruleset` requires `checks`, as
+// `context@integration_id` labels: a context pinned to no app, or to another
+// app, is removed and the pinned one added.
 export function checkChanges(ruleset, checks) {
   const live = liveChecks(ruleset);
+  const wanted = checks.map(checkLabel);
   return {
-    add: checks.filter((check) => !live.includes(check)),
-    remove: [...new Set(live)].filter((check) => !checks.includes(check)),
+    add: wanted.filter((check) => !live.includes(check)),
+    remove: [...new Set(live)].filter((check) => !wanted.includes(check)),
   };
 }
 
@@ -85,13 +99,14 @@ export function run(mode, checks, { fetch, put }) {
       return { lines, error: `${repo}: ${error.message}` };
     }
     const prefix = `${repo}: ruleset "${RULESET_NAME}" (${ruleset.id})`;
+    const labels = wanted.map(checkLabel);
     const { add, remove } = checkChanges(ruleset, wanted);
     if (add.length === 0 && remove.length === 0) {
-      lines.push(`${prefix} already requires exactly ${list(wanted)}`);
+      lines.push(`${prefix} already requires exactly ${list(labels)}`);
       continue;
     }
     if (mode === '--dry-run') {
-      lines.push(`${prefix} would add ${list(add)}, remove ${list(remove)}; it would then require ${list(wanted)}`);
+      lines.push(`${prefix} would add ${list(add)}, remove ${list(remove)}; it would then require ${list(labels)}`);
       continue;
     }
     try {
@@ -99,7 +114,8 @@ export function run(mode, checks, { fetch, put }) {
     } catch (error) {
       return { lines, error: `${repo}: the PUT of ruleset ${ruleset.id} failed: ${error.message}` };
     }
-    lines.push(`${prefix} updated: added ${list(add)}, removed ${list(remove)}; it now requires ${list(wanted)}`);
+    lines.push(`${prefix} updated: added ${list(add)}, removed ${list(remove)}; it now requires ${list(labels)}`);
+
   }
   lines.push(mode === '--dry-run' ? 'dry run: nothing was changed' : 'applied: now run node scripts/check-ci-governance.mjs --live');
   return { lines, error: undefined };
@@ -112,8 +128,17 @@ function selfTest() {
     if (!same(actual, expected)) failures.push(`${name}: got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
   };
 
+  // A required check from `context@integration_id`, or `context` alone for
+  // one pinned to no app, as the live rulesets hold them today.
+  const checkOf = (label) => {
+    const [context, id] = label.split('@');
+    return id === undefined ? { context } : { context, integration_id: Number(id) };
+  };
+  // The versioned shape.
+  const pinned = (...contexts) => contexts.map((context) => ({ context, integration_id: ACTIONS_APP_ID }));
+  const QI = pinned('quality', 'image');
   // A ruleset as `gh api repos/<repo>/rulesets/<id>` returns it.
-  const read = (contexts, strict = false) => ({
+  const read = (labels, strict = false) => ({
     id: 23709809,
     name: 'protect main',
     target: 'branch',
@@ -142,7 +167,7 @@ function selfTest() {
         parameters: {
           strict_required_status_checks_policy: strict,
           do_not_enforce_on_create: false,
-          required_status_checks: contexts.map((context) => ({ context })),
+          required_status_checks: labels.map(checkOf),
         },
       },
     ],
@@ -159,7 +184,7 @@ function selfTest() {
   const before = JSON.stringify(input);
   let body;
   try {
-    body = withRequiredChecks(input, ['quality', 'image']);
+    body = withRequiredChecks(input, QI);
   } catch (error) {
     body = { error: error.message };
   }
@@ -177,13 +202,25 @@ function selfTest() {
     parameters: {
       strict_required_status_checks_policy: false,
       do_not_enforce_on_create: false,
-      required_status_checks: [{ context: 'quality' }, { context: 'image' }],
+      required_status_checks: [{ context: 'quality', integration_id: 15368 }, { context: 'image', integration_id: 15368 }],
     },
   });
+  // M17: a live list with a stale extra check comes out exactly as the
+  // versioned list, not with the extra kept (a list that shrinks).
+  for (const live of [['quality', 'lint'], ['quality@15368', 'lint@15368']]) {
+    let shrunk;
+    try {
+      shrunk = withRequiredChecks(read(live), QI);
+    } catch (error) {
+      shrunk = { error: error.message };
+    }
+    expect(`a live list ${JSON.stringify(live)} is replaced by exactly the versioned list`,
+      shrunk?.rules?.[4]?.parameters?.required_status_checks, [{ context: 'quality', integration_id: 15368 }, { context: 'image', integration_id: 15368 }]);
+  }
   expect('the ruleset read is not mutated', JSON.stringify(input), before);
   let strictBody;
   try {
-    strictBody = withRequiredChecks(read(['quality'], true), ['quality', 'image']);
+    strictBody = withRequiredChecks(read(['quality'], true), QI);
   } catch (error) {
     strictBody = { error: error.message };
   }
@@ -192,21 +229,25 @@ function selfTest() {
   noRule.rules = noRule.rules.filter((rule) => rule.type !== 'required_status_checks');
   let noRuleError;
   try {
-    withRequiredChecks(noRule, ['quality', 'image']);
+    withRequiredChecks(noRule, QI);
   } catch (error) {
     noRuleError = error.message;
   }
   expect('a ruleset without the rule is refused', noRuleError, 'ruleset "protect main" (23709809) has no required_status_checks rule to replace');
 
-  expect('the changes add the missing check', checkChanges(read(['quality']), ['quality', 'image']), { add: ['image'], remove: [] });
-  expect('the changes remove an extra check', checkChanges(read(['quality', 'lint']), ['quality', 'image']), { add: ['image'], remove: ['lint'] });
-  expect('no change when the set already matches', checkChanges(read(['image', 'quality']), ['quality', 'image']), { add: [], remove: [] });
+  expect('the changes add the missing check', checkChanges(read(['quality@15368']), QI), { add: ['image@15368'], remove: [] });
+  expect('the changes remove an extra check', checkChanges(read(['quality@15368', 'lint@15368']), QI), { add: ['image@15368'], remove: ['lint@15368'] });
+  expect('the changes pin each unpinned context, as the rulesets are today', checkChanges(read(['quality', 'image']), QI),
+    { add: ['quality@15368', 'image@15368'], remove: ['quality@-', 'image@-'] });
+  expect('the changes re-pin a context posted by another app (near-miss)', checkChanges(read(['quality@15368', 'image@1']), QI),
+    { add: ['image@15368'], remove: ['image@1'] });
+  expect('no change when the set already matches', checkChanges(read(['image@15368', 'quality@15368']), QI), { add: [], remove: [] });
 
   // Both modes, against injected GitHub calls.
   const W = 'o/worker';
   const P = 'o/platform';
-  const checks = { [W]: ['quality', 'image'], [P]: ['topology'] };
-  const fetched = { [W]: [read(['quality'])], [P]: [{ ...read(['topology']), id: 7 }] };
+  const checks = { [W]: QI, [P]: pinned('topology') };
+  const fetched = { [W]: [read(['quality'])], [P]: [{ ...read(['topology@15368']), id: 7 }] };
   const puts = [];
   const deps = (failOn) => ({
     fetch: (repo) => fetched[repo],
@@ -219,34 +260,42 @@ function selfTest() {
   expect('--dry-run writes nothing', puts, []);
   expect('--dry-run output', dry, {
     lines: [
-      `${W}: ruleset "protect main" (23709809) would add [image], remove []; it would then require [quality, image]`,
-      `${P}: ruleset "protect main" (7) already requires exactly [topology]`,
+      `${W}: ruleset "protect main" (23709809) would add [quality@15368, image@15368], remove [quality@-]; it would then require [quality@15368, image@15368]`,
+      `${P}: ruleset "protect main" (7) already requires exactly [topology@15368]`,
       'dry run: nothing was changed',
     ],
     error: undefined,
   });
   const applied = run('--apply', checks, deps());
   expect('--apply writes only the ruleset that differs, with the transformed body', puts, [
-    [W, 23709809, withRequiredChecks(read(['quality']), ['quality', 'image'])],
+    [W, 23709809, withRequiredChecks(read(['quality']), QI)],
   ]);
   expect('--apply output', applied, {
     lines: [
-      `${W}: ruleset "protect main" (23709809) updated: added [image], removed []; it now requires [quality, image]`,
-      `${P}: ruleset "protect main" (7) already requires exactly [topology]`,
+      `${W}: ruleset "protect main" (23709809) updated: added [quality@15368, image@15368], removed [quality@-]; it now requires [quality@15368, image@15368]`,
+      `${P}: ruleset "protect main" (7) already requires exactly [topology@15368]`,
       'applied: now run node scripts/check-ci-governance.mjs --live',
     ],
     error: undefined,
   });
   puts.length = 0;
-  const failed = run('--apply', { [P]: ['topology', 'docs-links'], [W]: ['quality', 'image'] }, deps(W));
+  const failed = run('--apply', { [P]: pinned('topology', 'docs-links'), [W]: QI }, deps(W));
   expect('a failed PUT stops and names the repository; the earlier one kept its update', [puts.map(([repo]) => repo), failed], [
     [P],
     {
-      lines: [`${P}: ruleset "protect main" (7) updated: added [docs-links], removed []; it now requires [topology, docs-links]`],
+      lines: [`${P}: ruleset "protect main" (7) updated: added [docs-links@15368], removed []; it now requires [topology@15368, docs-links@15368]`],
       error: `${W}: the PUT of ruleset 23709809 failed: HTTP 422`,
     },
   ]);
-  const twoNamed = run('--dry-run', { [W]: ['quality'] }, { fetch: () => [read(['quality']), read(['quality'])], put: () => {} });
+  // Applying twice changes nothing the second time.
+  const rewritten = withRequiredChecks(read(['quality']), QI);
+  const again = run('--apply', { [W]: QI }, { fetch: () => [{ ...read([]), rules: rewritten.rules }], put: () => { throw new Error('wrote on a second run'); } });
+  expect('a second apply changes nothing', again, {
+    lines: [`${W}: ruleset "protect main" (23709809) already requires exactly [quality@15368, image@15368]`, 'applied: now run node scripts/check-ci-governance.mjs --live'],
+    error: undefined,
+  });
+  const twoNamed = run('--dry-run', { [W]: pinned('quality') }, { fetch: () => [read(['quality']), read(['quality'])], put: () => {} });
+
   expect('two rulesets named protect main are refused', twoNamed.error, `${W}: expected exactly one ruleset named "protect main", found 2`);
 
   // Spawned: no mode, and --dry-run without gh authentication.
@@ -269,7 +318,7 @@ function selfTest() {
   }
   console.log(
     'apply-required-checks self-test passed: every other rule byte-identical, the checks list replaced exactly, a strict policy kept, a ruleset without the rule refused, ' +
-      '3 change sets computed, --dry-run wrote nothing, --apply wrote only the differing ruleset, a failed PUT stopped naming the repository, a duplicate ruleset refused, ' +
+      'a live list with a stale extra check replaced by exactly the versioned pairs (2 cases), 5 change sets computed, --dry-run wrote nothing, --apply wrote only the differing ruleset, a failed PUT stopped naming the repository, a second apply changed nothing, a duplicate ruleset refused, ' +
       '3 spawned runs without a mode or authentication exited 1',
   );
 }
