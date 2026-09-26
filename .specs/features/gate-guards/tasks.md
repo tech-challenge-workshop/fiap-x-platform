@@ -283,13 +283,13 @@ dry run: nothing was changed
 **Done when**:
 
 - [x] Build gate green
-- [ ] PR CI green (`topology`, `docs-links`, `integration`)
-- [ ] With the go-ahead: `--apply`, then `--live` passes, and the other rules are byte-identical to a before snapshot
+- [x] PR CI green (`topology`, `docs-links`, `integration`)
+- [x] With the go-ahead: `--apply`, then `--live` passes, and the other rules are byte-identical to a before snapshot
 
 **Tests**: integration
 **Gate**: build
 
-**Status**: ⚠️ Partial (2026-09-26). Build gate green at `470a1e2`; the branch is not pushed, no PR is open, and `--apply` has not run. Siblings `fiap-x-api`, `processing-catalog`, `processing-worker` and `notification-service` on `main`, clean. Ports `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002`; started from `docker compose down -v`.
+**Status**: ✅ Complete (2026-09-26)
 
 | Step | Result |
 | --- | --- |
@@ -323,6 +323,9 @@ check-ci-governance: tech-challenge-workshop/fiap-x-platform: missing [topology@
 ```
 
 Still to do: push and open the PR, then wait for a green CI. After that, and only with the user's go-ahead, run `--apply` and then `--live`.
+
+---
+- **PR and rollout.** PR fiap-x-platform#12 CI green at `c374375`: `topology`, `docs-links`, `integration` (6m55s, 30-step smoke). With the user's go-ahead, `--apply` pinned the 5 rulesets to `integration_id` 15368; `--live` then passed (`the 5 "protect main" rulesets require exactly the checks in ci/required-checks.json`); a before/after comparison of the full ruleset JSON (minus timestamps, links and the checks list) shows every other rule identical; the PR stayed `CLEAN` under the pinned checks.
 
 ---
 
