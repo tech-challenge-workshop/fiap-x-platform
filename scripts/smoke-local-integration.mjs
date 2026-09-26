@@ -156,6 +156,48 @@ function listArchives(id) {
   return keys === 'None' ? '' : keys.split(/\s+/).join('\n');
 }
 
+// The three lifecycle rules storage/bootstrap.sh owns, written here literally
+// rather than read from the bootstrap: a rule changed there must fail here.
+const OWNED_LIFECYCLE_RULES = [
+  { ID: 'expire-sources', Status: 'Enabled', Filter: { Prefix: 'sources/' }, Expiration: { Days: 7 } },
+  { ID: 'expire-zips', Status: 'Enabled', Filter: { Prefix: 'zips/' }, Expiration: { Days: 7 } },
+  { ID: 'abort-incomplete-uploads', Status: 'Enabled', Filter: { Prefix: '' }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
+];
+
+// Keys sorted at every level and rules sorted by ID, so two configurations
+// compare equal exactly when they hold the same rules.
+function canonicalRules(rules) {
+  const canonical = (value) => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+    }
+    return value;
+  };
+  return JSON.stringify(canonical([...rules].sort((a, b) => String(a.ID).localeCompare(String(b.ID)))));
+}
+
+// GATE-03: the bucket the stack runs on must carry exactly the owned rules,
+// read from outside the bootstrap, so a bootstrap that stopped enforcing them
+// turns the smoke red. `config` is what get-bucket-lifecycle-configuration
+// prints.
+function assertOwnedLifecycle(config) {
+  const expected = canonicalRules(OWNED_LIFECYCLE_RULES);
+  const found = canonicalRules(JSON.parse(config).Rules ?? []);
+  if (found !== expected) {
+    throw new Error(`Bucket ${BUCKET} lifecycle: expected exactly the 3 owned rules ${expected}, found ${found}`);
+  }
+}
+
+// Read only, never through the bootstrap: a bucket without a configuration
+// fails here, naming the error.
+function readBucketLifecycle() {
+  return dockerCompose([
+    'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
+    's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json',
+  ]);
+}
+
 // The non-video must settle FAILED with FORMATO_INVALIDO; COMPLETED or any
 // other failure code fails naming what was observed.
 function assertRejected(id, request) {
@@ -786,6 +828,14 @@ export const SMOKE_STEPS = [
     report: (ctx) => `Storage refused anonymous GET of ${BUCKET}/${ctx.videoKey} and of the ${BUCKET} listing (403)`,
   },
   {
+    name: 'bucket lifecycle',
+    observe: (ctx) => {
+      ctx.lifecycle = readBucketLifecycle();
+    },
+    check: (ctx) => assertOwnedLifecycle(observed(ctx, 'lifecycle')),
+    report: () => `Bucket ${BUCKET} carries exactly expire-sources and expire-zips (7 days) and abort-incomplete-uploads (1 day)`,
+  },
+  {
     name: 'video completed',
     observe: async (ctx) => {
       ctx.completed = await waitForTerminalStatus(ctx.id);
@@ -936,6 +986,7 @@ const REQUIRED_STEPS = [
   'key reuse conflict',
   'download issued',
   'anonymous access',
+  'bucket lifecycle',
   'video completed',
   'key scope',
   'rejection',
@@ -996,6 +1047,18 @@ async function selfTest() {
   const withReason = (failureReason) => lists.aliceList.map((listed) => (
     listed.processingRequestId === rejectedId ? { ...listed, failureReason } : listed));
   const notFound = { status: 404, body: '{"statusCode":404,"message":"Processing request not found"}' };
+  // The bucket's rules as the stack's storage printed them. Literal, not
+  // OWNED_LIFECYCLE_RULES: a changed constant must fail here too.
+  const ownedRules = [
+    { Expiration: { Days: 7 }, ID: 'expire-sources', Filter: { Prefix: 'sources/' }, Status: 'Enabled' },
+    { Expiration: { Days: 7 }, ID: 'expire-zips', Filter: { Prefix: 'zips/' }, Status: 'Enabled' },
+    { ID: 'abort-incomplete-uploads', Filter: { Prefix: '' }, Status: 'Enabled', AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
+  ];
+  const lifecycleOf = (rules) => JSON.stringify({ Rules: rules }, null, 4);
+  const withAbortRule = (change) => ownedRules.map((rule) => (rule.ID === 'abort-incomplete-uploads' ? { ...rule, ...change } : rule));
+  const lifecycleFound = (rules) =>
+    `Bucket ${BUCKET} lifecycle: expected exactly the 3 owned rules ${canonicalRules(ownedRules)}, found ${canonicalRules(rules)}`;
+  const operatorRule = { ID: 'operator-rule', Status: 'Enabled', Filter: { Prefix: 'reports/' }, Expiration: { Days: 30 } };
   // One upload as the API and storage answer it: one part on the published
   // storage origin, PUT with 200, confirmed with 201.
   const partUrl = (uploadId, origin = STORAGE_ORIGIN) =>
@@ -1282,6 +1345,7 @@ async function selfTest() {
     crossDownload: { ...notFound },
     randomDownload: { ...notFound },
     scratchDirs: [goneDir],
+    lifecycle: lifecycleOf(ownedRules),
   };
   const stepRejections = [
     ['anonymous access', { anonymous: { [objectUrl]: 200, [listingUrl]: 403 } },
@@ -1314,6 +1378,12 @@ async function selfTest() {
       `GET of the download URL for ${id} from the host returned 403, expected 200`],
     ['download issued', { download: downloaded({ issued: { status: 200, body: { url: downloadUrl.replace(STORAGE_ORIGIN, nearOrigin), expiresAt: futureExpiry } } }) },
       `Download URL for ${id} targets ${nearOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    ['bucket lifecycle', { lifecycle: lifecycleOf(ownedRules.slice(0, 2)) }, lifecycleFound(ownedRules.slice(0, 2))],
+    ['bucket lifecycle', { lifecycle: lifecycleOf([...ownedRules, operatorRule]) }, lifecycleFound([...ownedRules, operatorRule])],
+    ['bucket lifecycle', { lifecycle: lifecycleOf(withAbortRule({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } })) },
+      lifecycleFound(withAbortRule({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } }))],
+    ['bucket lifecycle', { lifecycle: lifecycleOf(withAbortRule({ Expiration: { Days: 30 } })) },
+      lifecycleFound(withAbortRule({ Expiration: { Days: 30 } }))],
     ['no archive', { rejectedListing: listing },
       `Rejected request ${rejectedId} left an archive under zips/${rejectedId}/:\n${listing}`],
     ['delivery sentence', { delivery: { status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' } },

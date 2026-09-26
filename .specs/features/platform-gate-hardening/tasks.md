@@ -201,12 +201,18 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 **Done when**:
 
-- [ ] The self-test requires the step. It rejects these, each with the exact message: two rules, a fourth rule, the abort rule at 2 days, and an extra `Expiration` (near-miss). It accepts the exact set
-- [ ] The real run is green
-- [ ] Full gate passes
+- [x] The self-test requires the step. It rejects these, each with the exact message: two rules, a fourth rule, the abort rule at 2 days, and an extra `Expiration` (near-miss). It accepts the exact set
+- [x] The real run is green
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Step.** `bucket lifecycle`, after `anonymous access`, reads `fiapx` with `get-bucket-lifecycle-configuration` through `storage-init`'s `aws` entrypoint, never through the bootstrap. The owned rules are literals in the smoke, compared as ID-sorted canonical JSON.
+- **Real run.** Green: `Bucket fiapx carries exactly expire-sources and expire-zips (7 days) and abort-incomplete-uploads (1 day)`, and every earlier step still passed.
+- **Self-test.** From 20/108/44 to `21 required steps present, 112 bad inputs rejected with the expected message, 45 good inputs accepted`. The good input is the configuration as RustFS printed it, written literally in another key order.
+- **Literal negative.** A scratch copy whose comparison never throws fails the self-test four times: `step "bucket lifecycle" given a bad observation: accepted, expected rejection …`.
 
 ---
 
