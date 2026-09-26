@@ -106,14 +106,22 @@ Also add the real workflow check to `topology`.
 
 **Done when**:
 
-- [ ] `node scripts/check-ci-governance.mjs` passes on the new workflow
-- [ ] The workflow parses (Python `yaml.safe_load`)
-- [ ] The job's commands run locally, in order, against a fresh stack, with the port overrides this machine needs: the equivalent of the build gate. Record the result
-- [ ] Removing one stack command makes the workflow check fail
+- [x] `node scripts/check-ci-governance.mjs` passes on the new workflow
+- [x] The workflow parses (Python `yaml.safe_load`)
+- [x] The job's commands run locally, in order, against a fresh stack, with the port overrides this machine needs: the equivalent of the build gate. Record the result
+- [x] Removing one stack command makes the workflow check fail
 - [ ] CI evidence comes when the PR is opened: `integration` must run the stack and go green. Record it in the Status note after the push. This is not a local gate item
 
 **Tests**: integration
 **Gate**: build (workflow check + local stack run)
+**Status**: ✅ Complete locally; CI evidence pending the PR
+**Evidence**:
+- **Change.** The `access` step, every `steps.access` condition and every `token:` are gone. The four services are checked out anonymously at their default branch, with the same `path:` as before. The eight stack commands run in order in `working-directory: fiap-x-platform`; logs are collected and uploaded `if: failure()`, and `docker compose down -v` runs `if: always()`. `timeout-minutes: 45`. `topology` now also runs the real check.
+- **Real check.** `integration job runs the 8 stack commands in order, with no skip path and no token`, exit 0. `yaml.safe_load` parses the file.
+- **Negatives** (scratch copies of the new `ci.yml`, via `CI_WORKFLOW_PATH`): without the bootstrap step → `integration stack step 2 must be "node scripts/check-storage-bootstrap.mjs", but it is "node scripts/generate-db-script.mjs --check"`, exit 1; without the recreate → `integration stack step 6 must be "docker compose up -d --wait --force-recreate identity storage-init api", but it is "node scripts/smoke-local-integration.mjs"`, exit 1.
+- **Local stack run** (siblings on `main`, clean: api `323fc3a`, catalog `2eaab23`, worker `ddfef84`, notification `f82bf09`; `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002`; `clean-appledouble.mjs` on the workspace root first): 1 `up --build -d --wait` rc 0 (49 s); 2 `10 bootstrap scenarios passed; no fiapx-scenario-* bucket left` (118 s); 3 `db/create-database.sql is exactly what the migrations generate`; 4 smoke rc 0 (10 s); 5 `6 identity checks passed`; 6 `--force-recreate identity storage-init api` rc 0 (39 s); 7 smoke rc 0 (10 s); 8 `6 identity checks passed`; then `down -v` rc 0.
+- **Gotcha.** `clean-appledouble.mjs` cleans its working directory by default; run from `fiap-x-platform` it left `._*` files in the siblings and BuildKit failed on `._ci.yml`. Pass the workspace root. CI is unaffected.
+- **Beyond the design.** The job gains `actions/setup-node@v4` (Node 22), as in `topology`, so the scripts run on the same Node as elsewhere rather than the runner's default.
 
 ---
 
