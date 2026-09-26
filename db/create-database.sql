@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS idx_outbox_pending
         ON outbox (id) WHERE published_at IS NULL;
 
+-- from 1789955000000-IndexProcessingRequestOwnerCreatedAt.ts
+CREATE INDEX IF NOT EXISTS idx_processing_request_owner_created
+        ON processing_request (owner_user_id, created_at DESC, processing_request_id);
+
+DROP INDEX IF EXISTS idx_processing_request_owner;
+
 -- ============================================================
 -- notification-service (schema: notification)
 -- ============================================================

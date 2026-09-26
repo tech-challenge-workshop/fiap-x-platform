@@ -47,12 +47,21 @@ function extractUpStatements(source, file) {
     downStart === -1 ? source.length : downStart,
   );
 
-  const statements = [...upBody.matchAll(/query\(\s*`([\s\S]*?)`\s*\)/g)].map(
-    (match) => match[1].trim(),
-  );
+  // `,?`: a call Prettier wraps onto its own lines ends with a trailing comma.
+  const statements = [
+    ...upBody.matchAll(/query\(\s*`([\s\S]*?)`\s*,?\s*\)/g),
+  ].map((match) => match[1].trim());
 
   if (statements.length === 0) {
     throw new Error(`${file}: up() contains no SQL this script can read`);
+  }
+  // A call the pattern cannot read would otherwise vanish from the output
+  // without a trace, and the script would stop matching the migrations.
+  const calls = (upBody.match(/\.query\(/g) ?? []).length;
+  if (calls !== statements.length) {
+    throw new Error(
+      `${file}: up() makes ${calls} query() calls but only ${statements.length} could be read`,
+    );
   }
   return statements;
 }
