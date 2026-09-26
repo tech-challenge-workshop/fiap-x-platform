@@ -106,12 +106,25 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] Fresh bucket → three rules read back; re-run → all three `already configured`; a two-rule bucket (the S5 state) → upgraded to three
-- [ ] A foreign rule still → exit 1 naming it, configuration intact; the abort rule disabled or at 2 days → rewritten
-- [ ] Full gate passes
+- [x] Fresh bucket → three rules read back; re-run → all three `already configured`; a two-rule bucket (the S5 state) → upgraded to three
+- [x] A foreign rule still → exit 1 naming it, configuration intact; the abort rule disabled or at 2 days → rewritten
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **How the scenarios ran.** Each scenario ran the real `storage/bootstrap.sh` through `docker compose run storage-init -e STORAGE_BUCKET=<scratch bucket>` against the stack's RustFS 1.0.0. A scenario asserts the exit code and the exact output line. It also asserts the read-back rules, sorted by ID and compared as JSON against the three rules the spec requires.
+- **Results.** 27 of 27 assertions passed:
+  - A fresh bucket gets `created`, then `… and abort of incomplete uploads configured`, and reads back exactly three rules.
+  - A re-run prints all three `already configured` lines, does not rewrite, and leaves the configuration unchanged.
+  - A bucket carrying only the S5 pair is upgraded to the three rules.
+  - A foreign rule `someone-elses-rule` exits 1 with `… has 1 lifecycle rule(s) this bootstrap does not own (IDs: someone-elses-rule); refusing to overwrite them`, and the configuration stays byte-identical.
+  - An abort rule that is `Disabled`, at 2 days, or narrowed to `sources/` is rewritten to the required rule.
+- **Discrimination.** The same scenarios run against the pre-T2 bootstrap (`git show HEAD:storage/bootstrap.sh`, mounted over `/bootstrap.sh`) fail 16 assertions.
+- **Read-back filter.** RustFS reads `Filter.Prefix: ""` back as `""`, so the abort check requires the whole-bucket filter as well as `Enabled` and 1 day.
+- **Full gate.** Ran with the port overrides. `config -q` and `up --build -d --wait` pass, every service is healthy, and `storage-init` exits 0. It upgraded the live `fiapx` bucket, left in the S5 state by T1's run, from `expire-sources expire-zips` to `expire-sources expire-zips abort-incomplete-uploads`.
+- **Open item (L-005).** The scenario harness is not versioned in the repository. No task names a location for it, so it ran from a scratch file.
 
 ---
 
