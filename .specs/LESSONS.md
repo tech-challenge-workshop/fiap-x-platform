@@ -116,6 +116,18 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: spec.md Edge Cases (restart); validation.md spec-precision note 2
 - last seen: 2026-09-26T04:47:15Z
 
+### L-018 - Scenario harnesses used to prove a task must be versioned and run by the gate, or later regressions pass green.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `gate` · harmful: 0
+- features: upload-download
+- evidence: storage/bootstrap.sh:73 (gate)
+- last seen: 2026-09-26T06:41:54Z
+
+### L-019 - When the smoke switches to a new read path, re-assert the link to the specific record the old path proved, not just the shape of the result.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `smoke` · harmful: 0
+- features: upload-download
+- evidence: scripts/smoke-local-integration.mjs:507 (smoke)
+- last seen: 2026-09-26T06:41:54Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
