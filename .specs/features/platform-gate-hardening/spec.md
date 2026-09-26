@@ -203,29 +203,29 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Design | In Design |
-| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Design | In Design |
-| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Design | In Design |
-| GATE-04 | P2: Database script drift check (V10, V37) | Design | In Design |
-| GATE-05 | P2: Script includes spec B's index | Design | In Design |
-| GATE-06 | P3: Storage-write check reads every script (V37) | Design | In Design |
-| GATE-07 | P4: Download tied to the request's archive (V35) | Design | In Design |
-| GATE-08 | P4: Deliveries counted by the right id (V16) | Design | In Design |
-| GATE-09 | P4: Exact delivery sentence (V17) | Design | In Design |
-| GATE-10 | P4: Exactly one object at the exact key (V18) | Design | In Design |
-| GATE-11 | P5: `main()` runs every step (V14) | Design | In Design |
-| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Design | In Design |
-| GATE-13 | P6: `sub` stable across an identity recreate (V24) | Design | In Design |
-| GATE-14 | P6: `check-identity.mjs` (V25) | Design | In Design |
-| GATE-15 | P7: Spec B's fixes on the real stack | Design | In Design |
-| GATE-16 | P8: Processing failure end to end (V8) | Design | In Design |
-| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Design | In Design |
+| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Tasks | In Tasks |
+| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Tasks | In Tasks |
+| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Tasks | In Tasks |
+| GATE-04 | P2: Database script drift check (V10, V37) | Tasks | In Tasks |
+| GATE-05 | P2: Script includes spec B's index | Tasks | In Tasks |
+| GATE-06 | P3: Storage-write check reads every script (V37) | Tasks | In Tasks |
+| GATE-07 | P4: Download tied to the request's archive (V35) | Tasks | In Tasks |
+| GATE-08 | P4: Deliveries counted by the right id (V16) | Tasks | In Tasks |
+| GATE-09 | P4: Exact delivery sentence (V17) | Tasks | In Tasks |
+| GATE-10 | P4: Exactly one object at the exact key (V18) | Tasks | In Tasks |
+| GATE-11 | P5: `main()` runs every step (V14) | Tasks | In Tasks |
+| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Tasks | In Tasks |
+| GATE-13 | P6: `sub` stable across an identity recreate (V24) | Tasks | In Tasks |
+| GATE-14 | P6: `check-identity.mjs` (V25) | Tasks | In Tasks |
+| GATE-15 | P7: Spec B's fixes on the real stack | Tasks | In Tasks |
+| GATE-16 | P8: Processing failure end to end (V8) | Tasks | In Tasks |
+| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Tasks | In Tasks |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 17 total, 0 mapped to tasks, 17 unmapped ⚠️ (mapped in Tasks)
+**Coverage:** 17 total, 17 mapped to tasks, 0 unmapped
 
 ---
 
