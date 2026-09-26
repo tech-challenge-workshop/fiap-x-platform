@@ -141,19 +141,28 @@ function dockerCompose(args, input) {
 }
 
 // A rejected request must leave nothing under its archive prefix.
-function assertNoArchiveListing(id, listing) {
-  if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
+function assertNoArchiveListing(id, keys) {
+  if (keys.length > 0) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${keys.join('\n')}`);
 }
 
-// Keys under the request's archive prefix, one per line; empty when there are
-// none (aws-cli prints "None" for an empty listing in text output).
+// GATE-10: the request's prefix must hold exactly one object, at exactly the
+// key the Catalog reported, so an archive written elsewhere or twice fails.
+function assertArchiveObject(id, zipKey, keys) {
+  if (JSON.stringify(keys) !== JSON.stringify([zipKey])) {
+    throw new Error(`Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found ${JSON.stringify(keys)}`);
+  }
+}
+
+// The keys under the request's archive prefix, with the id whose prefix was
+// listed; none when the prefix is empty (aws-cli prints "None" for an empty
+// listing in text output).
 function listArchives(id) {
   const keys = dockerCompose([
     'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
     's3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`,
     '--query', 'Contents[].Key', '--output', 'text',
   ]).trim();
-  return keys === 'None' ? '' : keys.split(/\s+/).join('\n');
+  return { id, keys: keys === 'None' ? [] : keys.split(/\s+/) };
 }
 
 // The three lifecycle rules storage/bootstrap.sh owns, written here literally
@@ -240,14 +249,14 @@ function assertSingleDelivery(id, deliveries) {
 }
 
 // The HTTP view returns one record, so it cannot show a duplicate; the count
-// comes from the Notification schema. The id travels as a psql variable,
-// never as SQL text.
+// comes from the Notification schema, with the id it was counted for. The id
+// travels as a psql variable, never as SQL text.
 function countDeliveries(id) {
   const out = dockerCompose(
     ['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`],
     "SELECT count(*) FROM notification.delivery_record WHERE processing_request_id = :'id';\n",
   );
-  return Number(out.trim());
+  return { id, count: Number(out.trim()) };
 }
 
 // The bucket must refuse a request that carries no credentials (RM-01 AC3).
@@ -682,9 +691,10 @@ async function downloadAs(user, step, id) {
   return { status: res.status, body: res.text };
 }
 
-// Waits until the request is terminal and returns it whichever way it ended;
-// the caller decides which ending was expected. A request still in flight at
-// the deadline fails naming the status it was last seen in.
+// Waits until the request is terminal and returns it whichever way it ended,
+// with `id` taken from the record itself; the caller decides which ending was
+// expected. A request still in flight at the deadline fails naming the status
+// it was last seen in.
 async function waitForTerminalStatus(id) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let observed;
@@ -695,7 +705,7 @@ async function waitForTerminalStatus(id) {
     }
 
     const body = await res.json();
-    if (body.status === 'COMPLETED' || body.status === 'FAILED') return body;
+    if (body.status === 'COMPLETED' || body.status === 'FAILED') return { id: body.processingRequestId, ...body };
     observed = body.status;
     await sleep(POLL_INTERVAL_MS);
   }
@@ -706,11 +716,16 @@ function describe(request) {
   return request.failureCode ? `${request.status} (${request.failureCode})` : request.status;
 }
 
+// The delivery record, with `id` taken from the record's own
+// processingRequestId.
 async function waitForNotificationDelivery(id) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const res = await fetch(`${NOTIFICATION_URL}/local/deliveries/${id}`);
-    if (res.status === 200) return await res.json();
+    if (res.status === 200) {
+      const record = await res.json();
+      return { id: record.processingRequestId, ...record };
+    }
     if (res.status === 404) {
       await sleep(POLL_INTERVAL_MS);
       continue;
@@ -725,6 +740,15 @@ async function waitForNotificationDelivery(id) {
 function observed(ctx, key) {
   if (ctx[key] === undefined) throw new Error(`Nothing was observed for ${key}; the step that observes it did not run`);
   return ctx[key];
+}
+
+// GATE-08, GATE-10: every observation carries the id it was taken for, and a
+// check judges its value only once that id is the one under test (ctx[idKey]).
+function observedFor(ctx, key, idKey) {
+  const observation = observed(ctx, key);
+  const expected = observed(ctx, idKey);
+  if (observation.id !== expected) throw new Error(`${key} observed for ${observation.id}, expected ${expected}`);
+  return observation;
 }
 
 // The smoke is this ordered list and nothing else. Each step may observe the
@@ -840,26 +864,38 @@ export const SMOKE_STEPS = [
     observe: async (ctx) => {
       ctx.completed = await waitForTerminalStatus(ctx.id);
     },
-    check: (ctx) => assertCompleted(observed(ctx, 'id'), observed(ctx, 'completed')),
+    check: (ctx) => assertCompleted(observed(ctx, 'id'), observedFor(ctx, 'completed', 'id')),
   },
   {
     name: 'key scope',
-    check: (ctx) => assertArchiveKeyScoped(observed(ctx, 'id'), observed(ctx, 'completed').zipStorageKey),
+    check: (ctx) => assertArchiveKeyScoped(observed(ctx, 'id'), observedFor(ctx, 'completed', 'id').zipStorageKey),
     report: (ctx) => `Catalog reached COMPLETED for ${ctx.id} with archive ${ctx.completed.zipStorageKey}`,
+  },
+  {
+    name: 'archive object',
+    observe: (ctx) => {
+      ctx.archiveObject = listArchives(ctx.id);
+    },
+    check: (ctx) => assertArchiveObject(
+      observed(ctx, 'id'),
+      observedFor(ctx, 'completed', 'id').zipStorageKey,
+      observedFor(ctx, 'archiveObject', 'id').keys,
+    ),
+    report: (ctx) => `Exactly one object exists under zips/${ctx.id}/: ${ctx.completed.zipStorageKey}`,
   },
   {
     name: 'rejection',
     observe: async (ctx) => {
       ctx.rejected = await waitForTerminalStatus(ctx.rejectedId);
     },
-    check: (ctx) => assertRejected(observed(ctx, 'rejectedId'), observed(ctx, 'rejected')),
+    check: (ctx) => assertRejected(observed(ctx, 'rejectedId'), observedFor(ctx, 'rejected', 'rejectedId')),
     report: (ctx) => `Catalog reached FAILED (FORMATO_INVALIDO) for ${ctx.rejectedId}`,
   },
   {
     name: 'archive count',
     // The bytes are the ones the download URL served to the host.
     check: (ctx) => {
-      const zipKey = observed(ctx, 'completed').zipStorageKey;
+      const zipKey = observedFor(ctx, 'completed', 'id').zipStorageKey;
       ctx.frames = checkArchiveBytes(zipKey, observed(ctx, 'download').fetched.bytes);
     },
     report: (ctx) =>
@@ -870,12 +906,15 @@ export const SMOKE_STEPS = [
     observe: (ctx) => {
       ctx.rejectedListing = listArchives(ctx.rejectedId);
     },
-    check: (ctx) => assertNoArchiveListing(observed(ctx, 'rejectedId'), observed(ctx, 'rejectedListing')),
+    check: (ctx) => assertNoArchiveListing(observed(ctx, 'rejectedId'), observedFor(ctx, 'rejectedListing', 'rejectedId').keys),
     report: (ctx) => `No archive exists under zips/${ctx.rejectedId}/`,
   },
   {
     name: 'video delivery',
-    observe: (ctx) => waitForNotificationDelivery(ctx.id),
+    observe: async (ctx) => {
+      ctx.videoDelivery = await waitForNotificationDelivery(ctx.id);
+    },
+    check: (ctx) => observedFor(ctx, 'videoDelivery', 'id'),
     report: (ctx) => `Notification delivered for ${ctx.id}`,
   },
   {
@@ -883,14 +922,14 @@ export const SMOKE_STEPS = [
     observe: async (ctx) => {
       ctx.delivery = await waitForNotificationDelivery(ctx.rejectedId);
     },
-    check: (ctx) => assertDeliverySentence(observed(ctx, 'rejectedId'), observed(ctx, 'delivery')),
+    check: (ctx) => assertDeliverySentence(observed(ctx, 'rejectedId'), observedFor(ctx, 'delivery', 'rejectedId')),
   },
   {
     name: 'single delivery',
     observe: (ctx) => {
       ctx.deliveries = countDeliveries(ctx.rejectedId);
     },
-    check: (ctx) => assertSingleDelivery(observed(ctx, 'rejectedId'), observed(ctx, 'deliveries')),
+    check: (ctx) => assertSingleDelivery(observed(ctx, 'rejectedId'), observedFor(ctx, 'deliveries', 'rejectedId').count),
     report: (ctx) => `Notification delivered once for ${ctx.rejectedId}: ${ctx.delivery.failureReason}`,
   },
   {
@@ -989,9 +1028,11 @@ const REQUIRED_STEPS = [
   'bucket lifecycle',
   'video completed',
   'key scope',
+  'archive object',
   'rejection',
   'archive count',
   'no archive',
+  'video delivery',
   'delivery sentence',
   'single delivery',
   'bob request created',
@@ -1020,7 +1061,8 @@ async function selfTest() {
   const videoKey = 'sources/self-test-sub/self-test-video-upload.mp4';
   const objectUrl = `${STORAGE_URL}/${BUCKET}/${videoKey}`;
   const listingUrl = `${STORAGE_URL}/${BUCKET}/`;
-  const listing = '[2026-09-25 12:00:00 UTC] 1.2KiB STANDARD self-test-attempt/frames.zip';
+  // Keys as listArchives reads them under a request's zips/ prefix.
+  const archiveKeys = (requestId) => [`zips/${requestId}/self-test-attempt/frames.zip`];
   const leftover = join(tmpdir(), 'fiapx-smoke-self-test');
   // Literal, not FORMATO_INVALIDO_REASON: a changed constant must fail here too.
   const sentence = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
@@ -1138,8 +1180,8 @@ async function selfTest() {
       `Delivery for ${id}: expected exactly 1 record, found 0`],
     ['2 deliveries', () => assertSingleDelivery(id, 2),
       `Delivery for ${id}: expected exactly 1 record, found 2`],
-    ['archive present for the rejected request', () => assertNoArchiveListing(id, listing),
-      `Rejected request ${id} left an archive under zips/${id}/:\n${listing}`],
+    ['archive present for the rejected request', () => assertNoArchiveListing(id, archiveKeys(id)),
+      `Rejected request ${id} left an archive under zips/${id}/:\n${archiveKeys(id).join('\n')}`],
     ['anonymous GET of the object answered 200', () => assertAnonymousRefused(objectUrl, 200),
       `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
     ['anonymous GET of the listing answered 200', () => assertAnonymousRefused(listingUrl, 200),
@@ -1268,7 +1310,7 @@ async function selfTest() {
     ['download issued with a future expiresAt, URL answered 200', () => assertDownloadIssued(id, downloaded())],
     ['rejected request FAILED (FORMATO_INVALIDO)', () => assertRejected(id, { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' })],
     ['1 delivery', () => assertSingleDelivery(id, 1)],
-    ['no archive for the rejected request', () => assertNoArchiveListing(id, '')],
+    ['no archive for the rejected request', () => assertNoArchiveListing(id, [])],
     ['anonymous GET refused with 403', () => assertAnonymousRefused(objectUrl, 403)],
     ['temp directory gone', () => assertScratchRemoved(leftover, false)],
     ['video request COMPLETED', () => assertCompleted(id, { status: 'COMPLETED', zipStorageKey: zipKey })],
@@ -1330,12 +1372,14 @@ async function selfTest() {
     reuse: reuse({ status: 409, body: reusedBody }),
     id,
     rejectedId,
-    completed: { status: 'COMPLETED', zipStorageKey: zipKey },
-    rejected: { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' },
+    completed: { id, status: 'COMPLETED', zipStorageKey: zipKey },
+    archiveObject: { id, keys: [zipKey] },
+    rejected: { id: rejectedId, status: 'FAILED', failureCode: 'FORMATO_INVALIDO' },
     download: downloaded(),
-    rejectedListing: '',
-    delivery: { status: 'FAILED', failureReason: sentence },
-    deliveries: 1,
+    rejectedListing: { id: rejectedId, keys: [] },
+    videoDelivery: { id, status: 'COMPLETED', zipStorageKey: zipKey },
+    delivery: { id: rejectedId, status: 'FAILED', failureReason: sentence },
+    deliveries: { id: rejectedId, count: 1 },
     bobUpload,
     bobId,
     aliceList: lists.aliceList,
@@ -1362,12 +1406,40 @@ async function selfTest() {
       `Part 1 URL for the fixture targets ${nearOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
     ['upload confirmed', { rejectedUpload: upload('self-test-non-video-upload', rejectedId, { confirmation: { status: 200, body: { processingRequestId: rejectedId, status: 'RECEIVED' } } }) },
       `alice's confirmation of the upload of the non-video returned 200, expected 201`],
-    ['video completed', { completed: { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } },
+    ['video completed', { completed: { id, status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } },
       `Request ${id} for the video: expected COMPLETED, observed FAILED (PROCESSAMENTO_FALHOU)`],
-    ['key scope', { completed: { status: 'COMPLETED', zipStorageKey: 'zips/another-request/attempt/frames.zip' } },
+    ['key scope', { completed: { id, status: 'COMPLETED', zipStorageKey: 'zips/another-request/attempt/frames.zip' } },
       `Catalog reported zipStorageKey "zips/another-request/attempt/frames.zip", expected a key under zips/${id}/`],
-    ['rejection', { rejected: { status: 'COMPLETED', zipStorageKey: zipKey } },
+    ['rejection', { rejected: { id: rejectedId, status: 'COMPLETED', zipStorageKey: zipKey } },
       `Request ${rejectedId} for the non-video: expected FAILED (FORMATO_INVALIDO), observed COMPLETED`],
+    // GATE-08, GATE-10: an observation taken for another request is refused
+    // before its value is judged, even when that value would pass.
+    ['video completed', { completed: { ...good.completed, id: rejectedId } },
+      `completed observed for ${rejectedId}, expected ${id}`],
+    ['key scope', { completed: { ...good.completed, id: rejectedId } },
+      `completed observed for ${rejectedId}, expected ${id}`],
+    ['archive count', { completed: { ...good.completed, id: rejectedId } },
+      `completed observed for ${rejectedId}, expected ${id}`],
+    ['rejection', { rejected: { ...good.rejected, id } },
+      `rejected observed for ${id}, expected ${rejectedId}`],
+    ['no archive', { rejectedListing: { id, keys: [] } },
+      `rejectedListing observed for ${id}, expected ${rejectedId}`],
+    ['video delivery', { videoDelivery: { ...good.videoDelivery, id: rejectedId } },
+      `videoDelivery observed for ${rejectedId}, expected ${id}`],
+    ['delivery sentence', { delivery: { ...good.delivery, id } },
+      `delivery observed for ${id}, expected ${rejectedId}`],
+    ['single delivery', { deliveries: { id, count: 1 } },
+      `deliveries observed for ${id}, expected ${rejectedId}`],
+    ['single delivery', { deliveries: { id: `${rejectedId}-2`, count: 1 } },
+      `deliveries observed for ${rejectedId}-2, expected ${rejectedId}`],
+    ['archive object', { archiveObject: { id: rejectedId, keys: [zipKey] } },
+      `archiveObject observed for ${rejectedId}, expected ${id}`],
+    ['archive object', { archiveObject: { id, keys: [] } },
+      `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found []`],
+    ['archive object', { archiveObject: { id, keys: [zipKey, `zips/${id}/another-attempt/frames.zip`] } },
+      `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found ${JSON.stringify([zipKey, `zips/${id}/another-attempt/frames.zip`])}`],
+    ['archive object', { archiveObject: { id, keys: [`${zipKey}.tmp`] } },
+      `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found ${JSON.stringify([`${zipKey}.tmp`])}`],
     ['archive count', { download: downloaded({ fetched: { status: 200, bytes: syntheticZip(7) } }) },
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
     ['download issued', { download: downloaded({ issued: { status: 200, body: { expiresAt: futureExpiry } } }) },
@@ -1384,11 +1456,11 @@ async function selfTest() {
       lifecycleFound(withAbortRule({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } }))],
     ['bucket lifecycle', { lifecycle: lifecycleOf(withAbortRule({ Expiration: { Days: 30 } })) },
       lifecycleFound(withAbortRule({ Expiration: { Days: 30 } }))],
-    ['no archive', { rejectedListing: listing },
-      `Rejected request ${rejectedId} left an archive under zips/${rejectedId}/:\n${listing}`],
-    ['delivery sentence', { delivery: { status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' } },
+    ['no archive', { rejectedListing: { id: rejectedId, keys: archiveKeys(rejectedId) } },
+      `Rejected request ${rejectedId} left an archive under zips/${rejectedId}/:\n${archiveKeys(rejectedId).join('\n')}`],
+    ['delivery sentence', { delivery: { id: rejectedId, status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' } },
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
-    ['single delivery', { deliveries: 2 },
+    ['single delivery', { deliveries: { id: rejectedId, count: 2 } },
       `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
     ['confirmation replay', { replay: { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, totalAfterReplay: 4 },
       `Replay created a request: ${replayCall} returned 201, expected 200`],
