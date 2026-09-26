@@ -25,6 +25,19 @@ const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
 // STORAGE_HOST_PORT is the variable compose.yaml publishes storage on.
 const STORAGE_URL = process.env.STORAGE_URL ?? `http://localhost:${process.env.STORAGE_HOST_PORT ?? 9000}`;
+// UPL-15 AC2: every URL the API signs must name this origin, the storage port
+// published on the host, or the client cannot use it.
+const STORAGE_ORIGIN = new URL(STORAGE_URL).origin;
+
+// The two sources every run uploads through the API (UPL-17 AC1, AC4): the
+// committed fixture, and a non-video under an .mp4 name that the Worker must
+// reject. Neither reaches storage any other way (UPL-18).
+const FIXTURE_PATH = join(REPO_ROOT, 'fixtures', 'sample-8s.mp4');
+const NOT_A_VIDEO_FILE = {
+  bytes: Buffer.from('This is plain text under an .mp4 name. The Worker must reject it.\n'),
+  fileName: 'not-a-video.mp4',
+  contentType: 'video/mp4',
+};
 
 const HEALTH_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS ?? 30000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 60000);
@@ -261,43 +274,44 @@ async function waitForApiHealth() {
   throw new Error('API health check timed out');
 }
 
-// The seed is idempotent (fixed keys), so running it here costs two uploads
-// and means the smoke never depends on someone having seeded first. It prints
-// the video's key, then the key of an object that is not a video.
-function seedSources() {
-  const result = spawnSync(process.execPath, [join(SCRIPTS_DIR, 'seed-source-video.mjs')], {
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(`Seeding the source objects failed:\n${(result.stderr || result.stdout).trim()}`);
-  }
-  const [videoKey, notAVideoKey] = result.stdout.trim().split('\n');
-  if (!videoKey || !notAVideoKey) throw new Error(`Seed script printed ${JSON.stringify(result.stdout)}, expected two storage keys`);
-  return { videoKey, notAVideoKey };
-}
-
-// AUTH-17 AC1: creating a request without a token must be refused with 401.
-// A 2xx means the API let an anonymous caller in; any other status is named.
-function assertAnonymousCreateRefused(status) {
-  const call = `POST ${API_URL}/processing-requests`;
+// AUTH-17 AC1: a call without a token must be refused with 401. A 2xx means
+// the API let an anonymous caller in; any other status is named.
+function assertAnonymousCallRefused(call, status) {
   if (status >= 200 && status < 300) {
-    throw new Error(`Anonymous creation accepted: ${call} without a token returned ${status}; the API must refuse it with 401`);
+    throw new Error(`Anonymous call accepted: ${call} without a token returned ${status}; the API must refuse it with 401`);
   }
   if (status !== 401) {
     throw new Error(`Anonymous ${call} without a token returned ${status}, expected 401`);
   }
 }
 
-// The same creation call as the authenticated one, with no Authorization
-// header. Only the status is observed; the check judges it.
-async function anonymousCreateStatus(sourceStorageKey) {
-  const res = await fetch(`${API_URL}/processing-requests`, {
+// Creation is now two calls, starting an upload and confirming it, so both
+// are made without a token, and so is a read. Each carries a body and headers
+// a signed-in caller could send, so only the missing token can refuse it.
+const ANONYMOUS_CALLS = [
+  {
+    label: `POST ${API_URL}/uploads`,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceStorageKey }),
-  });
-  await res.arrayBuffer();
-  return res.status;
+    path: () => '/uploads',
+    body: JSON.stringify({ fileName: 'clip.mp4', contentType: 'video/mp4', sizeBytes: 1 }),
+  },
+  { label: `POST ${API_URL}/uploads/:uploadId/complete`, method: 'POST', path: () => `/uploads/${randomUUID()}/complete` },
+  { label: `GET ${API_URL}/processing-requests`, method: 'GET', path: () => '/processing-requests' },
+];
+
+// Only the statuses are observed, by call; the check judges them.
+async function anonymousApiStatuses() {
+  const statuses = {};
+  for (const call of ANONYMOUS_CALLS) {
+    const res = await fetch(`${API_URL}${call.path()}`, {
+      method: call.method,
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `smoke-anonymous-${randomUUID()}` },
+      body: call.body,
+    });
+    await res.arrayBuffer();
+    statuses[call.label] = res.status;
+  }
+  return statuses;
 }
 
 // One token per user, fetched when a step first needs it. refresh() replaces
@@ -344,52 +358,134 @@ function fetchAs(user, step, path, init = {}) {
   });
 }
 
-function createRequestAs(user, step, sourceStorageKey) {
-  return fetchAs(user, step, '/processing-requests', {
+// A body as JSON when it is JSON, otherwise as the text it is.
+function parseBody(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+// UPL-17 AC7: S5's creation by storage key is gone. Nest answers a route it
+// does not have with 404 and this message, so a 404 with another message, a
+// route that still exists and refuses, fails as well.
+const OLD_CREATE_GONE = 'Cannot POST /processing-requests';
+
+function assertOldCreateGone(answer) {
+  const call = `alice's POST ${API_URL}/processing-requests`;
+  if (answer.status >= 200 && answer.status < 300) {
+    throw new Error(`Old creation route still creates: ${call} returned ${answer.status}; a request must be created only by confirming an upload`);
+  }
+  if (answer.status !== 404) throw new Error(`${call} returned ${answer.status}, expected 404: the route must be gone`);
+  if (answer.body?.message !== OLD_CREATE_GONE) {
+    throw new Error(`${call} returned 404 with ${JSON.stringify(answer.body)}, expected the unknown-route message ${JSON.stringify(OLD_CREATE_GONE)}`);
+  }
+}
+
+// The S5 creation call, with alice's token. The answer is returned unjudged.
+async function oldCreateAs(user, step) {
+  const res = await fetchAs(user, step, '/processing-requests', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceStorageKey }),
+    body: JSON.stringify({ sourceStorageKey: 'sources/sample-8s.mp4' }),
   });
+  return { status: res.status, body: parseBody(res.text) };
 }
 
-// The owner is the token's subject (AUTH-17 AC2): the body carries no
-// ownerUserId.
-async function postProcessingRequest(sourceStorageKey) {
-  const res = await createRequestAs('alice', 'create requests', sourceStorageKey);
-
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`Create request failed: ${res.status}`);
+// PUTs one part's bytes to its presigned URL from the host. A URL the host
+// cannot reach, one signed for storage:9000 inside the network, is recorded
+// as such, so the check names its host instead of the run dying on a fetch
+// error.
+async function putPart(url, bytes) {
+  try {
+    const res = await fetch(url, { method: 'PUT', body: bytes });
+    await res.arrayBuffer();
+    return res.status;
+  } catch (err) {
+    return `unreachable (${err.cause?.code ?? err.message})`;
   }
-
-  const body = JSON.parse(res.text);
-  if (!body.processingRequestId) {
-    throw new Error('Create response missing processingRequestId');
-  }
-
-  return body.processingRequestId;
 }
 
-// A creation must answer 201 with the new id; the id is returned for the
-// steps that follow.
-function assertCreated(user, created) {
-  const call = `${user}'s POST ${API_URL}/processing-requests`;
-  if (created.status !== 201) throw new Error(`${call} returned ${created.status}, expected 201`);
-  const id = created.body?.processingRequestId;
+// Starts an upload as user and PUTs each part's slice to its URL, as a client
+// on the host would. Every answer is returned unjudged: the step's check
+// judges it.
+async function uploadThroughApi(user, step, { bytes, fileName, contentType }) {
+  const res = await fetchAs(user, step, '/uploads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName, contentType, sizeBytes: bytes.length }),
+  });
+  const start = { status: res.status, body: parseBody(res.text) };
+  const puts = [];
+  if (start.status === 201) {
+    const { partSize } = start.body;
+    for (const { partNumber, url } of start.body.parts ?? []) {
+      const slice = bytes.subarray((partNumber - 1) * partSize, partNumber * partSize);
+      puts.push({ partNumber, url, status: await putPart(url, slice) });
+    }
+  }
+  return { start, puts };
+}
+
+// Confirms an upload with the Idempotency-Key. The answer is returned
+// unjudged.
+async function confirm(user, step, uploadId, key) {
+  const res = await fetchAs(user, step, `/uploads/${uploadId}/complete`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+  });
+  return { status: res.status, body: parseBody(res.text) };
+}
+
+// One upload through the API and its first confirmation, with a key of its
+// own, kept with the answers so a later step can replay it.
+async function uploadAndConfirm(user, step, file) {
+  const upload = await uploadThroughApi(user, step, file);
+  const key = `smoke-${randomUUID()}`;
+  const confirmation = await confirm(user, step, upload.start.body?.uploadId, key);
+  return { ...upload, key, confirmation };
+}
+
+// UPL-15 AC2 and UPL-17 AC1: starting answers 201 with an uploadId and part
+// URLs, every URL names the storage port published on the host, and storage
+// accepts each part from the host. A URL signed for any other host fails
+// naming it, before its PUT is judged.
+function assertUploaded(user, what, upload) {
+  const call = `${user}'s POST ${API_URL}/uploads for ${what}`;
+  const { status, body } = upload.start;
+  if (status !== 201) throw new Error(`${call} returned ${status}, expected 201`);
+  if (typeof body?.uploadId !== 'string' || !Array.isArray(body.parts) || body.parts.length === 0) {
+    throw new Error(`${call} returned 201 without an uploadId and part URLs`);
+  }
+  for (const put of upload.puts) {
+    const origin = new URL(put.url).origin;
+    if (origin !== STORAGE_ORIGIN) {
+      throw new Error(`Part ${put.partNumber} URL for ${what} targets ${origin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`);
+    }
+    if (put.status !== 200) {
+      throw new Error(`PUT of part ${put.partNumber} for ${what} to ${origin} returned ${put.status}, expected 200`);
+    }
+  }
+}
+
+// The first confirmation creates the request: 201, its id, RECEIVED. The
+// owner is the token's subject (AUTH-17 AC2): nothing in the call names one.
+// The id is returned for the steps that follow.
+function assertConfirmed(user, what, confirmation) {
+  const call = `${user}'s confirmation of the upload of ${what}`;
+  if (confirmation.status !== 201) throw new Error(`${call} returned ${confirmation.status}, expected 201`);
+  const id = confirmation.body?.processingRequestId;
   if (typeof id !== 'string' || id === '') throw new Error(`${call} returned 201 without a processingRequestId`);
+  if (confirmation.body.status !== 'RECEIVED') {
+    throw new Error(`${call} returned 201 with status ${JSON.stringify(confirmation.body.status)}, expected "RECEIVED"`);
+  }
   return id;
 }
 
-// Creates a request with the user's token. The answer is returned, not
-// judged: the step's check does that.
-async function createAs(user, step, sourceStorageKey) {
-  const res = await createRequestAs(user, step, sourceStorageKey);
-  let body;
-  try {
-    body = JSON.parse(res.text);
-  } catch {
-    body = res.text;
-  }
-  return { status: res.status, body };
+// A source's key, from the path of one of its part URLs: /<bucket>/<key>.
+function sourceKeyOf(partUrl) {
+  return decodeURIComponent(new URL(partUrl).pathname).slice(`/${BUCKET}/`.length);
 }
 
 // The API caps pageSize at 100, so a list is read page by page until every
@@ -524,9 +620,43 @@ export const SMOKE_STEPS = [
     observe: () => waitForApiHealth(),
   },
   {
-    name: 'seed',
-    observe: (ctx) => Object.assign(ctx, seedSources()),
-    report: (ctx) => `Seeded source video at ${ctx.videoKey} and a non-video at ${ctx.notAVideoKey}`,
+    name: 'anonymous refused',
+    observe: async (ctx) => {
+      ctx.anonymousApi = await anonymousApiStatuses();
+    },
+    check: (ctx) => {
+      const statuses = observed(ctx, 'anonymousApi');
+      for (const { label } of ANONYMOUS_CALLS) assertAnonymousCallRefused(label, statuses[label]);
+    },
+    report: () => `API refused anonymous POST /uploads, POST /uploads/:uploadId/complete and GET /processing-requests (401)`,
+  },
+  {
+    name: 'old create gone',
+    observe: async (ctx) => {
+      ctx.oldCreate = await oldCreateAs('alice', 'old create gone');
+    },
+    check: (ctx) => assertOldCreateGone(observed(ctx, 'oldCreate')),
+    report: () => `API no longer creates by storage key: alice's POST /processing-requests answered 404 (${OLD_CREATE_GONE})`,
+  },
+  {
+    name: 'upload confirmed',
+    observe: async (ctx) => {
+      const fixture = { bytes: readFileSync(FIXTURE_PATH), fileName: 'sample-8s.mp4', contentType: 'video/mp4' };
+      ctx.videoUpload = await uploadAndConfirm('alice', 'upload confirmed', fixture);
+      ctx.rejectedUpload = await uploadAndConfirm('alice', 'upload confirmed', NOT_A_VIDEO_FILE);
+    },
+    check: (ctx) => {
+      const video = observed(ctx, 'videoUpload');
+      const nonVideo = observed(ctx, 'rejectedUpload');
+      assertUploaded('alice', 'the fixture', video);
+      ctx.id = assertConfirmed('alice', 'the fixture', video.confirmation);
+      assertUploaded('alice', 'the non-video', nonVideo);
+      ctx.rejectedId = assertConfirmed('alice', 'the non-video', nonVideo.confirmation);
+      ctx.videoKey = sourceKeyOf(video.puts[0].url);
+    },
+    report: (ctx) =>
+      `Uploaded the fixture as alice through ${ctx.videoUpload.puts.length} part URL(s) on ${STORAGE_ORIGIN} and confirmed it: processing request ${ctx.id}\n`
+      + `Uploaded the non-video as alice and confirmed it: processing request ${ctx.rejectedId}`,
   },
   {
     name: 'anonymous access',
@@ -538,22 +668,6 @@ export const SMOKE_STEPS = [
       for (const url of anonymousUrls(observed(ctx, 'videoKey'))) assertAnonymousRefused(url, statuses[url]);
     },
     report: (ctx) => `Storage refused anonymous GET of ${BUCKET}/${ctx.videoKey} and of the ${BUCKET} listing (403)`,
-  },
-  {
-    name: 'anonymous refused',
-    observe: async (ctx) => {
-      ctx.anonymousCreate = await anonymousCreateStatus(ctx.videoKey);
-    },
-    check: (ctx) => assertAnonymousCreateRefused(observed(ctx, 'anonymousCreate')),
-    report: () => `API refused an anonymous POST /processing-requests (401)`,
-  },
-  {
-    name: 'create requests',
-    observe: async (ctx) => {
-      ctx.id = await postProcessingRequest(ctx.videoKey);
-      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey);
-    },
-    report: (ctx) => `Created processing request ${ctx.id} as alice\nCreated processing request ${ctx.rejectedId} for the non-video as alice`,
   },
   {
     name: 'video completed',
@@ -620,10 +734,12 @@ export const SMOKE_STEPS = [
   {
     name: 'bob request created',
     observe: async (ctx) => {
-      ctx.bobCreate = await createAs('bob', 'bob request created', ctx.notAVideoKey);
+      ctx.bobUpload = await uploadAndConfirm('bob', 'bob request created', NOT_A_VIDEO_FILE);
     },
     check: (ctx) => {
-      ctx.bobId = assertCreated('bob', observed(ctx, 'bobCreate'));
+      const upload = observed(ctx, 'bobUpload');
+      assertUploaded('bob', 'the non-video', upload);
+      ctx.bobId = assertConfirmed('bob', 'the non-video', upload.confirmation);
     },
     report: (ctx) => `Created processing request ${ctx.bobId} as bob`,
   },
@@ -692,8 +808,10 @@ function syntheticZip(entries) {
 // The steps --self-test requires by name. Removing one from SMOKE_STEPS, or
 // its check, fails the self-test naming it.
 const REQUIRED_STEPS = [
-  'anonymous access',
   'anonymous refused',
+  'old create gone',
+  'upload confirmed',
+  'anonymous access',
   'video completed',
   'key scope',
   'rejection',
@@ -723,13 +841,19 @@ async function runStepCheck(name, ctx) {
 async function selfTest() {
   const zipKey = 'zips/self-test-request/self-test-attempt/frames.zip';
   const id = 'self-test-request';
-  const objectUrl = `${STORAGE_URL}/${BUCKET}/sources/sample-8s.mp4`;
+  const videoKey = 'sources/self-test-sub/self-test-video-upload.mp4';
+  const objectUrl = `${STORAGE_URL}/${BUCKET}/${videoKey}`;
   const listingUrl = `${STORAGE_URL}/${BUCKET}/`;
   const listing = '[2026-09-25 12:00:00 UTC] 1.2KiB STANDARD self-test-attempt/frames.zip';
   const leftover = join(tmpdir(), 'fiapx-smoke-self-test');
   // Literal, not FORMATO_INVALIDO_REASON: a changed constant must fail here too.
   const sentence = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
-  const createCall = `POST ${API_URL}/processing-requests`;
+  const uploadsCall = `POST ${API_URL}/uploads`;
+  const confirmCall = `POST ${API_URL}/uploads/:uploadId/complete`;
+  const readCall = `GET ${API_URL}/processing-requests`;
+  const oldCreateCall = `alice's POST ${API_URL}/processing-requests`;
+  const notFoundBody = { statusCode: 404, message: 'Processing request not found' };
+  const goneBody = { message: 'Cannot POST /processing-requests', error: 'Not Found', statusCode: 404 };
   const rejectedId = 'self-test-rejected';
   const bobId = 'self-test-bob-request';
   const olderAliceId = 'self-test-older-alice-request';
@@ -747,6 +871,25 @@ async function selfTest() {
   const withReason = (failureReason) => lists.aliceList.map((listed) => (
     listed.processingRequestId === rejectedId ? { ...listed, failureReason } : listed));
   const notFound = { status: 404, body: '{"statusCode":404,"message":"Processing request not found"}' };
+  // One upload as the API and storage answer it: one part on the published
+  // storage origin, PUT with 200, confirmed with 201.
+  const partUrl = (uploadId, origin = STORAGE_ORIGIN) =>
+    `${origin}/${BUCKET}/sources/self-test-sub/${uploadId}.mp4?X-Amz-Expires=3600&X-Amz-Signature=self-test`;
+  const upload = (uploadId, processingRequestId, { origin, putStatus = 200, confirmation } = {}) => ({
+    start: {
+      status: 201,
+      body: { uploadId, partSize: 16777216, parts: [{ partNumber: 1, url: partUrl(uploadId, origin) }], expiresAt: '2026-09-26T13:00:00.000Z' },
+    },
+    puts: [{ partNumber: 1, url: partUrl(uploadId, origin), status: putStatus }],
+    key: `smoke-${uploadId}`,
+    confirmation: confirmation ?? { status: 201, body: { processingRequestId, status: 'RECEIVED' } },
+  });
+  const internalOrigin = 'http://storage:9000';
+  // Same port, another host: a URL signed for 127.0.0.1 fails on localhost.
+  const nearOrigin = STORAGE_ORIGIN.replace('localhost', '127.0.0.1');
+  const videoUpload = upload('self-test-video-upload', id);
+  const rejectedUpload = upload('self-test-non-video-upload', rejectedId);
+  const bobUpload = upload('self-test-bob-upload', bobId);
   const lists = {
     aliceIds: [id, rejectedId],
     bobId,
@@ -793,18 +936,40 @@ async function selfTest() {
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['delivery observed COMPLETED', () => assertDeliverySentence(id, { status: 'COMPLETED', failureReason: sentence }),
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed COMPLETED with ${JSON.stringify(sentence)}`],
-    ['anonymous creation answered 201', () => assertAnonymousCreateRefused(201),
-      `Anonymous creation accepted: ${createCall} without a token returned 201; the API must refuse it with 401`],
-    ['anonymous creation answered 500', () => assertAnonymousCreateRefused(500),
-      `Anonymous ${createCall} without a token returned 500, expected 401`],
-    ['anonymous creation answered 403', () => assertAnonymousCreateRefused(403),
-      `Anonymous ${createCall} without a token returned 403, expected 401`],
-    ["bob's creation answered 401", () => assertCreated('bob', { status: 401, body: { statusCode: 401, message: 'Unauthorized' } }),
-      `bob's ${createCall} returned 401, expected 201`],
-    ["bob's creation answered 200", () => assertCreated('bob', { status: 200, body: { processingRequestId: bobId } }),
-      `bob's ${createCall} returned 200, expected 201`],
-    ["bob's creation answered 201 without an id", () => assertCreated('bob', { status: 201, body: { status: 'RECEIVED' } }),
-      `bob's ${createCall} returned 201 without a processingRequestId`],
+    ['anonymous confirmation answered 201', () => assertAnonymousCallRefused(confirmCall, 201),
+      `Anonymous call accepted: ${confirmCall} without a token returned 201; the API must refuse it with 401`],
+    ['anonymous upload start answered 500', () => assertAnonymousCallRefused(uploadsCall, 500),
+      `Anonymous ${uploadsCall} without a token returned 500, expected 401`],
+    ['anonymous upload start answered 403', () => assertAnonymousCallRefused(uploadsCall, 403),
+      `Anonymous ${uploadsCall} without a token returned 403, expected 401`],
+    ['anonymous read answered 200', () => assertAnonymousCallRefused(readCall, 200),
+      `Anonymous call accepted: ${readCall} without a token returned 200; the API must refuse it with 401`],
+    ["bob's confirmation answered 401", () => assertConfirmed('bob', 'the non-video', { status: 401, body: { statusCode: 401, message: 'Unauthorized' } }),
+      `bob's confirmation of the upload of the non-video returned 401, expected 201`],
+    ["bob's confirmation answered 200", () => assertConfirmed('bob', 'the non-video', { status: 200, body: { processingRequestId: bobId, status: 'RECEIVED' } }),
+      `bob's confirmation of the upload of the non-video returned 200, expected 201`],
+    ["bob's confirmation answered 201 without an id", () => assertConfirmed('bob', 'the non-video', { status: 201, body: { status: 'RECEIVED' } }),
+      `bob's confirmation of the upload of the non-video returned 201 without a processingRequestId`],
+    ['a confirmation answered 201 with status RECEIVE', () => assertConfirmed('alice', 'the fixture', { status: 201, body: { processingRequestId: id, status: 'RECEIVE' } }),
+      `alice's confirmation of the upload of the fixture returned 201 with status "RECEIVE", expected "RECEIVED"`],
+    ['old creation route answered 201', () => assertOldCreateGone({ status: 201, body: { processingRequestId: id, status: 'RECEIVED' } }),
+      `Old creation route still creates: ${oldCreateCall} returned 201; a request must be created only by confirming an upload`],
+    ['old creation route answered 400', () => assertOldCreateGone({ status: 400, body: { statusCode: 400, message: 'sourceStorageKey is not allowed' } }),
+      `${oldCreateCall} returned 400, expected 404: the route must be gone`],
+    ['old creation route answered 404 with another message', () => assertOldCreateGone({ status: 404, body: notFoundBody }),
+      `${oldCreateCall} returned 404 with ${JSON.stringify(notFoundBody)}, expected the unknown-route message "Cannot POST /processing-requests"`],
+    ['old creation route answered 404 for a near-miss path', () => assertOldCreateGone({ status: 404, body: { ...goneBody, message: 'Cannot POST /processing-requests/' } }),
+      `${oldCreateCall} returned 404 with ${JSON.stringify({ ...goneBody, message: 'Cannot POST /processing-requests/' })}, expected the unknown-route message "Cannot POST /processing-requests"`],
+    ['part URL signed for the internal host', () => assertUploaded('alice', 'the fixture', upload('u', id, { origin: internalOrigin, putStatus: 'unreachable (ENOTFOUND)' })),
+      `Part 1 URL for the fixture targets ${internalOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    ['part URL signed for another host on the same port', () => assertUploaded('alice', 'the fixture', upload('u', id, { origin: nearOrigin, putStatus: 403 })),
+      `Part 1 URL for the fixture targets ${nearOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    ['part PUT answered 403', () => assertUploaded('alice', 'the fixture', upload('u', id, { putStatus: 403 })),
+      `PUT of part 1 for the fixture to ${STORAGE_ORIGIN} returned 403, expected 200`],
+    ['upload start answered 400', () => assertUploaded('alice', 'the fixture', { start: { status: 400, body: { statusCode: 400, message: 'contentType must be video/mp4 or video/quicktime' } }, puts: [] }),
+      `alice's POST ${API_URL}/uploads for the fixture returned 400, expected 201`],
+    ['upload start answered 201 without part URLs', () => assertUploaded('alice', 'the fixture', { start: { status: 201, body: { uploadId: 'u', partSize: 16777216, parts: [] } }, puts: [] }),
+      `alice's POST ${API_URL}/uploads for the fixture returned 201 without an uploadId and part URLs`],
     ["alice's list holding bob's request", () => assertListsDisjoint({ ...lists, aliceList: [...lists.aliceList, item(bobId)] }),
       `Owner scope leak: alice's list contains bob's request ${bobId}`],
     ["bob's list holding alice's request", () => assertListsDisjoint({ ...lists, bobList: [...lists.bobList, item(id)] }),
@@ -861,10 +1026,23 @@ async function selfTest() {
     ['video request COMPLETED', () => assertCompleted(id, { status: 'COMPLETED', zipStorageKey: zipKey })],
     ['archive key under this request', () => assertArchiveKeyScoped(id, zipKey)],
     ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
-    ['anonymous creation refused with 401', () => assertAnonymousCreateRefused(401)],
-    ["bob's creation answered 201 with an id", () => {
-      const created = assertCreated('bob', { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } });
+    ['anonymous call refused with 401', () => assertAnonymousCallRefused(uploadsCall, 401)],
+    ["bob's confirmation answered 201 with an id", () => {
+      const created = assertConfirmed('bob', 'the non-video', { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } });
       if (created !== bobId) throw new Error(`returned ${created}, expected ${bobId}`);
+    }],
+    ['old creation route answered 404 Cannot POST', () => assertOldCreateGone({ status: 404, body: goneBody })],
+    ['upload on the published origin, PUT 200', () => assertUploaded('alice', 'the fixture', videoUpload)],
+    ['source key read from the part URL', () => {
+      const key = sourceKeyOf(videoUpload.puts[0].url);
+      if (key !== videoKey) throw new Error(`returned ${key}, expected ${videoKey}`);
+    }],
+    ['upload confirmed records both ids and the source key', async () => {
+      const ctx = { videoUpload, rejectedUpload };
+      await runStepCheck('upload confirmed', ctx);
+      const got = JSON.stringify([ctx.id, ctx.rejectedId, ctx.videoKey]);
+      const expected = JSON.stringify([id, rejectedId, videoKey]);
+      if (got !== expected) throw new Error(`recorded ${got}, expected ${expected}`);
     }],
     ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
     ['cross-owner read answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound })],
@@ -889,9 +1067,12 @@ async function selfTest() {
   const goneDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
   rmSync(goneDir, { recursive: true, force: true });
   const good = {
-    videoKey: 'sources/sample-8s.mp4',
+    videoKey,
     anonymous: { [objectUrl]: 403, [listingUrl]: 403 },
-    anonymousCreate: 401,
+    anonymousApi: { [uploadsCall]: 401, [confirmCall]: 401, [readCall]: 401 },
+    oldCreate: { status: 404, body: goneBody },
+    videoUpload,
+    rejectedUpload,
     id,
     rejectedId,
     completed: { status: 'COMPLETED', zipStorageKey: zipKey },
@@ -900,7 +1081,7 @@ async function selfTest() {
     rejectedListing: '',
     delivery: { status: 'FAILED', failureReason: sentence },
     deliveries: 1,
-    bobCreate: { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } },
+    bobUpload,
     bobId,
     aliceList: lists.aliceList,
     bobList: lists.bobList,
@@ -911,8 +1092,18 @@ async function selfTest() {
   const stepRejections = [
     ['anonymous access', { anonymous: { [objectUrl]: 200, [listingUrl]: 403 } },
       `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
-    ['anonymous refused', { anonymousCreate: 201 },
-      `Anonymous creation accepted: ${createCall} without a token returned 201; the API must refuse it with 401`],
+    ['anonymous refused', { anonymousApi: { [uploadsCall]: 401, [confirmCall]: 201, [readCall]: 401 } },
+      `Anonymous call accepted: ${confirmCall} without a token returned 201; the API must refuse it with 401`],
+    ['old create gone', { oldCreate: { status: 201, body: { processingRequestId: id, status: 'RECEIVED' } } },
+      `Old creation route still creates: ${oldCreateCall} returned 201; a request must be created only by confirming an upload`],
+    ['old create gone', { oldCreate: { status: 404, body: notFoundBody } },
+      `${oldCreateCall} returned 404 with ${JSON.stringify(notFoundBody)}, expected the unknown-route message "Cannot POST /processing-requests"`],
+    ['upload confirmed', { videoUpload: upload('self-test-video-upload', id, { origin: internalOrigin, putStatus: 'unreachable (ENOTFOUND)' }) },
+      `Part 1 URL for the fixture targets ${internalOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    ['upload confirmed', { videoUpload: upload('self-test-video-upload', id, { origin: nearOrigin, putStatus: 403 }) },
+      `Part 1 URL for the fixture targets ${nearOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    ['upload confirmed', { rejectedUpload: upload('self-test-non-video-upload', rejectedId, { confirmation: { status: 200, body: { processingRequestId: rejectedId, status: 'RECEIVED' } } }) },
+      `alice's confirmation of the upload of the non-video returned 200, expected 201`],
     ['video completed', { completed: { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } },
       `Request ${id} for the video: expected COMPLETED, observed FAILED (PROCESSAMENTO_FALHOU)`],
     ['key scope', { completed: { status: 'COMPLETED', zipStorageKey: 'zips/another-request/attempt/frames.zip' } },
@@ -927,8 +1118,8 @@ async function selfTest() {
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['single delivery', { deliveries: 2 },
       `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
-    ['bob request created', { bobCreate: { status: 401, body: { statusCode: 401, message: 'Unauthorized' } } },
-      `bob's ${createCall} returned 401, expected 201`],
+    ['bob request created', { bobUpload: upload('self-test-bob-upload', bobId, { confirmation: { status: 401, body: { statusCode: 401, message: 'Unauthorized' } } }) },
+      `bob's confirmation of the upload of the non-video returned 401, expected 201`],
     ['lists disjoint', { aliceList: [...lists.aliceList, item(bobId)] },
       `Owner scope leak: alice's list contains bob's request ${bobId}`],
     ['cross-owner read 404', { crossRead: { status: 403, body: '{"statusCode":403,"message":"Forbidden resource"}' } },
