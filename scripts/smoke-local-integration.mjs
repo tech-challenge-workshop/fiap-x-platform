@@ -483,6 +483,44 @@ function assertConfirmed(user, what, confirmation) {
   return id;
 }
 
+// UPL-17 AC2: replaying the first confirmation with its key answers 200 with
+// the request that confirmation created, and alice gains no request. A 201 is
+// named for what it means: the replay created a second request.
+function assertReplayed(firstId, replay, totals) {
+  const call = "alice's replayed confirmation (same upload, same Idempotency-Key)";
+  if (replay.status === 201) throw new Error(`Replay created a request: ${call} returned 201, expected 200`);
+  if (replay.status !== 200) throw new Error(`${call} returned ${replay.status}, expected 200`);
+  const id = replay.body?.processingRequestId;
+  if (id !== firstId) {
+    throw new Error(`${call} returned processing request ${JSON.stringify(id)}, expected ${firstId}, the one the first confirmation created`);
+  }
+  if (totals.after !== totals.before) {
+    throw new Error(`Replay created a request: alice had ${totals.before} requests before the replay and ${totals.after} after`);
+  }
+}
+
+// UPL-17 AC3: a key already spent on one upload is refused on another with
+// 409 and this message, and creates nothing.
+const KEY_REUSED = 'Idempotency-Key is already used for another upload';
+
+function assertKeyReuseConflict(conflict) {
+  const call = "alice's confirmation of a second upload with the fixture's Idempotency-Key";
+  if (conflict.status >= 200 && conflict.status < 300) {
+    throw new Error(`Key reused: ${call} returned ${conflict.status}, expected 409`);
+  }
+  if (conflict.status !== 409) throw new Error(`${call} returned ${conflict.status}, expected 409`);
+  if (conflict.body?.message !== KEY_REUSED) {
+    throw new Error(`${call} returned 409 with ${JSON.stringify(conflict.body)}, expected the message ${JSON.stringify(KEY_REUSED)}`);
+  }
+}
+
+// The user's total number of requests, as the list reports it.
+async function totalAs(user, step) {
+  const res = await fetchAs(user, step, '/processing-requests?page=1&pageSize=1');
+  if (res.status !== 200) throw new Error(`${user}'s GET ${API_URL}/processing-requests?page=1&pageSize=1 failed: ${res.status}`);
+  return JSON.parse(res.text).total;
+}
+
 // A source's key, from the path of one of its part URLs: /<bucket>/<key>.
 function sourceKeyOf(partUrl) {
   return decodeURIComponent(new URL(partUrl).pathname).slice(`/${BUCKET}/`.length);
@@ -659,6 +697,35 @@ export const SMOKE_STEPS = [
       + `Uploaded the non-video as alice and confirmed it: processing request ${ctx.rejectedId}`,
   },
   {
+    name: 'confirmation replay',
+    observe: async (ctx) => {
+      const { start, key } = ctx.videoUpload;
+      ctx.totalBeforeReplay = await totalAs('alice', 'confirmation replay');
+      ctx.replay = await confirm('alice', 'confirmation replay', start.body?.uploadId, key);
+      ctx.totalAfterReplay = await totalAs('alice', 'confirmation replay');
+    },
+    check: (ctx) => assertReplayed(observed(ctx, 'id'), observed(ctx, 'replay'), {
+      before: observed(ctx, 'totalBeforeReplay'),
+      after: observed(ctx, 'totalAfterReplay'),
+    }),
+    report: (ctx) =>
+      `alice's confirmation replayed with the same key answered 200 with ${ctx.id}; she still has ${ctx.totalAfterReplay} requests`,
+  },
+  {
+    name: 'key reuse conflict',
+    observe: async (ctx) => {
+      const second = await uploadThroughApi('alice', 'key reuse conflict', NOT_A_VIDEO_FILE);
+      const confirmation = await confirm('alice', 'key reuse conflict', second.start.body?.uploadId, ctx.videoUpload.key);
+      ctx.reuse = { ...second, confirmation };
+    },
+    check: (ctx) => {
+      const reuse = observed(ctx, 'reuse');
+      assertUploaded('alice', 'the second upload', reuse);
+      assertKeyReuseConflict(reuse.confirmation);
+    },
+    report: () => `alice's second upload confirmed with the fixture's key answered 409 (${KEY_REUSED})`,
+  },
+  {
     name: 'anonymous access',
     observe: async (ctx) => {
       ctx.anonymous = await anonymousStatuses(ctx.videoKey);
@@ -811,6 +878,8 @@ const REQUIRED_STEPS = [
   'anonymous refused',
   'old create gone',
   'upload confirmed',
+  'confirmation replay',
+  'key reuse conflict',
   'anonymous access',
   'video completed',
   'key scope',
@@ -890,6 +959,12 @@ async function selfTest() {
   const videoUpload = upload('self-test-video-upload', id);
   const rejectedUpload = upload('self-test-non-video-upload', rejectedId);
   const bobUpload = upload('self-test-bob-upload', bobId);
+  // Literal, not KEY_REUSED: a changed constant must fail here too.
+  const reusedBody = { statusCode: 409, message: 'Idempotency-Key is already used for another upload' };
+  const replayCall = "alice's replayed confirmation (same upload, same Idempotency-Key)";
+  const reuseCall = "alice's confirmation of a second upload with the fixture's Idempotency-Key";
+  const replayed = { status: 200, body: { processingRequestId: id, status: 'RECEIVED' } };
+  const reuse = (confirmation) => upload('self-test-reuse-upload', undefined, { confirmation });
   const lists = {
     aliceIds: [id, rejectedId],
     bobId,
@@ -960,6 +1035,24 @@ async function selfTest() {
       `${oldCreateCall} returned 404 with ${JSON.stringify(notFoundBody)}, expected the unknown-route message "Cannot POST /processing-requests"`],
     ['old creation route answered 404 for a near-miss path', () => assertOldCreateGone({ status: 404, body: { ...goneBody, message: 'Cannot POST /processing-requests/' } }),
       `${oldCreateCall} returned 404 with ${JSON.stringify({ ...goneBody, message: 'Cannot POST /processing-requests/' })}, expected the unknown-route message "Cannot POST /processing-requests"`],
+    ['replay answered 201 with a new id', () => assertReplayed(id, { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, { before: 3, after: 4 }),
+      `Replay created a request: ${replayCall} returned 201, expected 200`],
+    ['replay answered 409', () => assertReplayed(id, { status: 409, body: reusedBody }, { before: 3, after: 3 }),
+      `${replayCall} returned 409, expected 200`],
+    ['replay answered 200 with an id extending the first', () => assertReplayed(id, { status: 200, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, { before: 3, after: 3 }),
+      `${replayCall} returned processing request "${id}-2", expected ${id}, the one the first confirmation created`],
+    ['replay answered 200 without an id', () => assertReplayed(id, { status: 200, body: { status: 'RECEIVED' } }, { before: 3, after: 3 }),
+      `${replayCall} returned processing request undefined, expected ${id}, the one the first confirmation created`],
+    ['replay answered 200 but the total grew by one', () => assertReplayed(id, replayed, { before: 3, after: 4 }),
+      `Replay created a request: alice had 3 requests before the replay and 4 after`],
+    ['key reuse answered 201', () => assertKeyReuseConflict({ status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } }),
+      `Key reused: ${reuseCall} returned 201, expected 409`],
+    ['key reuse answered 200', () => assertKeyReuseConflict({ status: 200, body: { processingRequestId: id, status: 'RECEIVED' } }),
+      `Key reused: ${reuseCall} returned 200, expected 409`],
+    ['key reuse answered 400', () => assertKeyReuseConflict({ status: 400, body: { statusCode: 400, message: 'Idempotency-Key header is required' } }),
+      `${reuseCall} returned 400, expected 409`],
+    ['key reuse answered 409 with another message', () => assertKeyReuseConflict({ status: 409, body: { ...reusedBody, message: 'Idempotency-Key is already used' } }),
+      `${reuseCall} returned 409 with ${JSON.stringify({ ...reusedBody, message: 'Idempotency-Key is already used' })}, expected the message ${JSON.stringify(reusedBody.message)}`],
     ['part URL signed for the internal host', () => assertUploaded('alice', 'the fixture', upload('u', id, { origin: internalOrigin, putStatus: 'unreachable (ENOTFOUND)' })),
       `Part 1 URL for the fixture targets ${internalOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
     ['part URL signed for another host on the same port', () => assertUploaded('alice', 'the fixture', upload('u', id, { origin: nearOrigin, putStatus: 403 })),
@@ -1031,6 +1124,8 @@ async function selfTest() {
       const created = assertConfirmed('bob', 'the non-video', { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } });
       if (created !== bobId) throw new Error(`returned ${created}, expected ${bobId}`);
     }],
+    ['replay answered 200 with the first id, total unchanged', () => assertReplayed(id, replayed, { before: 3, after: 3 })],
+    ['key reuse answered 409 with the message', () => assertKeyReuseConflict({ status: 409, body: reusedBody })],
     ['old creation route answered 404 Cannot POST', () => assertOldCreateGone({ status: 404, body: goneBody })],
     ['upload on the published origin, PUT 200', () => assertUploaded('alice', 'the fixture', videoUpload)],
     ['source key read from the part URL', () => {
@@ -1073,6 +1168,10 @@ async function selfTest() {
     oldCreate: { status: 404, body: goneBody },
     videoUpload,
     rejectedUpload,
+    replay: replayed,
+    totalBeforeReplay: 3,
+    totalAfterReplay: 3,
+    reuse: reuse({ status: 409, body: reusedBody }),
     id,
     rejectedId,
     completed: { status: 'COMPLETED', zipStorageKey: zipKey },
@@ -1118,6 +1217,20 @@ async function selfTest() {
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['single delivery', { deliveries: 2 },
       `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
+    ['confirmation replay', { replay: { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, totalAfterReplay: 4 },
+      `Replay created a request: ${replayCall} returned 201, expected 200`],
+    ['confirmation replay', { replay: { status: 200, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } } },
+      `${replayCall} returned processing request "${id}-2", expected ${id}, the one the first confirmation created`],
+    ['confirmation replay', { totalAfterReplay: 4 },
+      `Replay created a request: alice had 3 requests before the replay and 4 after`],
+    ['key reuse conflict', { reuse: reuse({ status: 200, body: { processingRequestId: id, status: 'RECEIVED' } }) },
+      `Key reused: ${reuseCall} returned 200, expected 409`],
+    ['key reuse conflict', { reuse: reuse({ status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } }) },
+      `Key reused: ${reuseCall} returned 201, expected 409`],
+    ['key reuse conflict', { reuse: reuse({ status: 409, body: { ...reusedBody, message: 'Idempotency-Key is already used' } }) },
+      `${reuseCall} returned 409 with ${JSON.stringify({ ...reusedBody, message: 'Idempotency-Key is already used' })}, expected the message ${JSON.stringify(reusedBody.message)}`],
+    ['key reuse conflict', { reuse: { ...reuse({ status: 409, body: reusedBody }), puts: [{ partNumber: 1, url: partUrl('self-test-reuse-upload'), status: 403 }] } },
+      `PUT of part 1 for the second upload to ${STORAGE_ORIGIN} returned 403, expected 200`],
     ['bob request created', { bobUpload: upload('self-test-bob-upload', bobId, { confirmation: { status: 401, body: { statusCode: 401, message: 'Unauthorized' } } }) },
       `bob's confirmation of the upload of the non-video returned 401, expected 201`],
     ['lists disjoint', { aliceList: [...lists.aliceList, item(bobId)] },

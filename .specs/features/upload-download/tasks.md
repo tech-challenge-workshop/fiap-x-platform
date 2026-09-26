@@ -247,11 +247,43 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] Self-test rejects a replay returning 201, another id, or a grown total; and a conflict returning 200 or 201
-- [ ] Quick gate passes
+- [x] Self-test rejects a replay returning 201, another id, or a grown total; and a conflict returning 200 or 201
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Steps.** Both steps run right after `upload confirmed`.
+  - `confirmation replay` reads `alice`'s total (`GET /processing-requests?page=1&pageSize=1`). It then confirms the fixture's upload again with the same key and reads the total again. `assertReplayed` requires 200 and the first confirmation's id, and requires the two totals to be equal. A 201 fails as `Replay created a request: … returned 201, expected 200`, and a grown total as `Replay created a request: alice had 3 requests before the replay and 4 after`.
+  - `key reuse conflict` uploads the non-video again as `alice` and confirms it with the fixture's key. `assertUploaded` judges the upload, so a failed `PUT` cannot pass as a conflict. `assertKeyReuseConflict` requires 409 with `Idempotency-Key is already used for another upload`, and a 2xx fails as `Key reused: …`.
+- **Self-test.** Before: 16 steps, 74 bad inputs, 37 good. After: 18 steps, 90 bad inputs, 41 good.
+  - The step `confirmation replay` is rejected when given:
+    - 201 with another id and a grown total
+    - 200 with `<id>-2`, an id extending the first (near-miss)
+    - only the grown total
+  - The step `key reuse conflict` is rejected when given:
+    - 200
+    - 201
+    - 409 with the shortened message `Idempotency-Key is already used` (near-miss)
+    - a second upload whose `PUT` answered 403
+  - The helpers are also rejected directly when given a replay answering 409, a replay answering 200 without an id, and a conflict answering 400.
+  - The expected message is written as a literal, not `KEY_REUSED`.
+  - Scratch mutations each fail the self-test: the total comparison disabled, the id comparison disabled, the replay step's check emptied, the conflict check dropped, and the message comparison disabled.
+- **Quick gate.** All of these pass:
+  - `node --check`
+  - the storage-write check and its self-test (10/6)
+  - the sizing self-test (12/7)
+  - the smoke's self-test, with the default port and with `STORAGE_HOST_PORT=39000`
+
+  The real run is T8's build gate.
+- **Adequacy.** Each AC maps to an assertion in `smoke-local-integration.mjs`:
+  - AC2, same id: `:494`, `:1222`
+  - AC2, no additional request: `:497`, `:1224`
+  - replay creating: `:491`, `:1220`
+  - AC3, 409: `:506`/`:512`, `:1226`–`:1232`
+
+  Every new case maps to UPL-17 AC2, AC3 or AC8.
 
 ---
 
