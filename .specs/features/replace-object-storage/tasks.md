@@ -45,12 +45,13 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-01
 
 **Done when**:
-- [ ] No MinIO image, `minio` service or `MC_HOST_*` remains in `compose.yaml`
-- [ ] `storage` reports healthy before `storage-init` runs; the Worker waits on `service_completed_successfully`
-- [ ] Quick gate: `docker compose config -q` and the sizing check pass
+- [x] No MinIO image, `minio` service or `MC_HOST_*` remains in `compose.yaml`
+- [x] `storage` reports healthy before `storage-init` runs; the Worker waits on `service_completed_successfully`
+- [x] Quick gate: `docker compose config -q` and the sizing check pass
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
 
 ---
 
