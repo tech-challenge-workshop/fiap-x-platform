@@ -28,7 +28,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | Assumption / decision | Chosen default | Rationale | Confirmed? |
 | --- | --- | --- | --- |
 | How V8's processing failure is produced | A committed fixture that FFprobe accepts and FFmpeg fails on | Decided; it needs no Worker change and runs in the normal stack | y |
-| If no such fixture can be found | The Design phase reports it, and GATE-16 goes back to open | Decided: no silent change of approach | y |
+| If no such fixture can be found | The Design phase reports it, and GATE-16 goes back to open | Decided: no silent change of approach. Spike of 2026-09-26 found one (design.md) | y |
 | V25 | `scripts/check-identity.mjs` with `--self-test`, in the build gate | Decided | y |
 | Where the bucket scenarios run | Against the stack's own storage, on scratch buckets the runner creates and deletes; never on `fiapx` itself except the read-back | The real server is what the bootstrap talks to (AD-014); the live bucket must not be disturbed mid-gate | y |
 | Database drift check | Regenerate from the sibling repositories' migrations and fail on any difference from the committed script, in the build gate | The generator needs the service repositories checked out, which only the build gate has today (V11) | y |
@@ -203,23 +203,23 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | - | Pending |
-| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | - | Pending |
-| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | - | Pending |
-| GATE-04 | P2: Database script drift check (V10, V37) | - | Pending |
-| GATE-05 | P2: Script includes spec B's index | - | Pending |
-| GATE-06 | P3: Storage-write check reads every script (V37) | - | Pending |
-| GATE-07 | P4: Download tied to the request's archive (V35) | - | Pending |
-| GATE-08 | P4: Deliveries counted by the right id (V16) | - | Pending |
-| GATE-09 | P4: Exact delivery sentence (V17) | - | Pending |
-| GATE-10 | P4: Exactly one object at the exact key (V18) | - | Pending |
-| GATE-11 | P5: `main()` runs every step (V14) | - | Pending |
-| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | - | Pending |
-| GATE-13 | P6: `sub` stable across an identity recreate (V24) | - | Pending |
-| GATE-14 | P6: `check-identity.mjs` (V25) | - | Pending |
-| GATE-15 | P7: Spec B's fixes on the real stack | - | Pending |
-| GATE-16 | P8: Processing failure end to end (V8) | - | Pending |
-| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | - | Pending |
+| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Design | In Design |
+| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Design | In Design |
+| GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Design | In Design |
+| GATE-04 | P2: Database script drift check (V10, V37) | Design | In Design |
+| GATE-05 | P2: Script includes spec B's index | Design | In Design |
+| GATE-06 | P3: Storage-write check reads every script (V37) | Design | In Design |
+| GATE-07 | P4: Download tied to the request's archive (V35) | Design | In Design |
+| GATE-08 | P4: Deliveries counted by the right id (V16) | Design | In Design |
+| GATE-09 | P4: Exact delivery sentence (V17) | Design | In Design |
+| GATE-10 | P4: Exactly one object at the exact key (V18) | Design | In Design |
+| GATE-11 | P5: `main()` runs every step (V14) | Design | In Design |
+| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Design | In Design |
+| GATE-13 | P6: `sub` stable across an identity recreate (V24) | Design | In Design |
+| GATE-14 | P6: `check-identity.mjs` (V25) | Design | In Design |
+| GATE-15 | P7: Spec B's fixes on the real stack | Design | In Design |
+| GATE-16 | P8: Processing failure end to end (V8) | Design | In Design |
+| GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Design | In Design |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
