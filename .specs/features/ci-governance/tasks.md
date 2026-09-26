@@ -65,13 +65,20 @@ T3 -> T4
 
 **Done when**:
 
-- [ ] The self-test rejects each of these, with its exact message: a `steps.access` gate, a token reference, a missing smoke, and a reordered recreate (the near-miss). It accepts a correct block. A spawned gated copy exits non-zero
-- [ ] The real run fails on the current `ci.yml`, naming the `steps.access` condition
-- [ ] The `topology` job runs `--self-test`. The real check joins it in T2
-- [ ] Quick gate passes (self-test)
+- [x] The self-test rejects each of these, with its exact message: a `steps.access` gate, a token reference, a missing smoke, and a reordered recreate (the near-miss). It accepts a correct block. A spawned gated copy exits non-zero
+- [x] The real run fails on the current `ci.yml`, naming the `steps.access` condition
+- [x] The `topology` job runs `--self-test`. The real check joins it in T2
+- [x] Quick gate passes (self-test)
 
 **Tests**: self-test
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The self-test was written against a stub that reported no problem: all 10 bad workflows were accepted and the spawned gated copy exited 0 with nothing on stderr (12 failures).
+- **Self-test.** `10 bad workflows rejected with the expected message, 2 good workflows accepted, spawned gated copy exited non-zero`. Bad: a `steps.access` gate, a token reference, the first smoke missing, the recreate before the first identity check (near-miss), `failure() && steps.access…` (near-miss), `continue-on-error`, no `integration` job, a recreate without `storage-init` (near-miss), an extra smoke, no stack command at all. The spawned run must print exactly the gate's line on stderr; a spawned correct copy must exit 0.
+- **Real run on the old `ci.yml`.** Exit 1: ten `if:` lines named, the first `line 72: the integration job is conditioned on "steps.access.outputs.available == 'true'"; only failure() or always() may gate its steps`; five `SERVICES_READ_TOKEN` lines; and `integration stack step 2 must be "node scripts/check-storage-bootstrap.mjs", but it is "node scripts/smoke-local-integration.mjs"`.
+- **Literal negatives** (scratch copies): no `if:` rule → 4 self-test failures; no token rule → 1; no order comparison → 5.
+- **Beyond the task.** `continue-on-error` inside the job is also rejected: it is a pass-without-the-stack path (CIG-01 AC4).
 
 ---
 
