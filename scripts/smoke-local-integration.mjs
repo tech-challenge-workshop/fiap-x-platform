@@ -554,8 +554,10 @@ async function totalAs(user, step) {
 // UPL-17 AC5: alice's completed request gets 200 with a URL and an expiresAt
 // still in the future when the answer arrived; the URL names the published
 // storage origin and serves the archive to the host. A URL answering 404 means
-// the archive is absent, the first of the archive's three causes.
-function assertDownloadIssued(id, download) {
+// the archive is absent, the first of the archive's three causes. GATE-07: the
+// URL's path must be /<bucket>/<zipKey>, the archive the Catalog records for
+// this same request, since another request's archive would serve 8 frames too.
+function assertDownloadIssued(id, download, zipKey) {
   const call = `alice's GET ${API_URL}/processing-requests/${id}/download`;
   const { issued, observedAt, fetched } = download;
   if (issued.status !== 200) throw new Error(`${call} returned ${issued.status}, expected 200`);
@@ -569,6 +571,10 @@ function assertDownloadIssued(id, download) {
   const origin = new URL(url).origin;
   if (origin !== STORAGE_ORIGIN) {
     throw new Error(`Download URL for ${id} targets ${origin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`);
+  }
+  const path = decodeURIComponent(new URL(url).pathname);
+  if (path !== `/${BUCKET}/${zipKey}`) {
+    throw new Error(`Download URL for ${id} names ${path}, expected /${BUCKET}/${zipKey}, the archive of that request`);
   }
   if (fetched.status === 404) throw new Error(`Archive absent: the download URL for ${id} answered 404 from ${origin}`);
   if (fetched.status !== 200) throw new Error(`GET of the download URL for ${id} from the host returned ${fetched.status}, expected 200`);
@@ -834,8 +840,15 @@ export const SMOKE_STEPS = [
       ctx.download = await waitForDownload('alice', 'download issued', ctx.id);
       const url = ctx.download.issued.body?.url;
       ctx.download.fetched = typeof url === 'string' ? await fetchArchive(url) : { status: 'not fetched', bytes: Buffer.alloc(0) };
+      // The Catalog's record of the same request, read once the URL is issued,
+      // names the archive the URL must point at.
+      ctx.downloadRequest = await waitForTerminalStatus(ctx.id);
     },
-    check: (ctx) => assertDownloadIssued(observed(ctx, 'id'), observed(ctx, 'download')),
+    check: (ctx) => assertDownloadIssued(
+      observed(ctx, 'id'),
+      observed(ctx, 'download'),
+      observedFor(ctx, 'downloadRequest', 'id').zipStorageKey,
+    ),
     report: (ctx) =>
       `alice's download of ${ctx.id} was issued after ${ctx.download.notYet} not-yet answer(s) (409), expiring at ${ctx.download.issued.body.expiresAt}; `
       + `its URL on ${STORAGE_ORIGIN} served ${ctx.download.fetched.bytes.length} bytes to the host`,
@@ -1128,6 +1141,9 @@ async function selfTest() {
   const futureExpiry = new Date(answeredAtMs + 300000).toISOString();
   const pastExpiry = new Date(answeredAtMs - 1000).toISOString();
   const downloadUrl = `${STORAGE_ORIGIN}/${BUCKET}/${zipKey}?X-Amz-Expires=300&X-Amz-Signature=self-test`;
+  const otherArchivePath = `/${BUCKET}/zips/self-test-older-alice-request/self-test-attempt/frames.zip`;
+  const otherArchiveUrl = `${STORAGE_ORIGIN}${otherArchivePath}?X-Amz-Expires=300&X-Amz-Signature=self-test`;
+  const otherBucketUrl = `${STORAGE_ORIGIN}/${BUCKET}2/${zipKey}?X-Amz-Expires=300&X-Amz-Signature=self-test`;
   const downloaded = ({ issued, fetched } = {}) => ({
     issued: issued ?? { status: 200, body: { url: downloadUrl, expiresAt: futureExpiry } },
     observedAt: answeredAtMs,
@@ -1152,21 +1168,21 @@ async function selfTest() {
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 16 entries, expected 8`],
     ['frame count 7', () => checkArchiveBytes(zipKey, syntheticZip(7)),
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
-    ['archive absent', () => assertDownloadIssued(id, downloaded({ fetched: { status: 404, bytes: Buffer.from('<Error><Code>NoSuchKey</Code></Error>') } })),
+    ['archive absent', () => assertDownloadIssued(id, downloaded({ fetched: { status: 404, bytes: Buffer.from('<Error><Code>NoSuchKey</Code></Error>') } }), zipKey),
       `Archive absent: the download URL for ${id} answered 404 from ${STORAGE_ORIGIN}`],
-    ['download answered 409', () => assertDownloadIssued(id, downloaded({ issued: { status: 409, body: { statusCode: 409, message: 'Processing request is not completed' } } })),
+    ['download answered 409', () => assertDownloadIssued(id, downloaded({ issued: { status: 409, body: { statusCode: 409, message: 'Processing request is not completed' } } }), zipKey),
       `${downloadCall} returned 409, expected 200`],
-    ['download answered 200 without a url', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { expiresAt: futureExpiry } } })),
+    ['download answered 200 without a url', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { expiresAt: futureExpiry } } }), zipKey),
       `${downloadCall} returned 200 without a url`],
-    ['download expiresAt one second before the answer', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: pastExpiry } } })),
+    ['download expiresAt one second before the answer', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: pastExpiry } } }), zipKey),
       `${downloadCall} returned expiresAt ${pastExpiry}, not after ${answeredAt} when the answer arrived`],
-    ['download expiresAt equal to the answer', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: answeredAt } } })),
+    ['download expiresAt equal to the answer', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: answeredAt } } }), zipKey),
       `${downloadCall} returned expiresAt ${answeredAt}, not after ${answeredAt} when the answer arrived`],
-    ['download expiresAt not a date', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: 'in 5 minutes' } } })),
+    ['download expiresAt not a date', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl, expiresAt: 'in 5 minutes' } } }), zipKey),
       `${downloadCall} returned expiresAt "in 5 minutes", expected a date`],
-    ['download URL signed for the internal host', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl.replace(STORAGE_ORIGIN, internalOrigin), expiresAt: futureExpiry } } })),
+    ['download URL signed for the internal host', () => assertDownloadIssued(id, downloaded({ issued: { status: 200, body: { url: downloadUrl.replace(STORAGE_ORIGIN, internalOrigin), expiresAt: futureExpiry } } }), zipKey),
       `Download URL for ${id} targets ${internalOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
-    ['download URL answered 403', () => assertDownloadIssued(id, downloaded({ fetched: { status: 403, bytes: Buffer.from('<Error><Code>AccessDenied</Code></Error>') } })),
+    ['download URL answered 403', () => assertDownloadIssued(id, downloaded({ fetched: { status: 403, bytes: Buffer.from('<Error><Code>AccessDenied</Code></Error>') } }), zipKey),
       `GET of the download URL for ${id} from the host returned 403, expected 200`],
     ['archive unreadable', () => checkArchiveBytes(zipKey, Buffer.from('plain text, not an archive')),
       `Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`],
@@ -1200,6 +1216,14 @@ async function selfTest() {
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['delivery observed COMPLETED', () => assertDeliverySentence(id, { status: 'COMPLETED', failureReason: sentence }),
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed COMPLETED with ${JSON.stringify(sentence)}`],
+    // GATE-09: near-misses of the sentence, each sharing most of its text.
+    ...[
+      ['a prefix of it', 'O arquivo enviado nao e um video'],
+      ['it without its final period', sentence.slice(0, -1)],
+      ['it plus a space', `${sentence} `],
+      ['it with its first word lowercased', `o${sentence.slice(1)}`],
+    ].map(([what, reason]) => [`delivery sentence given ${what}`, () => assertDeliverySentence(id, { status: 'FAILED', failureReason: reason }),
+      `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with ${JSON.stringify(reason)}`]),
     ['anonymous confirmation answered 201', () => assertAnonymousCallRefused(confirmCall, 201),
       `Anonymous call accepted: ${confirmCall} without a token returned 201; the API must refuse it with 401`],
     ['anonymous upload start answered 500', () => assertAnonymousCallRefused(uploadsCall, 500),
@@ -1307,7 +1331,7 @@ async function selfTest() {
       if (entries !== EXPECTED_FRAMES) throw new Error(`returned ${entries}, expected ${EXPECTED_FRAMES}`);
       if (existsSync(scratch)) throw new Error(`${scratch} still exists`);
     }],
-    ['download issued with a future expiresAt, URL answered 200', () => assertDownloadIssued(id, downloaded())],
+    ['download issued with a future expiresAt, URL answered 200', () => assertDownloadIssued(id, downloaded(), zipKey)],
     ['rejected request FAILED (FORMATO_INVALIDO)', () => assertRejected(id, { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' })],
     ['1 delivery', () => assertSingleDelivery(id, 1)],
     ['no archive for the rejected request', () => assertNoArchiveListing(id, [])],
@@ -1376,6 +1400,7 @@ async function selfTest() {
     archiveObject: { id, keys: [zipKey] },
     rejected: { id: rejectedId, status: 'FAILED', failureCode: 'FORMATO_INVALIDO' },
     download: downloaded(),
+    downloadRequest: { id, status: 'COMPLETED', zipStorageKey: zipKey },
     rejectedListing: { id: rejectedId, keys: [] },
     videoDelivery: { id, status: 'COMPLETED', zipStorageKey: zipKey },
     delivery: { id: rejectedId, status: 'FAILED', failureReason: sentence },
@@ -1450,6 +1475,14 @@ async function selfTest() {
       `GET of the download URL for ${id} from the host returned 403, expected 200`],
     ['download issued', { download: downloaded({ issued: { status: 200, body: { url: downloadUrl.replace(STORAGE_ORIGIN, nearOrigin), expiresAt: futureExpiry } } }) },
       `Download URL for ${id} targets ${nearOrigin}, expected ${STORAGE_ORIGIN}: the API must sign for the storage port published on the host`],
+    // GATE-07: the URL must name this request's archive. Another request's
+    // archive serves 8 frames too, so only the path can tell them apart.
+    ['download issued', { download: downloaded({ issued: { status: 200, body: { url: otherArchiveUrl, expiresAt: futureExpiry } } }) },
+      `Download URL for ${id} names ${otherArchivePath}, expected /${BUCKET}/${zipKey}, the archive of that request`],
+    ['download issued', { download: downloaded({ issued: { status: 200, body: { url: otherBucketUrl, expiresAt: futureExpiry } } }) },
+      `Download URL for ${id} names /${BUCKET}2/${zipKey}, expected /${BUCKET}/${zipKey}, the archive of that request`],
+    ['download issued', { downloadRequest: { id: rejectedId, status: 'COMPLETED', zipStorageKey: zipKey } },
+      `downloadRequest observed for ${rejectedId}, expected ${id}`],
     ['bucket lifecycle', { lifecycle: lifecycleOf(ownedRules.slice(0, 2)) }, lifecycleFound(ownedRules.slice(0, 2))],
     ['bucket lifecycle', { lifecycle: lifecycleOf([...ownedRules, operatorRule]) }, lifecycleFound([...ownedRules, operatorRule])],
     ['bucket lifecycle', { lifecycle: lifecycleOf(withAbortRule({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } })) },

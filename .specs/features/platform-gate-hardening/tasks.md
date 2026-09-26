@@ -348,13 +348,25 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] The self-test rejects a URL for another request's archive, and a URL for the right key under another bucket (near-miss)
-- [ ] The self-test rejects the sentence's prefix, its truncation without the final period, the sentence plus a space, and an uppercase first word
-- [ ] A literal negative passes: a scratch API image that serves the owner's first archive for every download fails `download issued` on its second run
-- [ ] Full gate passes
+- [x] The self-test rejects a URL for another request's archive, and a URL for the right key under another bucket (near-miss)
+- [x] The self-test rejects the sentence's prefix, its truncation without the final period, the sentence plus a space, and an uppercase first word
+- [x] A literal negative passes: a scratch API image that serves the owner's first archive for every download fails `download issued` on its second run
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The three path cases failed before the check existed; the four sentence near-misses passed at once, since `assertDeliverySentence` already compares with `!==`. They now guard that comparison.
+- **Change.** `assertDownloadIssued(id, download, zipKey)` requires `decodeURIComponent(new URL(url).pathname) === /fiapx/<zipKey>` after the origin check: `Download URL for X names <path>, expected /fiapx/<zipKey>, the archive of that request`.
+- **Where the key comes from.** `download issued` runs before `video completed`, so its observe reads the Catalog record once the URL is issued (`downloadRequest`), and the check takes the key only after `observedFor(ctx, 'downloadRequest', 'id')`. The step keeps its place, so the live poll still sees the `409` not-yet answers.
+- **Self-test.** From 23/125/47 to `23 required steps present, 132 bad inputs rejected with the expected message, 47 good inputs accepted`:
+  - another request's archive;
+  - the right key under bucket `fiapx2` (near-miss);
+  - a `downloadRequest` for another id;
+  - the sentence's prefix, its truncation, the sentence plus a space, and a case change.
+- **Deviation.** The sentence's first word is `O`, already uppercase, so "an uppercase first word" would equal the sentence. The case-change near-miss lowercases it instead (`o arquivo …`).
+- **Literal negative.** A scratch copy of `fiap-x-api` whose `DownloadService` signs the owner's first archive forever (S6's mutant A3), built through a compose override: run 1 green, run 2 exit 1 with `Download URL for dc1b… names /fiapx/zips/389d…/…/frames.zip, expected /fiapx/zips/dc1b…/…/frames.zip, the archive of that request`. The real API was rebuilt afterwards (no `firstArchive` in its `dist`), the smoke was green on it, and `../fiap-x-api` has no changes.
 
 ---
 
