@@ -10,12 +10,16 @@
 // `--self-test` needs no files: it feeds the detector the deleted seed's
 // calls, a shell copy, an s3api write and an SDK upload, requires each to be
 // named, and requires a read from the bucket to stdout or a file to pass.
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SELF = fileURLToPath(import.meta.url);
-const SCRIPTS_DIR = dirname(SELF);
+// SCRIPTS_DIR stands in for scripts/, so the self-test can run this script on
+// a tree it built. Unset, it is the directory this script lives in.
+const SCRIPTS_DIR = process.env.SCRIPTS_DIR ? resolve(process.env.SCRIPTS_DIR) : dirname(SELF);
 
 // Each entry names a write and matches it in a shell line or in the argument
 // array a script hands to spawn. `s3 cp` is a write only when its last path
@@ -46,12 +50,21 @@ function writersProblem(files) {
     .join('\n');
 }
 
-// Every file under scripts/ except this one, whose patterns name the writes
-// they detect, and exFAT `._*` sidecars, which hold no text.
-function readScripts() {
-  return readdirSync(SCRIPTS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && !entry.name.startsWith('._') && join(SCRIPTS_DIR, entry.name) !== SELF)
-    .map((entry) => ({ name: `scripts/${entry.name}`, text: readFileSync(join(SCRIPTS_DIR, entry.name), 'utf8') }));
+// Every file under scripts/, subdirectories included, except this one, whose
+// patterns name the writes they detect, and exFAT `._*` sidecars, which hold
+// no text.
+function readScripts(dir = SCRIPTS_DIR) {
+  const files = [];
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.name.startsWith('._')) continue;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && path !== SELF) files.push({ name: `scripts/${relative(dir, path)}`, text: readFileSync(path, 'utf8') });
+    }
+  };
+  walk(dir);
+  return files;
 }
 
 function fail(message) {
@@ -62,6 +75,8 @@ function fail(message) {
 // The file list is injected so the self-test can drive this exact function.
 function main({ read = readScripts, fail: stop = fail, log = console.log } = {}) {
   const files = read();
+  // Reading nothing would pass every check below, so it is a failure itself.
+  if (files.length === 0) stop('no script was read under scripts/');
   const problem = writersProblem(files);
   if (problem) stop(problem);
   log(`${files.length} scripts under scripts/ checked; none writes into the bucket outside the API`);
@@ -125,6 +140,31 @@ function selfTest() {
     named('scripts/seed.mjs', 'aws s3 cp into the bucket')]);
   acceptances.push(['main: only reads', () => runMain([{ name: 'scripts/smoke.mjs', text: archiveRead + listing }])]);
 
+  // The real reader on temporary directories: a writer one level down must be
+  // read and named, the same tree without it must pass, and a directory with
+  // nothing to read must fail rather than pass by reading nothing.
+  const tree = mkdtempSync(join(tmpdir(), 'fiapx-storage-writes-self-test-'));
+  const empty = mkdtempSync(join(tmpdir(), 'fiapx-storage-writes-self-test-'));
+  const nestedWriter = join(tree, 'nested', 'writes.mjs');
+  mkdirSync(join(tree, 'nested'));
+  writeFileSync(join(tree, 'reads.mjs'), archiveRead);
+  writeFileSync(join(tree, 'nested', 'lists.mjs'), listing);
+  writeFileSync(nestedWriter, "aws(['s3', 'cp', '--only-show-errors', './clip.mp4', 's3://fiapx/sources/clip.mp4']);\n");
+  // Each tree is read now, while it holds what the case describes.
+  const withWriter = readScripts(tree);
+  const nothing = readScripts(empty);
+  const spawned = spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: { ...process.env, SCRIPTS_DIR: tree } });
+  const spawnedMessage = `check-no-storage-writes: ${named('scripts/nested/writes.mjs', 'aws s3 cp into the bucket')}\n`;
+  rmSync(nestedWriter);
+  const withoutWriter = readScripts(tree);
+  rmSync(tree, { recursive: true, force: true });
+  rmSync(empty, { recursive: true, force: true });
+  rejections.push(
+    ['main: a nested writer read from disk', () => runMain(withWriter), named('scripts/nested/writes.mjs', 'aws s3 cp into the bucket')],
+    ['main: an empty directory', () => runMain(nothing), 'no script was read under scripts/'],
+  );
+  acceptances.push(['main: the same tree without the writer, read from disk', () => runMain(withoutWriter)]);
+
   const failures = [];
   for (const [name, run, expected] of rejections) {
     const message = run();
@@ -138,13 +178,18 @@ function selfTest() {
     const message = run();
     if (message !== undefined) failures.push(`${name}: rejected a good input with ${JSON.stringify(message)}`);
   }
+  // The script itself, as the gate runs it, on the tree holding the writer.
+  if (spawned.status === 0) failures.push('spawned run on a tree with a nested writer exited 0, expected non-zero');
+  if (spawned.stderr !== spawnedMessage) {
+    failures.push(`spawned run printed ${JSON.stringify(spawned.stderr)}, expected ${JSON.stringify(spawnedMessage)}`);
+  }
 
   if (failures.length > 0) {
     for (const failure of failures) console.error(`check-no-storage-writes self-test failed: ${failure}`);
     process.exit(1);
   }
   console.log(
-    `check-no-storage-writes self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
+    `check-no-storage-writes self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, spawned failure exited non-zero`,
   );
 }
 
