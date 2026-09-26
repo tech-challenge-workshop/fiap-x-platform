@@ -113,10 +113,10 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| AUTH-14 | P1: An identity provider in the topology | Execute | Implementing |
-| AUTH-15 | P1: An identity provider in the topology | Execute | Implementing |
-| AUTH-16 | P2: A token with one command | Execute | Implementing |
-| AUTH-17 | P3: The smoke proves authentication and owner scope | Execute | Implementing |
+| AUTH-14 | P1: An identity provider in the topology | Validate | Verified |
+| AUTH-15 | P1: An identity provider in the topology | Validate | Verified |
+| AUTH-16 | P2: A token with one command | Validate | Verified |
+| AUTH-17 | P3: The smoke proves authentication and owner scope | Validate | Verified |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 

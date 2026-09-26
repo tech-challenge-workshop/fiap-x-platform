@@ -98,6 +98,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: tasks.md:39 vs tasks.md:25 (M15)
 - last seen: 2026-09-26T00:11:20Z
 
+### L-015 - A gate step meant to prove state survives a restart must force-recreate the container, since a no-op compose up restarts nothing
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: auth-owner-scope
+- evidence: validation.md K1 (identity/fiapx-realm.json:35; tasks.md:182 second up)
+- last seen: 2026-09-26T04:47:15Z
+
+### L-016 - Every check the test matrix assigns to a gate must appear as a command in that gate, not only as a one-off manual probe
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: auth-owner-scope
+- evidence: validation.md K2 K4 K5 K6 T1-T3 (tasks.md:168-169 vs :182)
+- last seen: 2026-09-26T04:47:15Z
+
+### L-017 - Name the exact restart operation (restart, force-recreate or down then up) whenever a spec requires state to survive a restart
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · harmful: 0
+- features: auth-owner-scope
+- evidence: spec.md Edge Cases (restart); validation.md spec-precision note 2
+- last seen: 2026-09-26T04:47:15Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
