@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 26,
+  "next_id": 28,
   "lessons": [
     {
       "id": "L-001",
@@ -454,6 +454,42 @@
       ],
       "created": "2026-09-26T22:31:31Z",
       "last_seen": "2026-09-26T22:31:31Z"
+    },
+    {
+      "id": "L-026",
+      "key": "surviving_mutant::a guard over a structured file must parse it with a real parser a regex over keys misses quoted or spaced keys that the consumer reads the same way",
+      "text": "A guard over a structured file must parse it with a real parser; a regex over keys misses quoted or spaced keys that the consumer reads the same way.",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "gate-guards"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/check-ci-governance.mjs:120 (ci)"
+      ],
+      "created": "2026-09-26T23:57:18Z",
+      "last_seen": "2026-09-26T23:57:18Z"
+    },
+    {
+      "id": "L-027",
+      "key": "surviving_mutant::guarding a ci job means guarding what can skip it from outside too its needs chain and every job upstream",
+      "text": "Guarding a CI job means guarding what can skip it from outside too: its needs chain and every job upstream.",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "gate-guards"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "scripts/check-ci-governance.mjs:202 (ci)"
+      ],
+      "created": "2026-09-26T23:57:18Z",
+      "last_seen": "2026-09-26T23:57:18Z"
     }
   ]
 }
