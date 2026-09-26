@@ -382,6 +382,28 @@ function assertListsDisjoint({ aliceIds, bobId, aliceList, bobList }) {
   }
 }
 
+// Fields the Catalog keeps that a user must never see (AUTH-17 AC5).
+const INTERNAL_FIELDS = ['sourceStorageKey', 'zipStorageKey', 'failureCode', 'ownerUserId'];
+
+// AUTH-17 AC5: no listed item carries an internal field, even as null, and
+// the rejected request carries exactly the user-facing sentence.
+function assertNoInternalFields(rejectedId, list) {
+  for (const item of list) {
+    for (const field of INTERNAL_FIELDS) {
+      if (Object.hasOwn(item, field)) {
+        throw new Error(`alice's list exposes ${field} on request ${item.processingRequestId}`);
+      }
+    }
+  }
+  const rejected = list.find((item) => item.processingRequestId === rejectedId);
+  if (!rejected) throw new Error(`alice's list is missing her rejected request ${rejectedId}`);
+  if (rejected.failureReason !== FORMATO_INVALIDO_REASON) {
+    throw new Error(
+      `alice's rejected request ${rejectedId} carries failureReason ${JSON.stringify(rejected.failureReason)}, expected ${JSON.stringify(FORMATO_INVALIDO_REASON)}`,
+    );
+  }
+}
+
 // Reads one request with the user's token and returns the status and the raw
 // body text, so a check can compare two bodies byte for byte.
 async function readAs(user, id) {
@@ -592,6 +614,11 @@ export const SMOKE_STEPS = [
     report: (ctx) => `bob reading alice's request ${ctx.id} got 404 with the same body as a random id`,
   },
   {
+    name: 'no internal fields',
+    check: (ctx) => assertNoInternalFields(observed(ctx, 'rejectedId'), observed(ctx, 'aliceList')),
+    report: (ctx) => `alice's list carries no internal field, and ${ctx.rejectedId} carries the safe failureReason`,
+  },
+  {
     name: 'no leftovers',
     observe: (ctx) => {
       ctx.scratchDirs = [...scratchDirs];
@@ -640,6 +667,7 @@ const REQUIRED_STEPS = [
   'bob request created',
   'lists disjoint',
   'cross-owner read 404',
+  'no internal fields',
   'no leftovers',
 ];
 
@@ -670,11 +698,17 @@ async function selfTest() {
   const olderAliceId = 'self-test-older-alice-request';
   const item = (processingRequestId) => ({ processingRequestId, status: 'RECEIVED' });
   const readUrl = `${API_URL}/processing-requests/${id}`;
+  // alice's good list with one change: a field added to her older request,
+  // or another failureReason on the rejected one.
+  const withField = (field, value) => lists.aliceList.map((listed) => (
+    listed.processingRequestId === olderAliceId ? { ...listed, [field]: value } : listed));
+  const withReason = (failureReason) => lists.aliceList.map((listed) => (
+    listed.processingRequestId === rejectedId ? { ...listed, failureReason } : listed));
   const notFound = { status: 404, body: '{"statusCode":404,"message":"Processing request not found"}' };
   const lists = {
     aliceIds: [id, rejectedId],
     bobId,
-    aliceList: [item(olderAliceId), item(id), item(rejectedId)],
+    aliceList: [item(olderAliceId), item(id), { ...item(rejectedId), status: 'FAILED', failureReason: sentence }],
     bobList: [item(bobId)],
   };
 
@@ -749,6 +783,17 @@ async function selfTest() {
       `bob's GET ${readUrl} returned 404 with ${notFound.body} , but a random id gets ${notFound.body}`],
     ["random id answered 500", () => assertCrossOwnerNotFound(id, notFound, { status: 500, body: '{"statusCode":500,"message":"Internal server error"}' }),
       `bob's GET of a random id returned 500, expected 404 to compare against`],
+    ...['sourceStorageKey', 'zipStorageKey', 'failureCode', 'ownerUserId'].map((field) => [
+      `listed item carrying ${field}`, () => assertNoInternalFields(rejectedId, withField(field, 'leaked')),
+      `alice's list exposes ${field} on request ${olderAliceId}`]),
+    ['listed item carrying ownerUserId as null', () => assertNoInternalFields(rejectedId, withField('ownerUserId', null)),
+      `alice's list exposes ownerUserId on request ${olderAliceId}`],
+    ['rejected request with a near-miss failureReason', () => assertNoInternalFields(rejectedId, withReason(sentence.slice(0, -1))),
+      `alice's rejected request ${rejectedId} carries failureReason ${JSON.stringify(sentence.slice(0, -1))}, expected ${JSON.stringify(sentence)}`],
+    ['rejected request without a failureReason', () => assertNoInternalFields(rejectedId, withReason(undefined)),
+      `alice's rejected request ${rejectedId} carries failureReason undefined, expected ${JSON.stringify(sentence)}`],
+    ['rejected request absent from the list', () => assertNoInternalFields(rejectedId, [item(olderAliceId), item(id)]),
+      `alice's list is missing her rejected request ${rejectedId}`],
   ];
 
   let scratch;
@@ -779,6 +824,7 @@ async function selfTest() {
     }],
     ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
     ['cross-owner read answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound })],
+    ['list without internal fields, rejected request with the sentence', () => assertNoInternalFields(rejectedId, lists.aliceList)],
   ];
 
   // The steps main() runs: each required step must be in SMOKE_STEPS with a
@@ -832,6 +878,8 @@ async function selfTest() {
       `Owner scope leak: alice's list contains bob's request ${bobId}`],
     ['cross-owner read 404', { crossRead: { status: 403, body: '{"statusCode":403,"message":"Forbidden resource"}' } },
       `bob's GET ${readUrl} returned 403, expected 404 as for a random id`],
+    ['no internal fields', { aliceList: withField('zipStorageKey', zipKey) },
+      `alice's list exposes zipStorageKey on request ${olderAliceId}`],
     ['no leftovers', { scratchDirs: [goneDir, survivingDir] },
       `Downloaded artefact left behind: ${survivingDir} still exists after cleanup`],
   ];
