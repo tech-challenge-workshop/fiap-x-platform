@@ -167,7 +167,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | GRD-04 | P4: Expiry-rule scenarios (V42) | Execute | Implementing |
 | GRD-05 | P5: No token in failures (V43) | Execute | Implementing |
-| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Tasks | In Tasks |
+| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Execute | Implementing |
 | GRD-07 | P6: Wording (V52) | Execute | Implementing |
 
 

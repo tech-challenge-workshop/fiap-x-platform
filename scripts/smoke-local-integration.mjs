@@ -164,16 +164,28 @@ function assertArchiveObject(id, zipKey, keys) {
   }
 }
 
-// The keys under the request's archive prefix, with the id whose prefix was
-// listed; none when the prefix is empty (aws-cli prints "None" for an empty
-// listing in text output).
+// The id a key names in its zips/<id>/ segment; a key outside zips/ names
+// itself, so a check comparing ids names it.
+function archiveIdOf(key) {
+  return /^zips\/([^/]+)\//.exec(key)?.[1] ?? key;
+}
+
+// The keys under the request's archive prefix, each key's id read from the key
+// itself (GRD-06), and the id the prefix was queried with; none when the prefix
+// is empty (aws-cli prints "None" for an empty listing in text output).
 function listArchives(id) {
-  const keys = dockerCompose([
+  return listingOf(id, dockerCompose([
     'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
     's3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`,
     '--query', 'Contents[].Key', '--output', 'text',
-  ]).trim();
-  return { id, keys: keys === 'None' ? [] : keys.split(/\s+/) };
+  ]));
+}
+
+// The observation listArchives returns, from aws-cli's text output.
+function listingOf(queried, out) {
+  const text = out.trim();
+  const keys = text === 'None' || text === '' ? [] : text.split(/\s+/);
+  return { ids: keys.map(archiveIdOf), keys, queried };
 }
 
 // The three lifecycle rules storage/bootstrap.sh owns, written here literally
@@ -266,20 +278,33 @@ function assertDeliverySentence(id, delivery, code = 'FORMATO_INVALIDO') {
 // Exactly one: none means the terminal event never arrived, two means it was
 // delivered twice.
 function assertSingleDelivery(id, deliveries) {
+  if (deliveries === 0) throw new Error(`0 deliveries for ${id}: expected exactly 1 record`);
   if (deliveries !== 1) {
     throw new Error(`Delivery for ${id}: expected exactly 1 record, found ${deliveries}`);
   }
 }
 
 // The HTTP view returns one record, so it cannot show a duplicate; the count
-// comes from the Notification schema, with the id it was counted for. The id
-// travels as a psql variable, never as SQL text.
+// comes from the Notification schema. Each row carries the id it was counted
+// for (GRD-06), so a query that filters on the wrong thing shows another id or
+// none; no row means 0. The id travels as a psql variable, never as SQL text.
 function countDeliveries(id) {
-  const out = dockerCompose(
+  return deliveriesOf(id, dockerCompose(
     ['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`],
-    "SELECT count(*) FROM notification.delivery_record WHERE processing_request_id = :'id';\n",
-  );
-  return { id, count: Number(out.trim()) };
+    "SELECT processing_request_id, count(*) FROM notification.delivery_record WHERE processing_request_id = :'id' GROUP BY 1;\n",
+  ));
+}
+
+// The observation countDeliveries returns, from psql's unaligned `id|count`
+// rows: every row's id, and the count summed over them.
+// SPEC_DEVIATION: design.md returns `{ id: row?.id, count, queried }`; this
+// keeps every row's id in `ids`.
+// Reason: a query that matched several requests would otherwise be judged on
+// its first row alone.
+function deliveriesOf(queried, out) {
+  const text = out.trim();
+  const rows = text === '' ? [] : text.split('\n').map((line) => line.split('|'));
+  return { ids: rows.map(([rowId]) => rowId), count: rows.reduce((sum, [, count]) => sum + Number(count), 0), queried };
 }
 
 // The bucket must refuse a request that carries no credentials (RM-01 AC3).
@@ -762,6 +787,28 @@ function assertNoInternalFields(rejectedId, list) {
   }
 }
 
+// GRD-06: the user reads the failure through the API itself, as the owner
+// would, and gets exactly the sentence PROCESSAMENTO_FALHOU maps to. The body
+// must be that request: its own processingRequestId is compared, not the id
+// the read was made for.
+function assertFailureReasonRead(id, read) {
+  const call = `alice's GET ${API_URL}/processing-requests/${id}`;
+  if (read.status !== 200) throw new Error(`${call} returned ${read.status}, expected 200`);
+  let body;
+  try {
+    body = JSON.parse(read.body);
+  } catch {
+    throw new Error(`${call} returned 200 with a body that is not JSON: ${read.body}`);
+  }
+  if (body.processingRequestId !== id) {
+    throw new Error(`${call} returned request ${body.processingRequestId}, expected ${id}`);
+  }
+  const reason = FAILURE_REASONS.PROCESSAMENTO_FALHOU;
+  if (body.failureReason !== reason) {
+    throw new Error(`alice's failed request ${id} carries failureReason ${JSON.stringify(body.failureReason)}, expected ${JSON.stringify(reason)}`);
+  }
+}
+
 // Reads one request with the user's token and returns the status and the raw
 // body text, so a check can compare two bodies byte for byte.
 async function readAs(user, step, id) {
@@ -852,6 +899,21 @@ function observedFor(ctx, key, idKey) {
   const observation = observed(ctx, key);
   const expected = observed(ctx, idKey);
   if (observation.id !== expected) throw new Error(`${key} observed for ${observation.id}, expected ${expected}`);
+  return observation;
+}
+
+// GRD-06: an observation read as rows or keys proves its record through the
+// ids its result carries, never through the argument: every row must belong to
+// the id under test. An empty result carries no id, so only then does the id it
+// was queried with stand in, and it must be the id under test.
+function observedRowsFor(ctx, key, idKey) {
+  const observation = observed(ctx, key);
+  const expected = observed(ctx, idKey);
+  const other = observation.ids.find((rowId) => rowId !== expected);
+  if (other !== undefined) throw new Error(`${key} observed for ${other}, expected ${expected}`);
+  if (observation.ids.length === 0 && observation.queried !== expected) {
+    throw new Error(`${key} observed for ${observation.queried}, expected ${expected}`);
+  }
   return observation;
 }
 
@@ -1018,7 +1080,7 @@ export const SMOKE_STEPS = [
     check: (ctx) => assertArchiveObject(
       observed(ctx, 'id'),
       observedFor(ctx, 'completed', 'id').zipStorageKey,
-      observedFor(ctx, 'archiveObject', 'id').keys,
+      observedRowsFor(ctx, 'archiveObject', 'id').keys,
     ),
     report: (ctx) => `Exactly one object exists under zips/${ctx.id}/: ${ctx.completed.zipStorageKey}`,
   },
@@ -1045,8 +1107,8 @@ export const SMOKE_STEPS = [
     observe: (ctx) => {
       ctx.rejectedListing = listArchives(ctx.rejectedId);
     },
-    check: (ctx) => assertNoArchiveListing(observed(ctx, 'rejectedId'), observedFor(ctx, 'rejectedListing', 'rejectedId').keys),
-    report: (ctx) => `No archive exists under zips/${ctx.rejectedId}/`,
+    check: (ctx) => assertNoArchiveListing(observed(ctx, 'rejectedId'), observedRowsFor(ctx, 'rejectedListing', 'rejectedId').keys),
+    report: (ctx) => `No archive under zips/${ctx.rejectedListing.queried}/`,
   },
   {
     name: 'video delivery',
@@ -1068,7 +1130,7 @@ export const SMOKE_STEPS = [
     observe: (ctx) => {
       ctx.deliveries = countDeliveries(ctx.rejectedId);
     },
-    check: (ctx) => assertSingleDelivery(observed(ctx, 'rejectedId'), observedFor(ctx, 'deliveries', 'rejectedId').count),
+    check: (ctx) => assertSingleDelivery(observed(ctx, 'rejectedId'), observedRowsFor(ctx, 'deliveries', 'rejectedId').count),
     report: (ctx) => `Notification delivered once for ${ctx.rejectedId}: ${ctx.delivery.failureReason}`,
   },
   {
@@ -1096,8 +1158,8 @@ export const SMOKE_STEPS = [
     observe: (ctx) => {
       ctx.failedListing = listArchives(ctx.failedId);
     },
-    check: (ctx) => assertNoArchiveListing(observed(ctx, 'failedId'), observedFor(ctx, 'failedListing', 'failedId').keys, 'Failed'),
-    report: (ctx) => `No archive exists under zips/${ctx.failedId}/`,
+    check: (ctx) => assertNoArchiveListing(observed(ctx, 'failedId'), observedRowsFor(ctx, 'failedListing', 'failedId').keys, 'Failed'),
+    report: (ctx) => `No archive under zips/${ctx.failedListing.queried}/`,
   },
   {
     name: 'processing failure delivery',
@@ -1108,9 +1170,17 @@ export const SMOKE_STEPS = [
     check: (ctx) => {
       const failedId = observed(ctx, 'failedId');
       assertDeliverySentence(failedId, observedFor(ctx, 'failedDelivery', 'failedId'), 'PROCESSAMENTO_FALHOU');
-      assertSingleDelivery(failedId, observedFor(ctx, 'failedDeliveries', 'failedId').count);
+      assertSingleDelivery(failedId, observedRowsFor(ctx, 'failedDeliveries', 'failedId').count);
     },
     report: (ctx) => `Notification delivered once for ${ctx.failedId}: ${ctx.failedDelivery.failureReason}`,
+  },
+  {
+    name: 'processing failure reason',
+    observe: async (ctx) => {
+      ctx.failedRead = await readAs('alice', 'processing failure reason', ctx.failedId);
+    },
+    check: (ctx) => assertFailureReasonRead(observed(ctx, 'failedId'), observed(ctx, 'failedRead')),
+    report: (ctx) => `alice reading ${ctx.failedId} through the API got 200 with failureReason ${JSON.parse(ctx.failedRead.body).failureReason}`,
   },
   {
     name: 'bob request created',
@@ -1235,6 +1305,7 @@ const REQUIRED_STEPS = [
   'processing failure',
   'processing failure archive',
   'processing failure delivery',
+  'processing failure reason',
   'bob request created',
   'lists disjoint',
   'cross-owner read 404',
@@ -1335,6 +1406,11 @@ async function selfTest() {
   const rejectedUpload = upload('self-test-non-video-upload', rejectedId);
   const bobUpload = upload('self-test-bob-upload', bobId);
   const failedUpload = upload('self-test-corrupted-upload', failedId);
+  // GET /processing-requests/:id as the owner reads a failed request.
+  const failedRead = (failureReason, requestId = failedId) => ({
+    status: 200,
+    body: JSON.stringify({ processingRequestId: requestId, status: 'FAILED', failureReason }),
+  });
   // A download as the API and storage answer it: issued 5 minutes ahead of the
   // moment the answer arrived, and the URL serving an 8-entry archive.
   const downloadCall = `alice's GET ${API_URL}/processing-requests/${id}/download`;
@@ -1415,7 +1491,7 @@ async function selfTest() {
     ['rejected request FAILED with another code', () => assertRejected(id, { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' }),
       `Request ${id} for the non-video: expected FAILED (FORMATO_INVALIDO), observed FAILED (PROCESSAMENTO_FALHOU)`],
     ['0 deliveries', () => assertSingleDelivery(id, 0),
-      `Delivery for ${id}: expected exactly 1 record, found 0`],
+      `0 deliveries for ${id}: expected exactly 1 record`],
     ['2 deliveries', () => assertSingleDelivery(id, 2),
       `Delivery for ${id}: expected exactly 1 record, found 2`],
     ['archive present for the rejected request', () => assertNoArchiveListing(id, archiveKeys(id)),
@@ -1644,14 +1720,14 @@ async function selfTest() {
     id,
     rejectedId,
     completed: { id, status: 'COMPLETED', zipStorageKey: zipKey },
-    archiveObject: { id, keys: [zipKey] },
+    archiveObject: listingOf(id, `${zipKey}\n`),
     rejected: { id: rejectedId, status: 'FAILED', failureCode: 'FORMATO_INVALIDO' },
     download: downloaded(),
     downloadRequest: { id, status: 'COMPLETED', zipStorageKey: zipKey },
-    rejectedListing: { id: rejectedId, keys: [] },
+    rejectedListing: listingOf(rejectedId, 'None\n'),
     videoDelivery: { id, status: 'COMPLETED', zipStorageKey: zipKey },
     delivery: { id: rejectedId, status: 'FAILED', failureReason: sentence },
-    deliveries: { id: rejectedId, count: 1 },
+    deliveries: deliveriesOf(rejectedId, `${rejectedId}|1\n`),
     bobUpload,
     bobId,
     aliceList: lists.aliceList,
@@ -1665,9 +1741,10 @@ async function selfTest() {
     failedUpload,
     failedId,
     processingFailed: { id: failedId, status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' },
-    failedListing: { id: failedId, keys: [] },
+    failedListing: listingOf(failedId, 'None\n'),
     failedDelivery: { id: failedId, status: 'FAILED', failureReason: processingSentence },
-    failedDeliveries: { id: failedId, count: 1 },
+    failedDeliveries: deliveriesOf(failedId, `${failedId}|1\n`),
+    failedRead: failedRead(processingSentence),
   };
   const stepRejections = [
     ['api health', { health: 503 }, 'API health answered 503, expected 200'],
@@ -1702,23 +1779,23 @@ async function selfTest() {
       `completed observed for ${rejectedId}, expected ${id}`],
     ['rejection', { rejected: { ...good.rejected, id } },
       `rejected observed for ${id}, expected ${rejectedId}`],
-    ['no archive', { rejectedListing: { id, keys: [] } },
+    ['no archive', { rejectedListing: listingOf(id, 'None\n') },
       `rejectedListing observed for ${id}, expected ${rejectedId}`],
     ['video delivery', { videoDelivery: { ...good.videoDelivery, id: rejectedId } },
       `videoDelivery observed for ${rejectedId}, expected ${id}`],
     ['delivery sentence', { delivery: { ...good.delivery, id } },
       `delivery observed for ${id}, expected ${rejectedId}`],
-    ['single delivery', { deliveries: { id, count: 1 } },
+    ['single delivery', { deliveries: deliveriesOf(rejectedId, `${id}|1\n`) },
       `deliveries observed for ${id}, expected ${rejectedId}`],
-    ['single delivery', { deliveries: { id: `${rejectedId}-2`, count: 1 } },
+    ['single delivery', { deliveries: deliveriesOf(rejectedId, `${rejectedId}-2|1\n`) },
       `deliveries observed for ${rejectedId}-2, expected ${rejectedId}`],
-    ['archive object', { archiveObject: { id: rejectedId, keys: [zipKey] } },
+    ['archive object', { archiveObject: listingOf(id, archiveKeys(rejectedId).join('\t')) },
       `archiveObject observed for ${rejectedId}, expected ${id}`],
-    ['archive object', { archiveObject: { id, keys: [] } },
+    ['archive object', { archiveObject: listingOf(id, 'None\n') },
       `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found []`],
-    ['archive object', { archiveObject: { id, keys: [zipKey, `zips/${id}/another-attempt/frames.zip`] } },
+    ['archive object', { archiveObject: listingOf(id, `${zipKey}\tzips/${id}/another-attempt/frames.zip\n`) },
       `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found ${JSON.stringify([zipKey, `zips/${id}/another-attempt/frames.zip`])}`],
-    ['archive object', { archiveObject: { id, keys: [`${zipKey}.tmp`] } },
+    ['archive object', { archiveObject: listingOf(id, `${zipKey}.tmp\n`) },
       `Archive for ${id}: expected exactly ${JSON.stringify([zipKey])} under zips/${id}/, found ${JSON.stringify([`${zipKey}.tmp`])}`],
     ['archive count', { download: downloaded({ fetched: { status: 200, bytes: syntheticZip(7) } }) },
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
@@ -1744,11 +1821,11 @@ async function selfTest() {
       lifecycleFound(withAbortRule({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } }))],
     ['bucket lifecycle', { lifecycle: lifecycleOf(withAbortRule({ Expiration: { Days: 30 } })) },
       lifecycleFound(withAbortRule({ Expiration: { Days: 30 } }))],
-    ['no archive', { rejectedListing: { id: rejectedId, keys: archiveKeys(rejectedId) } },
+    ['no archive', { rejectedListing: listingOf(rejectedId, archiveKeys(rejectedId).join('\t')) },
       `Rejected request ${rejectedId} left an archive under zips/${rejectedId}/:\n${archiveKeys(rejectedId).join('\n')}`],
     ['delivery sentence', { delivery: { id: rejectedId, status: 'FAILED', failureReason: 'Nao foi possivel processar o video.' } },
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
-    ['single delivery', { deliveries: { id: rejectedId, count: 2 } },
+    ['single delivery', { deliveries: deliveriesOf(rejectedId, `${rejectedId}|2\n`) },
       `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
     ['confirmation replay', { replay: { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, totalAfterReplay: 4 },
       `Replay created a request: ${replayCall} returned 201, expected 200`],
@@ -1797,22 +1874,41 @@ async function selfTest() {
       `alice's confirmation of the upload of the corrupted video returned 200, expected 201`],
     ['processing failure', { failedUpload: upload('self-test-corrupted-upload', failedId, { putStatus: 403 }) },
       `PUT of part 1 for the corrupted video to ${STORAGE_ORIGIN} returned 403, expected 200`],
-    ['processing failure archive', { failedListing: { id: failedId, keys: archiveKeys(failedId) } },
+    ['processing failure archive', { failedListing: listingOf(failedId, archiveKeys(failedId).join('\t')) },
       `Failed request ${failedId} left an archive under zips/${failedId}/:\n${archiveKeys(failedId).join('\n')}`],
-    ['processing failure archive', { failedListing: { id: rejectedId, keys: [] } },
+    ['processing failure archive', { failedListing: listingOf(rejectedId, 'None\n') },
       `failedListing observed for ${rejectedId}, expected ${failedId}`],
-    ['processing failure delivery', { failedDeliveries: { id: failedId, count: 2 } },
+    ['processing failure delivery', { failedDeliveries: deliveriesOf(failedId, `${failedId}|2\n`) },
       `Delivery for ${failedId}: expected exactly 1 record, found 2`],
-    ['processing failure delivery', { failedDeliveries: { id: failedId, count: 0 } },
-      `Delivery for ${failedId}: expected exactly 1 record, found 0`],
+    ['processing failure delivery', { failedDeliveries: deliveriesOf(failedId, '') },
+      `0 deliveries for ${failedId}: expected exactly 1 record`],
     ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, failureReason: sentence } },
       `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with ${JSON.stringify(sentence)}`],
     ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, failureReason: 'Nao foi possivel processar o video.' } },
       `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, id: rejectedId } },
       `failedDelivery observed for ${rejectedId}, expected ${failedId}`],
-    ['processing failure delivery', { failedDeliveries: { id: rejectedId, count: 1 } },
+    // GRD-06: rows for another request fail naming both ids, even when the
+    // query was made for the right one; an empty result made for another fails too.
+    ['processing failure delivery', { failedDeliveries: deliveriesOf(failedId, `${rejectedId}|1\n`) },
       `failedDeliveries observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure delivery', { failedDeliveries: deliveriesOf(rejectedId, '') },
+      `failedDeliveries observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure delivery', { failedDeliveries: deliveriesOf(failedId, `${failedId}|1\n${rejectedId}|1\n`) },
+      `failedDeliveries observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure archive', { failedListing: listingOf(failedId, archiveKeys(rejectedId).join('\t')) },
+      `failedListing observed for ${rejectedId}, expected ${failedId}`],
+    ['no archive', { rejectedListing: listingOf(rejectedId, archiveKeys(id).join('\t')) },
+      `rejectedListing observed for ${id}, expected ${rejectedId}`],
+    // GRD-06: the failure read through the API as its owner.
+    ['processing failure reason', { failedRead: failedRead(sentence) },
+      `alice's failed request ${failedId} carries failureReason ${JSON.stringify(sentence)}, expected ${JSON.stringify(processingSentence)}`],
+    ['processing failure reason', { failedRead: failedRead(processingSentence.slice(0, -1)) },
+      `alice's failed request ${failedId} carries failureReason ${JSON.stringify(processingSentence.slice(0, -1))}, expected ${JSON.stringify(processingSentence)}`],
+    ['processing failure reason', { failedRead: { ...failedRead(processingSentence), status: 404 } },
+      `alice's GET ${API_URL}/processing-requests/${failedId} returned 404, expected 200`],
+    ['processing failure reason', { failedRead: failedRead(processingSentence, rejectedId) },
+      `alice's GET ${API_URL}/processing-requests/${failedId} returned request ${rejectedId}, expected ${failedId}`],
     ['lists disjoint', { aliceList: lists.aliceList.filter((listed) => listed.processingRequestId !== failedId) },
       `alice's list is missing her own request ${failedId}`],
     ['lists disjoint', { bobList: [...lists.bobList, item(failedId)] },
