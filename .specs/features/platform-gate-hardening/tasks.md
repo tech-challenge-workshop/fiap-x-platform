@@ -129,16 +129,25 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 **Done when**:
 
-- [ ] All 8 scenarios pass on the stack, and no `fiapx-scenario-*` bucket remains
-- [ ] Literal negatives in a scratch copy of the bootstrap each fail the named scenario:
+- [x] All 8 scenarios pass on the stack, and no `fiapx-scenario-*` bucket remains
+- [x] Literal negatives in a scratch copy of the bootstrap each fail the named scenario:
   - loosening the foreign-rule check fails `foreign`;
   - `DaysAfterInitiation` 2 fails `fresh`;
   - removing the policy check fails `policy`
-- [ ] The self-test's spawned run exits non-zero with the message on stderr
-- [ ] Full gate passes
+- [x] The self-test's spawned run exits non-zero with the message on stderr
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Real run.** `node scripts/check-storage-bootstrap.mjs` on the stack (RustFS 1.0.0, `STORAGE_HOST_PORT=39000`): `8 bootstrap scenarios passed; no fiapx-scenario-* bucket left`, in about 57 s. `list-buckets` afterwards: `fiapx` only.
+- **Expectation.** The owned rules are literals in the runner, compared as ID-sorted canonical JSON, so a rule changed in the bootstrap fails instead of moving the expectation. `foreign` requires `(IDs: operator-rule)` on stderr; `policy` requires `bucket fiapx-scenario-policy has a bucket policy`, so a refusal for another reason does not pass.
+- **Literal negatives.** `BOOTSTRAP_UNDER_TEST=<scratch copy>` mounts the copy over `/bootstrap.sh`; the tree was not touched:
+  - `if [[ "$owned" != "$total" ]]` → `if false`: `scenario foreign failed: bootstrap exited 0, expected 1`; the other 7 passed.
+  - `DaysAfterInitiation` 1 → 2 in both `desired` and `abort_correct()`: `scenario fresh failed: expected exactly the 3 owned lifecycle rules …`, and so did every other repair scenario; `foreign` and `policy` passed.
+  - The policy block (lines 23-29) removed: `scenario policy failed: bootstrap exited 0, expected 1`; the other 7 passed.
+- **Self-test.** `8 required scenarios present, 29 bad inputs rejected with the expected message, 15 good inputs accepted, 2 cleanup orders held, spawned failure exited non-zero`. The spawn uses a `COMPOSE_FILE` with no `storage-init` service, so it needs Docker's CLI but no stack; every scenario then fails with `no such service: storage-init`. Added to CI's `topology` job.
 
 ---
 

@@ -45,6 +45,8 @@ jobs:
         run: node --check scripts/smoke-local-integration.mjs
       - name: Prove each smoke assertion rejects a bad input
         run: node scripts/smoke-local-integration.mjs --self-test
+      - name: Prove each bootstrap scenario rejects a bad outcome
+        run: node scripts/check-storage-bootstrap.mjs --self-test
 
   integration:
     needs: topology

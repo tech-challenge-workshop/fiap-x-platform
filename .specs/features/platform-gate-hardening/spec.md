@@ -203,7 +203,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Tasks | In Tasks |
+| GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Execute | Implementing (T1 ✅) |
 | GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Tasks | In Tasks |
 | GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Tasks | In Tasks |
 | GATE-04 | P2: Database script drift check (V10, V37) | Tasks | In Tasks |
@@ -214,7 +214,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GATE-09 | P4: Exact delivery sentence (V17) | Tasks | In Tasks |
 | GATE-10 | P4: Exactly one object at the exact key (V18) | Tasks | In Tasks |
 | GATE-11 | P5: `main()` runs every step (V14) | Tasks | In Tasks |
-| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Tasks | In Tasks |
+| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅) |
 | GATE-13 | P6: `sub` stable across an identity recreate (V24) | Tasks | In Tasks |
 | GATE-14 | P6: `check-identity.mjs` (V25) | Tasks | In Tasks |
 | GATE-15 | P7: Spec B's fixes on the real stack | Tasks | In Tasks |
