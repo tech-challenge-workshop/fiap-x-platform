@@ -159,7 +159,8 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | Tasks | In Tasks |
+| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | Execute | Implementing |
+
 | GRD-02 | P2: `docs-links` scripted and guarded (V51) | Tasks | In Tasks |
 | GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | Tasks | In Tasks |
 | GRD-04 | P4: Expiry-rule scenarios (V42) | Tasks | In Tasks |

@@ -2,10 +2,15 @@
 //
 // Workflow check (default mode, CIG-01, CIG-02). Reads CI_WORKFLOW_PATH
 // (default .github/workflows/ci.yml) and, inside the `integration` job's
-// indented block, requires:
+// indented block, parsed into its own keys and its steps, requires:
 //
-//   no skip path       every `if:` is `failure()` or `always()`, and no
-//                      `continue-on-error` lets a red step pass the job;
+//   no skip path       the job sets no `if:`, `shell:` or `continue-on-error`
+//                      (nor does the workflow set a default shell); only the
+//                      two log steps may carry `failure()` and only the
+//                      teardown `always()`, and no other step is conditioned;
+//   no mask            each stack command is the whole one-line `run:` of its
+//                      own step, so no `set +e` or `|| true` can surround it;
+
 //   no token           SERVICES_READ_TOKEN appears nowhere in the workflow:
 //                      the four service repositories are public;
 //   the stack steps    the eight stack commands of the build gate run in
@@ -99,27 +104,86 @@ function integrationBlock(text) {
   return undefined;
 }
 
-// Every command the block runs, in order: a one-line `run:` value, or each
-// non-empty line of a block scalar (`run: |`).
-function runCommands(block) {
-  const commands = [];
-  for (let i = 0; i < block.length; i += 1) {
-    const match = /^(\s*(?:-\s+)?)run:\s*(.*)$/.exec(block[i]);
-    if (!match) continue;
-    const value = match[2].trim();
-    if (!/^[|>]/.test(value)) {
-      commands.push(unquote(value));
-      continue;
-    }
-    const keyColumn = match[1].length;
-    for (let j = i + 1; j < block.length; j += 1) {
-      if (block[j].trim() === '') continue;
-      if (indentOf(block[j]) <= keyColumn) break;
-      commands.push(block[j].trim());
+const isContent = (line) => line.trim() !== '' && !line.trimStart().startsWith('#');
+const KEY = /^([A-Za-z_][\w-]*):(?:\s+(.*))?$/;
+
+// The job's own keys and its steps. Each step is { index, name, if, run,
+// multiline, uses }: `run` is the value as written (a block scalar's lines
+// joined by newlines), and `multiline` is true when the value spans more than
+// one line (a block scalar, or a plain scalar continued on the next line).
+// Returns { keys, steps } with `keys` mapping each job-level key to its value.
+function parseSteps(block) {
+  const content = block.filter(isContent);
+  const keys = {};
+  const steps = [];
+  if (content.length === 0) return { keys, steps };
+  const jobKeyIndent = indentOf(content[0]);
+  let i = 0;
+  while (i < block.length) {
+    const line = block[i];
+    if (!isContent(line) || indentOf(line) !== jobKeyIndent) { i += 1; continue; }
+    const match = KEY.exec(line.trim());
+    if (!match) { i += 1; continue; }
+    keys[match[1]] = unquote(match[2] ?? '');
+    i += 1;
+    if (match[1] !== 'steps') continue;
+    // Each `- ` item deeper than `steps:` is a step; its keys sit two columns
+    // right of the dash.
+    let stepIndent;
+    while (i < block.length && (!isContent(block[i]) || indentOf(block[i]) > jobKeyIndent)) {
+      const itemLine = block[i];
+      if (!isContent(itemLine)) { i += 1; continue; }
+      stepIndent ??= indentOf(itemLine);
+      if (indentOf(itemLine) !== stepIndent || !itemLine.trimStart().startsWith('- ')) { i += 1; continue; }
+      const step = { index: steps.length + 1, name: undefined, if: undefined, run: undefined, multiline: false, uses: undefined };
+      const keyIndent = stepIndent + 2;
+      const lines = [' '.repeat(keyIndent) + itemLine.trimStart().slice(2)];
+      for (i += 1; i < block.length; i += 1) {
+        if (isContent(block[i]) && indentOf(block[i]) <= stepIndent) break;
+        lines.push(block[i]);
+      }
+      for (let k = 0; k < lines.length; k += 1) {
+        if (!isContent(lines[k]) || indentOf(lines[k]) !== keyIndent) continue;
+        const stepKey = KEY.exec(lines[k].trim());
+        if (!stepKey || !['name', 'if', 'run', 'uses'].includes(stepKey[1])) continue;
+        const value = (stepKey[2] ?? '').trim();
+        const continued = [];
+        for (let c = k + 1; c < lines.length && (lines[c].trim() === '' || indentOf(lines[c]) > keyIndent); c += 1) {
+          if (lines[c].trim() !== '') continued.push(lines[c].trim());
+        }
+        if (stepKey[1] === 'run') {
+          step.multiline = /^[|>]/.test(value) || continued.length > 0;
+          step.run = /^[|>]/.test(value) ? continued.join('\n') : [unquote(value), ...continued].join('\n');
+        } else {
+          step[stepKey[1]] = /^[|>]/.test(value) ? continued.join(' ') : [unquote(value), ...continued].join(' ');
+        }
+      }
+      steps.push(step);
     }
   }
-  return commands;
+  return { keys, steps };
 }
+
+// The steps a condition may gate, with the one expression each may carry:
+// logs are collected only when the job failed, and the stack is always torn
+// down. Any other conditioned step, or the job itself, could skip the stack.
+const CONDITIONED_STEPS = {
+  'Collect container logs': 'failure()',
+  'Upload container logs': 'failure()',
+  'Tear the stack down': 'always()',
+};
+const expressionOf = (value) => value.replace(/^\$\{\{\s*(.*?)\s*\}\}$/, '$1');
+
+// The top-level `defaults:` block's lines.
+function workflowDefaults(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => /^defaults:\s*$/.test(line));
+  if (start === -1) return [];
+  const block = [];
+  for (let j = start + 1; j < lines.length && (!isContent(lines[j]) || indentOf(lines[j]) > 0); j += 1) block.push(lines[j]);
+  return block;
+}
+
 
 // Every problem with the workflow text, in the order the file shows them.
 // An empty list means the integration job always runs the stack.
@@ -127,22 +191,44 @@ function workflowProblems(text) {
   const block = integrationBlock(text);
   if (!block) return ['the workflow has no `integration` job under `jobs:`'];
   const problems = [];
+  const { keys, steps } = parseSteps(block.lines);
 
-  block.lines.forEach((line, index) => {
-    const lineNumber = block.start + 1 + index;
-    const condition = /^\s*(?:-\s+)?if:\s*(.*)$/.exec(line);
-    if (condition) {
-      const expression = unquote(condition[1]).replace(/^\$\{\{\s*(.*?)\s*\}\}$/, '$1');
-      if (expression !== 'failure()' && expression !== 'always()') {
-        problems.push(
-          `line ${lineNumber}: the integration job is conditioned on "${expression}"; only failure() or always() may gate its steps`,
-        );
+  // Rule 1: the job itself is never conditioned, and neither the job nor any
+  // step may let a failed command pass (continue-on-error) or swap the shell
+  // that fails on the first error (shell:, anywhere in the job, including
+  // `defaults:`, or as the workflow's default).
+  if (Object.hasOwn(keys, 'if')) problems.push('the integration job must not set if');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?shell:/.test(line))) problems.push('the integration job must not set shell');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?continue-on-error:/.test(line))) {
+    problems.push('the integration job must not set continue-on-error');
+  }
+  if (workflowDefaults(text).some((line) => /^\s*(?:-\s+)?shell:/.test(line))) {
+    problems.push('the workflow must not set a default shell; it would apply to the integration job');
+  }
+
+  // Rule 2: only the allow-listed steps may carry a condition, each exactly
+  // its own expression, and never a step that runs a stack command.
+  for (const step of steps) {
+    if (step.if === undefined) continue;
+    const expression = expressionOf(step.if);
+    const label = step.name ?? step.run ?? step.uses ?? `#${step.index}`;
+    const runsStack = STACK_COMMANDS.some((command) => (step.run ?? '').includes(command));
+    if (CONDITIONED_STEPS[step.name] !== expression || runsStack) {
+      problems.push(`step "${label}" must not be conditioned on "${expression}"`);
+    }
+  }
+
+  // Rule 3: a stack command runs as the whole one-line `run:` of its own step,
+  // so no shell text (set +e, || true, exit 0) can surround it.
+  for (const step of steps) {
+    if (step.run === undefined) continue;
+    for (const command of new Set(STACK_COMMANDS)) {
+      if (step.run.includes(command) && (step.multiline || step.run !== command)) {
+        problems.push(`stack command "${command}" must be a one-line run step of its own`);
       }
     }
-    if (/^\s*(?:-\s+)?continue-on-error:/.test(line)) {
-      problems.push(`line ${lineNumber}: the integration job sets continue-on-error, so a failed stack step would pass the job`);
-    }
-  });
+  }
+
 
   text.split('\n').forEach((line, index) => {
     if (line.includes(TOKEN)) {
@@ -152,7 +238,8 @@ function workflowProblems(text) {
 
   // Only the stack commands, in the order the job runs them, must equal the
   // expected sequence; the first position that differs is named.
-  const stack = runCommands(block.lines).filter((command) => STACK_SET.has(command));
+  const stack = steps.filter((step) => !step.multiline && STACK_SET.has(step.run)).map((step) => step.run);
+
   for (let i = 0; i < Math.max(stack.length, STACK_COMMANDS.length); i += 1) {
     if (stack[i] === STACK_COMMANDS[i]) continue;
     const expected = i < STACK_COMMANDS.length ? `"${STACK_COMMANDS[i]}"` : 'nothing more';
@@ -325,6 +412,12 @@ jobs:
         if: failure()
         working-directory: fiap-x-platform
         run: docker compose logs --no-color > container-logs.txt
+      - name: Upload container logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-logs
+          path: fiap-x-platform/container-logs.txt
       - name: Tear the stack down
         if: \${{ always() }}
         working-directory: fiap-x-platform
@@ -348,7 +441,7 @@ const GATED = replaceOnce(
   '      - name: Start the stack and wait for every health check\n',
   "      - name: Start the stack and wait for every health check\n        if: steps.access.outputs.available == 'true'\n",
 );
-const GATED_MESSAGE = `line 24: the integration job is conditioned on "steps.access.outputs.available == 'true'"; only failure() or always() may gate its steps`;
+const GATED_MESSAGE = `step "Start the stack and wait for every health check" must not be conditioned on "steps.access.outputs.available == 'true'"`;
 
 // A `protect main` ruleset as `gh api repos/<repo>/rulesets/<id>` returns it,
 // requiring `contexts`; `change` edits the copy before it is returned.
@@ -486,6 +579,25 @@ function selfTest() {
     `      - run: ${SMOKE}\n      - name: Collect container logs\n`,
   );
   const noStack = GOOD.split('\n').filter((line) => !STACK_SET.has(line.replace(/^\s*run:\s*/, ''))).join('\n');
+  const SECOND_SMOKE = '      - name: Run the smoke test again after the recreate\n';
+  const FIRST_SMOKE = '      - name: Run the smoke test against the live stack\n';
+  const m10 = replaceOnce(GOOD, SECOND_SMOKE, `${SECOND_SMOKE}        if: failure()\n`);
+  const m11 = replaceOnce(GOOD, '    needs: topology\n', '    needs: topology\n    if: failure()\n');
+  const m14 = replaceOnce(
+    GOOD,
+    `${FIRST_SMOKE}        working-directory: fiap-x-platform\n        run: ${SMOKE}\n`,
+    `${FIRST_SMOKE}        working-directory: fiap-x-platform\n        run: |\n          set +e\n          ${SMOKE}\n          exit 0\n`,
+  );
+  const shellStep = replaceOnce(GOOD, `${FIRST_SMOKE}`, `${FIRST_SMOKE}        shell: bash {0}\n`);
+  const shellDefault = replaceOnce(GOOD, '    timeout-minutes: 45\n', '    timeout-minutes: 45\n    defaults:\n      run:\n        shell: bash {0}\n');
+  const workflowShell = replaceOnce(GOOD, 'jobs:\n', 'defaults:\n  run:\n    shell: bash {0}\njobs:\n');
+  const orTrue = replaceOnce(GOOD, `${FIRST_SMOKE}        working-directory: fiap-x-platform\n        run: ${SMOKE}\n`,
+    `${FIRST_SMOKE}        working-directory: fiap-x-platform\n        run: ${SMOKE} || true\n`);
+  const renamedStack = replaceOnce(GOOD, FIRST_SMOKE, '      - name: Collect container logs\n        if: failure()\n');
+  const alwaysOnLogs = replaceOnce(GOOD, '      - name: Upload container logs\n        if: failure()\n', '      - name: Upload container logs\n        if: always()\n');
+  const failureTeardown = replaceOnce(GOOD, '        if: \${{ always() }}\n', '        if: failure()\n');
+  const continueOnStep = replaceOnce(GOOD, SECOND_SMOKE, `${SECOND_SMOKE}        continue-on-error: true\n`);
+
 
   const rejections = [
     ['a stack step gated on steps.access', GATED, [GATED_MESSAGE]],
@@ -499,11 +611,34 @@ function selfTest() {
       `integration stack step 5 must be "${IDENTITY}", but it is "${RECREATE}"`,
     ]],
     ['failure() combined with steps.access (near-miss)', failureAndGate, [
-      `line ${lineOf(failureAndGate, 'if: failure() &&')}: the integration job is conditioned on "failure() && steps.access.outputs.available == 'true'"; only failure() or always() may gate its steps`,
+      `step "Collect container logs" must not be conditioned on "failure() && steps.access.outputs.available == 'true'"`,
     ]],
-    ['continue-on-error on the job', continueOnError, [
-      `line ${lineOf(continueOnError, 'continue-on-error: true')}: the integration job sets continue-on-error, so a failed stack step would pass the job`,
+    ['continue-on-error on the job', continueOnError, ['the integration job must not set continue-on-error']],
+    ['M10: failure() on the second-smoke step', m10, [
+      'step "Run the smoke test again after the recreate" must not be conditioned on "failure()"',
     ]],
+    ['M11: a job-level if: failure() (skipped on every green topology)', m11, ['the integration job must not set if']],
+    ['M14: the first smoke masked by set +e / exit 0 in a run: | block', m14, [
+      `stack command "${SMOKE}" must be a one-line run step of its own`,
+      `integration stack step 4 must be "${SMOKE}", but it is "${IDENTITY}"`,
+    ]],
+    ['a shell: override on a stack step', shellStep, ['the integration job must not set shell']],
+    ['a shell: default for the job (near-miss)', shellDefault, ['the integration job must not set shell']],
+    ['a workflow-level default shell (near-miss)', workflowShell, ['the workflow must not set a default shell; it would apply to the integration job']],
+    ['the smoke masked by || true on one line (near-miss)', orTrue, [
+      `stack command "${SMOKE}" must be a one-line run step of its own`,
+      `integration stack step 4 must be "${SMOKE}", but it is "${IDENTITY}"`,
+    ]],
+    ['a stack step renamed to an allow-listed log step (near-miss)', renamedStack, [
+      'step "Collect container logs" must not be conditioned on "failure()"',
+    ]],
+    ['always() moved to a log step (near-miss)', alwaysOnLogs, [
+      'step "Upload container logs" must not be conditioned on "always()"',
+    ]],
+    ['failure() on the teardown (near-miss)', failureTeardown, [
+      'step "Tear the stack down" must not be conditioned on "failure()"',
+    ]],
+    ['continue-on-error on a stack step (near-miss)', continueOnStep, ['the integration job must not set continue-on-error']],
     ['no integration job', noIntegration, ['the workflow has no `integration` job under `jobs:`']],
     ['a recreate that skips storage-init (near-miss)', recreateNearMiss, [
       `integration stack step 6 must be "${RECREATE}", but it is "${SMOKE}"`,

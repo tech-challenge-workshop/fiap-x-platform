@@ -79,12 +79,15 @@ T7
 
 **Done when**:
 
-- [ ] Each of M10, M11, M14 and a `shell:` override fails the self-test with its exact message. The real `ci.yml` passes
-- [ ] Reverting to the old line scan makes the new self-test cases fail
-- [ ] Quick gate passes
+- [x] Each of M10, M11, M14 and a `shell:` override fails the self-test with its exact message. The real `ci.yml` passes
+- [x] Reverting to the old line scan makes the new self-test cases fail
+- [x] Quick gate passes
 
 **Tests**: self-test
 **Gate**: quick
+
+**Status**: ✅ Complete (2026-09-26). Self-test 10 → 21 bad workflows rejected, 2 good accepted; the real `ci.yml` passes unchanged (its stack steps were already one-line). Red-first: the 11 new cases and the three reworded ones failed against the old line scan. Literal negatives on scratch copies of `ci.yml` (M10, M11, M14, a job `defaults.run.shell`) each exit 1 with the exact message. Beyond the design: a step that runs a stack command may not be conditioned even under an allow-listed name, `continue-on-error` is refused on steps as well as the job, and a workflow-level default shell is refused. The old `line N:` messages are replaced by the design's messages.
+
 
 ---
 
