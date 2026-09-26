@@ -55,7 +55,7 @@ Both assertions were verified by making them fail: a Worker that stores no archi
 
 ### Object storage
 
-RustFS serves the S3 API on `localhost:9000` (development credentials `fiapx-dev` / `fiapx-dev-secret`). The topology's own scripts talk to it with plain `aws-cli`, never a vendor CLI, so the server can be swapped behind the protocol ([AD-014](.specs/STATE.md)). One private bucket, `fiapx`, holds two prefixes:
+RustFS serves the S3 API on `localhost:9000`, or on `STORAGE_HOST_PORT` when it is set (development credentials `fiapx-dev` / `fiapx-dev-secret`). The topology's own scripts talk to it with plain `aws-cli`, never a vendor CLI, so the server can be swapped behind the protocol ([AD-014](.specs/STATE.md)). One private bucket, `fiapx`, holds two prefixes:
 
 | Prefix | Holds |
 | --- | --- |
@@ -91,15 +91,24 @@ This costs you the local data, which is the intent — the volume holds nothing 
 
 Each service evolves its own tables through its own migrations. This file only creates the empty schemas and denies each role access to the other's, which is the boundary `docs/foudation.md` requires.
 
-### Another PostgreSQL on port 5432
+### Host ports already in use
 
-PostgreSQL is published on host port 5432 by default. If something else already holds it, set `POSTGRES_HOST_PORT` in `.env` or the shell:
+Three host ports can be moved when another program on the machine already holds them. Set the variable in `.env` or the shell:
+
+| Variable | Default | Service |
+| --- | --- | --- |
+| `POSTGRES_HOST_PORT` | 5432 | `postgres` |
+| `STORAGE_HOST_PORT` | 9000 | `storage` (the S3 API) |
+| `WORKER_HOST_PORT` | 3002 | `worker` |
 
 ```sh
-POSTGRES_HOST_PORT=55432 docker compose up --build -d --wait
+export POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002
+docker compose up --build -d --wait
+node scripts/seed-source-video.mjs
+node scripts/smoke-local-integration.mjs
 ```
 
-Only the host side moves. The services still reach `postgres:5432` inside the network, so nothing else changes. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, then needs `DATABASE_PORT` set to the same value.
+Only the host side moves. The services still reach `postgres:5432`, `storage:9000` and `worker:3002` inside the network, so nothing else changes. The smoke reads `STORAGE_HOST_PORT` to reach the bucket from the host, so the same exports run the whole gate. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, needs `DATABASE_PORT` set to the value of `POSTGRES_HOST_PORT`.
 
 ### Worker sizing
 
