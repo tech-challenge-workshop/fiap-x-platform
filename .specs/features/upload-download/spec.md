@@ -110,7 +110,7 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 | UPL-15 | P1: The API can sign URLs the client can use | Execute | Implementing (T1 done; T8 proves it in the gate) |
 | UPL-16 | P2: Abandoned uploads are discarded | Execute | Implementing (T2 done; T8 documents it and runs it in the gate) |
 | UPL-17 | P3: The smoke proves the real flow | Tasks | In Tasks |
-| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Tasks | In Tasks |
+| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Execute | Implementing (T3 database script regenerated; T4 removes the seed) |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
