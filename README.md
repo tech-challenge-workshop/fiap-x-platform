@@ -91,6 +91,16 @@ This costs you the local data, which is the intent — the volume holds nothing 
 
 Each service evolves its own tables through its own migrations. This file only creates the empty schemas and denies each role access to the other's, which is the boundary `docs/foudation.md` requires.
 
+### Another PostgreSQL on port 5432
+
+PostgreSQL is published on host port 5432 by default. If something else already holds it, set `POSTGRES_HOST_PORT` in `.env` or the shell:
+
+```sh
+POSTGRES_HOST_PORT=55432 docker compose up --build -d --wait
+```
+
+Only the host side moves. The services still reach `postgres:5432` inside the network, so nothing else changes. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, then needs `DATABASE_PORT` set to the same value.
+
 ### Worker sizing
 
 `WORKER_CPUS` sets both the Worker's CPU limit (`cpus`) and its FFmpeg thread count (`FFMPEG_THREADS`). It defaults to 2; set it in `.env` or the shell to change both. FFmpeg reads the host's core count rather than the container's limit, so the two must agree (AD-006). `node scripts/check-worker-sizing.mjs` reads the rendered `docker compose config` and fails, naming both values, when they do not. It also fails when `WORKER_CPUS` exceeds the Docker engine's CPU count, because Docker refuses to start a container with a larger limit. It runs in the build gate and in CI.

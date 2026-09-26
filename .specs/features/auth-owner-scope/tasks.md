@@ -79,13 +79,15 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] Unset, `docker compose config` still renders `5432:5432`
-- [ ] With `POSTGRES_HOST_PORT=55432`, the stack comes up healthy while another process holds 5432, and the services still reach `postgres:5432` inside the network
-- [ ] The README says how to use it (and that the database e2e suites then need `DATABASE_PORT` set to the same value)
-- [ ] Full gate passes
+- [x] Unset, `docker compose config` still renders `5432:5432`
+- [x] With `POSTGRES_HOST_PORT=55432`, the stack comes up healthy while another process holds 5432, and the services still reach `postgres:5432` inside the network
+- [x] The README says how to use it (and that the database e2e suites then need `DATABASE_PORT` set to the same value)
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**: unset renders `published: "5432"`, set renders `"55432"`. With `fortal-postgres` on 5432, `up --build -d --wait` brought every service but `api` to healthy (`api` needs T1's `OIDC_*`), and the Catalog and Notification migrations ran over `postgres:5432`. On this machine the gate also remapped the host ports 9000 and 3002 through an uncommitted override, because another project holds them.
 
 ---
 

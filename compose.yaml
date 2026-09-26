@@ -135,7 +135,10 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     ports:
-      - "5432:5432"
+      # POSTGRES_HOST_PORT (from .env or the shell) moves only the host side,
+      # for a machine where another PostgreSQL already holds 5432. Services
+      # always reach postgres:5432 inside the network.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       # Runs only on an empty volume. See README: a stale volume needs
       # `docker compose down -v`.
