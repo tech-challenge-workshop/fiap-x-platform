@@ -6,16 +6,66 @@ services:
     environment:
       - PORT=3000
       - CATALOG_BASE_URL=http://catalog:3001
+      # The issuer is the public hostname the identity service is pinned to,
+      # so a token requested from the host validates inside the network. The
+      # key set is fetched from the internal address, not discovered: the
+      # discovery document advertises jwks_uri on localhost.
+      - OIDC_ISSUER=http://localhost:8080/realms/fiapx
+      - OIDC_AUDIENCE=fiapx-api
+      - OIDC_JWKS_URL=http://identity:8080/realms/fiapx/protocol/openid-connect/certs
     depends_on:
       rabbitmq:
         condition: service_healthy
       catalog:
+        condition: service_healthy
+      identity:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
+
+  identity:
+    # OIDC provider (AD-005). Development mode with its embedded database and
+    # no volume: every start imports the realm from the versioned file, so
+    # nothing configured by hand in the console outlives a restart. The
+    # users' ids are pinned in that file, so their `sub` survives the
+    # re-import.
+    image: quay.io/keycloak/keycloak:26.7.4
+    command: start-dev --import-realm
+    environment:
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      - KC_HEALTH_ENABLED=true
+      # One issuer for every token, whether requested from the host or from
+      # inside the network. The API validates exactly this value.
+      - KC_HOSTNAME=http://localhost:8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./identity/fiapx-realm.json:/opt/keycloak/data/import/fiapx-realm.json:ro
+    # The embedded database lives in memory, so it is empty on every start,
+    # a plain restart included: without this, a restart that keeps the
+    # container finds the realm already there, skips the import, and keeps
+    # whatever was changed by hand.
+    tmpfs:
+      - /opt/keycloak/data/h2:uid=1000,gid=0,mode=0770
+    healthcheck:
+      # The image has bash but no curl or wget, so readiness is read over
+      # /dev/tcp from the management port, which stays internal.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '"UP"' <&3
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   catalog:
     build: ../processing-catalog

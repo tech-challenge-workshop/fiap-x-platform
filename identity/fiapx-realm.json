@@ -1,0 +1,67 @@
+{
+  "realm": "fiapx",
+  "enabled": true,
+  "registrationAllowed": false,
+  "attributes": {
+    "fiapxNote": "Local development realm, imported on every start of the identity service. The demo passwords below are development credentials only; nothing here reaches a deployed environment (AD-005 keeps secrets in Kubernetes secrets). Each user's id is pinned so that its sub survives a re-import."
+  },
+  "clients": [
+    {
+      "clientId": "fiapx-cli",
+      "name": "FIAP X command line (development only)",
+      "description": "Public client for scripts/get-token.mjs and the smoke. It allows only the password grant, which OAuth 2.1 discourages: acceptable for a local development client, never for a deployed one. No standard flow, no secret.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "fiapx-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "fiapx-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "0f1c3a52-7a2e-4d8b-9c61-a11ce0000001",
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@fiapx.local",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-dev-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "0f1c3a52-7a2e-4d8b-9c61-b0b000000002",
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@fiapx.local",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-dev-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
