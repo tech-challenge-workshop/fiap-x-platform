@@ -51,6 +51,7 @@ function withRule(id, change) {
   return OWNED_RULES.map((rule) => (rule.ID === id ? { ...rule, ...change } : rule));
 }
 const withAbort = (change) => withRule('abort-incomplete-uploads', change);
+const withExpireZips = (change) => withRule('expire-zips', change);
 
 // Keys sorted at every level and rules sorted by ID, so two configurations
 // compare equal exactly when they hold the same rules.
@@ -148,12 +149,17 @@ export const SCENARIOS = [
     prepare: [create, lifecycle(withRule('expire-zips', { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 3 } }))],
     expect: { exit: 0, rules: true },
   },
+  // The expiry rules get the same variations as the abort rule (V42): a
+  // disabled or narrowed expire-zips must be rewritten, not taken as configured.
+  { name: 'expire-disabled', prepare: [create, lifecycle(withExpireZips({ Status: 'Disabled' }))], expect: { exit: 0, rules: true } },
+  { name: 'expire-narrowed', prepare: [create, lifecycle(withExpireZips({ Filter: { Prefix: 'zips/x/' } }))], expect: { exit: 0, rules: true } },
   { name: 'policy', prepare: [create, openPolicy], expect: { exit: 1, stderr: (bucket) => `bucket ${bucket} has a bucket policy` } },
 ];
 
 // The scenarios --self-test requires, in order.
 const REQUIRED_SCENARIOS = [
-  'fresh', 'rerun', 'upgrade', 'foreign', 'abort-disabled', 'abort-2-days', 'abort-narrowed', 'abort-extra-expiration', 'expire-extra-abort', 'policy',
+  'fresh', 'rerun', 'upgrade', 'foreign', 'abort-disabled', 'abort-2-days', 'abort-narrowed', 'abort-extra-expiration', 'expire-extra-abort',
+  'expire-disabled', 'expire-narrowed', 'policy',
 ];
 
 // Judges one scenario's observation against its expectation.
@@ -281,6 +287,8 @@ function selfTest() {
     'abort-narrowed': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
     'abort-extra-expiration': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
     'expire-extra-abort': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
+    'expire-disabled': { exit: 0, stdout: rewrote, stderr: '', before: pretty(withExpireZips({ Status: 'Disabled' })), after: owned },
+    'expire-narrowed': { exit: 0, stdout: rewrote, stderr: '', before: pretty(withExpireZips({ Filter: { Prefix: 'zips/x/' } })), after: owned },
     policy: { exit: 1, stdout: '', stderr: policyRefusal, before: null, after: null },
   };
   const bad = (name, change) => check(name, { ...good[name], ...change });
@@ -290,6 +298,8 @@ function selfTest() {
   const narrowed = withAbort({ Filter: { Prefix: 'sources/' } });
   const extraExpiration = withAbort({ Expiration: { Days: 30 } });
   const extraAbort = withRule('expire-zips', { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 3 } });
+  const expireDisabled = withExpireZips({ Status: 'Disabled' });
+  const expireNarrowed = withExpireZips({ Filter: { Prefix: 'zips/x/' } });
   const allLines = ALREADY_CONFIGURED.map((line) => JSON.stringify(line)).join(', ');
 
   const rejections = [
@@ -303,6 +313,8 @@ function selfTest() {
     ['abort rule narrowed', () => assertOwnedRules(pretty(narrowed)), found(narrowed)],
     ['abort rule with an extra Expiration (near-miss: every owned field is right)', () => assertOwnedRules(pretty(extraExpiration)), found(extraExpiration)],
     ['expire rule with an extra abort action', () => assertOwnedRules(pretty(extraAbort)), found(extraAbort)],
+    ['expire rule disabled', () => assertOwnedRules(pretty(expireDisabled)), found(expireDisabled)],
+    ['expire rule narrowed to a sub-prefix (near-miss: still starts with zips/)', () => assertOwnedRules(pretty(expireNarrowed)), found(expireNarrowed)],
     // assertUnchanged: bad, and a near-miss that differs by one space.
     ['configuration rewritten', () => assertUnchanged(withOperator, owned),
       `lifecycle configuration changed: before ${JSON.stringify(withOperator)}, after ${JSON.stringify(owned)}`],
@@ -342,6 +354,10 @@ function selfTest() {
     ['scenario abort-narrowed left narrowed', bad('abort-narrowed', { after: pretty(narrowed) }), found(narrowed)],
     ['scenario abort-extra-expiration keeping the Expiration', bad('abort-extra-expiration', { after: pretty(extraExpiration) }), found(extraExpiration)],
     ['scenario expire-extra-abort keeping the abort action', bad('expire-extra-abort', { after: pretty(extraAbort) }), found(extraAbort)],
+    ['scenario expire-disabled left disabled', bad('expire-disabled', { stdout: already, after: pretty(expireDisabled) }), found(expireDisabled)],
+    ['scenario expire-narrowed left narrowed', bad('expire-narrowed', { stdout: already, after: pretty(expireNarrowed) }), found(expireNarrowed)],
+    ['scenario expire-disabled failing the repair', bad('expire-disabled', { exit: 1, stderr: 'expected exactly 3 enabled lifecycle rules\n', after: pretty(expireDisabled) }),
+      'bootstrap exited 1, expected 0; stderr: expected exactly 3 enabled lifecycle rules'],
     ['scenario policy accepted', bad('policy', { exit: 0, stderr: '' }), 'bootstrap exited 0, expected 1'],
     ['scenario policy refused for another bucket (near-miss)', bad('policy', { stderr: policyRefusal.replace('fiapx-scenario-policy', 'fiapx-scenario-policy-2') }),
       `bootstrap's stderr does not contain "bucket fiapx-scenario-policy has a bucket policy"; stderr: ${policyRefusal.replace('fiapx-scenario-policy', 'fiapx-scenario-policy-2').trim()}`],

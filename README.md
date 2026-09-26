@@ -175,7 +175,7 @@ Objects under both prefixes expire **7 days** after creation. That is a product 
 
 `storage/bootstrap.sh` runs in the one-shot `storage-init` service (`amazon/aws-cli`) **on every start**, and the Worker does not start until it has succeeded. That is the opposite of the database bootstrap below, which runs only on an empty volume. So every step is idempotent: it creates the bucket only if it is missing, fails if the bucket has any bucket policy (the only way the S3 API grants anonymous access) without ever setting one, and writes its three lifecycle rules only when one is missing or wrong — refusing, rather than overwriting, any lifecycle rule it does not own. The rules are `expire-sources`, `expire-zips` and `abort-incomplete-uploads`, and a bucket carrying only the first two is upgraded in place. The API also waits for it, because it signs URLs for that bucket. A volume left over from an earlier run is therefore brought up to date instead of failing.
 
-`node scripts/check-storage-bootstrap.mjs` runs the real `storage/bootstrap.sh` through `storage-init` against ten scenarios, each on its own scratch bucket `fiapx-scenario-<name>` that it deletes before and after; the live `fiapx` bucket is never touched. It fails naming each scenario whose outcome is wrong:
+`node scripts/check-storage-bootstrap.mjs` runs the real `storage/bootstrap.sh` through `storage-init` against twelve scenarios, each on its own scratch bucket `fiapx-scenario-<name>` that it deletes before and after; the live `fiapx` bucket is never touched. It fails naming each scenario whose outcome is wrong:
 
 | Scenario | The bootstrap must |
 | --- | --- |
@@ -185,6 +185,7 @@ Objects under both prefixes expire **7 days** after creation. That is a product 
 | `foreign` | Refuse, naming it, a lifecycle rule it does not own, and exit 1 |
 | `abort-disabled`, `abort-2-days`, `abort-narrowed` | Rewrite a disabled, lengthened or narrowed abort rule to the owned one |
 | `abort-extra-expiration`, `expire-extra-abort` | Rewrite an owned rule that carries an extra action to exactly the owned one |
+| `expire-disabled`, `expire-narrowed` | Rewrite a disabled `expire-zips`, or one narrowed to `zips/x/`, to the owned one |
 | `policy` | Refuse a bucket that has a bucket policy, and exit 1 |
 
 The owned rules are literals in the runner, so a rule changed in the bootstrap fails instead of moving the expectation. `BOOTSTRAP_UNDER_TEST` mounts another copy of the bootstrap, so a literal negative runs on a scratch copy. Its `--self-test` needs no stack: it gives every assertion a bad, a near-miss and a good observation, and spawns the script with a compose file that has no `storage-init`, which must exit non-zero naming the scenario. CI's `topology` job and the build gate run it.
