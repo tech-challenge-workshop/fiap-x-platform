@@ -40,7 +40,7 @@
 - **Trade-off**: The team operates its own dependencies instead of consuming managed services, and the cloud-deployment story becomes documented evolution rather than delivered work. In exchange, no slice is blocked and the protocol-level ports keep a later migration to a managed provider at the cost of adapters and environment variables.
 - **Scope**: All FIAP X services, specifications, and deployment artifacts. Supersedes AD-002.
 - **Date**: 2026-09-19
-- **Status**: active
+- **Status**: active (the object storage server was amended by AD-014: RustFS replaces MinIO behind the same S3 port)
 
 ### AD-006
 - **Decision**: The Processing Worker stays on NestJS and runs FFmpeg in a child process. Concurrency comes from a configured `prefetchCount` per queue, an explicit `ffmpeg -threads` value matched to the pod's CPU limit, and horizontal replicas scaled by queue depth. `worker_threads` is not used.
@@ -104,6 +104,14 @@
 - **Trade-off**: `PROCESSING` can be skipped when the completion wins the race, so the state is no longer proof that a start was observed — the Worker still publishes it first, and a completion is taken as proof that processing began. This supersedes the S2 rule that a completion from `QUEUED` means a lost `ProcessingStarted`. Two events for the same request now serialize on the lock, which costs nothing at one row per request.
 - **Scope**: `processing-catalog` domain and application layers.
 - **Date**: 2026-09-24
+- **Status**: active
+
+### AD-014
+- **Decision**: Local object storage is RustFS (`rustfs/rustfs:1.0.0`) in a vendor-neutral `storage` service, and every script in this repository that touches storage (bootstrap, seed, smoke) uses `amazon/aws-cli` through a `storage-init` service. MinIO and `mc` are removed. Privacy is asserted as "no bucket policy" plus the smoke's anonymous-GET-is-403 check; retention as exactly two 7-day prefix rules read back through JMESPath.
+- **Reason**: On 2026-09-26 MinIO's public images stopped being pullable anonymously from every registry (`quay.io/minio/*` 401, Docker Hub `minio/minio` 404, Bitnami's mirror gone), checked against a control image on each registry. The stack only started where the images were cached, and `processing-worker`'s CI failed at `docker run`. A spike showed RustFS covers every S4 guarantee through the S3 API: bucket create/head, two 7-day lifecycle rules read back verbatim, `NoSuchBucketPolicy` and anonymous 403 on a new bucket, 200 under a public policy and 403 again once it is deleted, head-object size and 404; multi-arch images and an HTTP `/health`.
+- **Trade-off**: RustFS is younger than MinIO (1.0.0 released 2026-09-16), so behaviour outside what the smoke asserts is less proven. In exchange, no script depends on a storage vendor's CLI any more: replacing the server again is an image and credentials change, which is what AD-005 intended and what this incident showed was not yet true.
+- **Scope**: `fiap-x-platform` topology and scripts; the object storage used by `processing-worker`'s CI.
+- **Date**: 2026-09-26
 - **Status**: active
 
 ## Handoff

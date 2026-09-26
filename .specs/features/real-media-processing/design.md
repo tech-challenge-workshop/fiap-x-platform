@@ -5,6 +5,8 @@
 
 ---
 
+> **Superseded in part by `replace-object-storage` (AD-014, 2026-09-26).** MinIO's public images were withdrawn, so the storage server is now RustFS (`rustfs/rustfs:1.0.0`) in a `storage` service, and the bootstrap, seed and smoke use `amazon/aws-cli` in a `storage-init` service instead of `mc` in `minio-init`. The guarantees below are unchanged and still asserted; the MinIO- and `mc`-specific mechanics described in this document are history. See `.specs/features/replace-object-storage/`.
+
 ## Project decisions this design conforms to
 
 Read from `.specs/STATE.md` `## Decisions`.
@@ -202,7 +204,7 @@ One bucket with two prefixes rather than two buckets: both are private to the sa
 
 | Decision | Choice | Rationale |
 | --- | --- | --- |
-| Storage implementation | MinIO | It *is* the S3 API, including presigned and multipart, which S6 needs. LocalStack would bring an emulator of a whole cloud to provide one service |
+| Storage implementation | MinIO (superseded by RustFS, AD-014) | It *is* the S3 API, including presigned and multipart, which S6 needs. LocalStack would bring an emulator of a whole cloud to provide one service |
 | Bootstrap mechanism | One-shot `minio/mc` service, not an entry-point script | The image ships `mc`; a hand-rolled script would reimplement the client. `service_completed_successfully` then gives real ordering rather than a sleep |
 | Access posture | Assert private, never set | MinIO buckets start private. A `set` could only loosen the posture, and asserting catches a volume someone loosened by hand |
 | Retention mechanism | Bucket lifecycle rule | The storage already does this. A cron deleting objects would duplicate it and could disagree with it |
