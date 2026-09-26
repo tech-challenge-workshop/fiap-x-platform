@@ -243,7 +243,7 @@ The checks each repository's `protect main` ruleset must require are versioned i
 - `node scripts/apply-required-checks.mjs --dry-run` prints, per repository, the checks it would add and remove, and changes nothing. `--apply` puts each differing ruleset back with only its required-checks list replaced; every other rule and the strict-policy flag are kept as read. Applying changes GitHub settings: run `--dry-run` first, `--apply` only with an explicit go-ahead, then `--live`.
 - Both have a `--self-test` that injects the rulesets and never calls GitHub.
 
-`docs-links` is informational: its job sets `continue-on-error`, so requiring it requires that it ran, not that every link resolves. The build gate's last step is what holds links to zero.
+`docs-links` fails when any relative link in `README.md` or `docs/` does not resolve, so requiring it keeps the links at zero on every merge.
 
 ### The build gate
 

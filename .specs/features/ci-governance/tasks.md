@@ -209,7 +209,7 @@ Also add the real workflow check to `topology`.
   ```
   Afterwards every ruleset still shows its 2026-09-20 `updated_at` and its old list.
 - **README.** A "CI and the required checks" section: `integration` always runs the stack, the workflow check, `ci/required-checks.json`, `--live`, and the apply script's two modes. The build gate gains step 14; the layout gains `ci/`. The `docs-links` script reports `0 unresolved link(s)`. Every other script's `--self-test` still passes.
-- **Finding.** The `docs-links` job sets `continue-on-error: true`, so requiring it only requires that it ran; a broken link still merges. The README says so. Making it blocking is outside this task.
+- **Finding, fixed by the user's decision (2026-09-26).** The `docs-links` job set `continue-on-error: true` and its script never exited non-zero, so requiring it only required that it ran. Both are fixed in a follow-up commit on this branch: the job no longer sets `continue-on-error`, and the script exits 1 on any unresolved link (negative: a README with `[broken](nope.md)` → exit 1, `1 unresolved link(s)`).
 
 ---
 

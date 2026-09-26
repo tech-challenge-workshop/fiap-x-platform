@@ -123,9 +123,10 @@ jobs:
         run: docker compose down -v
 
   docs-links:
+    # A required check (ci/required-checks.json): an unresolved relative link
+    # in README.md or docs/ fails it, so it blocks the merge.
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Report relative links that do not resolve
@@ -145,5 +146,6 @@ jobs:
                   if t and not (f.parent / t).exists():
                       missing.append(str(f) + ': [' + text + '](' + target + ')')
           print('\n'.join(missing) if missing else 'all relative links resolve')
-          print(str(len(missing)) + ' unresolved link(s) - informational only')
+          print(str(len(missing)) + ' unresolved link(s)')
+          raise SystemExit(1 if missing else 0)
           PY
