@@ -14,7 +14,11 @@
 //   no token           SERVICES_READ_TOKEN appears nowhere in the workflow:
 //                      the four service repositories are public;
 //   the stack steps    the eight stack commands of the build gate run in
-//                      this order, and no other stack command is mixed in.
+//                      this order, and no other stack command is mixed in;
+//   docs-links         the `docs-links` job sets no `if:`, `shell:` or
+//                      `continue-on-error`, conditions no step, and runs
+//                      `node scripts/check-docs-links.mjs` as a one-line step.
+
 //
 // The block is parsed as text: the repository has no package.json, and the
 // scripts use only Node's standard library. A reformatted workflow that the
@@ -67,6 +71,9 @@ const STACK_COMMANDS = [
 ];
 const STACK_SET = new Set(STACK_COMMANDS);
 const TOKEN = 'SERVICES_READ_TOKEN';
+const DOCS_LINKS = 'node scripts/check-docs-links.mjs';
+const DOCS_RUN_MESSAGE = `the docs-links job must run "${DOCS_LINKS}" as a one-line step of its own`;
+
 
 function fail(message) {
   console.error(`check-ci-governance: ${message}`);
@@ -79,10 +86,10 @@ const unquote = (value) => {
   return /^(['"]).*\1$/.test(v) ? v.slice(1, -1) : v;
 };
 
-// The `integration:` key directly under `jobs:` and every line indented deeper
+// The `<name>:` job key directly under `jobs:` and every line indented deeper
 // than it. Returns { start, lines } with `start` the 1-based line number of
 // the key, or undefined when there is no such job.
-function integrationBlock(text) {
+function jobBlock(text, name) {
   const lines = text.split('\n');
   const jobs = lines.findIndex((line) => /^jobs:\s*$/.test(line));
   if (jobs === -1) return undefined;
@@ -93,7 +100,7 @@ function integrationBlock(text) {
     const indent = indentOf(line);
     if (indent === 0) return undefined;
     jobIndent ??= indent;
-    if (indent !== jobIndent || !/^\s*integration:\s*$/.test(line)) continue;
+    if (indent !== jobIndent || line.trim() !== `${name}:`) continue;
     const block = [];
     for (let j = i + 1; j < lines.length; j += 1) {
       if (lines[j].trim() !== '' && indentOf(lines[j]) <= jobIndent) break;
@@ -188,7 +195,7 @@ function workflowDefaults(text) {
 // Every problem with the workflow text, in the order the file shows them.
 // An empty list means the integration job always runs the stack.
 function workflowProblems(text) {
-  const block = integrationBlock(text);
+  const block = jobBlock(text, 'integration');
   if (!block) return ['the workflow has no `integration` job under `jobs:`'];
   const problems = [];
   const { keys, steps } = parseSteps(block.lines);
@@ -247,8 +254,31 @@ function workflowProblems(text) {
     problems.push(`integration stack step ${i + 1} must be ${expected}, but ${actual}`);
     break;
   }
+  return [...problems, ...docsLinksProblems(text)];
+}
+
+// Rule 4: the docs-links job is blocking. It is never conditioned, never lets
+// a red step pass, keeps the default shell, and runs the link check as the
+// whole one-line `run:` of an unconditioned step.
+function docsLinksProblems(text) {
+  const block = jobBlock(text, 'docs-links');
+  if (!block) return ['the workflow has no `docs-links` job under `jobs:`'];
+  const problems = [];
+  const { keys, steps } = parseSteps(block.lines);
+  if (Object.hasOwn(keys, 'if')) problems.push('the docs-links job must not set if');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?shell:/.test(line))) problems.push('the docs-links job must not set shell');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?continue-on-error:/.test(line))) {
+    problems.push('the docs-links job must not set continue-on-error');
+  }
+  for (const step of steps) {
+    if (step.if === undefined) continue;
+    const label = step.name ?? step.run ?? step.uses ?? `#${step.index}`;
+    problems.push(`docs-links step "${label}" must not be conditioned on "${expressionOf(step.if)}"`);
+  }
+  if (!steps.some((step) => !step.multiline && step.run === DOCS_LINKS)) problems.push(DOCS_RUN_MESSAGE);
   return problems;
 }
+
 
 function main() {
   let text;
@@ -259,7 +289,8 @@ function main() {
   }
   const problems = workflowProblems(text);
   if (problems.length > 0) fail(problems.join('\ncheck-ci-governance: '));
-  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token`);
+  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token; docs-links runs ${DOCS_LINKS} unconditionally`);
+
 }
 
 // The versioned required checks: repository -> non-empty list of check names.
@@ -426,9 +457,11 @@ jobs:
 
   docs-links:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 5
     steps:
-      - run: echo links
+      - uses: actions/checkout@v4
+      - name: Report relative links that do not resolve
+        run: node scripts/check-docs-links.mjs
 `;
 
 function replaceOnce(text, from, to) {
@@ -597,6 +630,19 @@ function selfTest() {
   const alwaysOnLogs = replaceOnce(GOOD, '      - name: Upload container logs\n        if: failure()\n', '      - name: Upload container logs\n        if: always()\n');
   const failureTeardown = replaceOnce(GOOD, '        if: \${{ always() }}\n', '        if: failure()\n');
   const continueOnStep = replaceOnce(GOOD, SECOND_SMOKE, `${SECOND_SMOKE}        continue-on-error: true\n`);
+  const DOCS_JOB = '  docs-links:\n    runs-on: ubuntu-latest\n';
+  const DOCS_STEP = '      - name: Report relative links that do not resolve\n';
+  const docsContinue = replaceOnce(GOOD, DOCS_JOB, `${DOCS_JOB}    continue-on-error: true\n`);
+  const docsPython = replaceOnce(
+    GOOD,
+    `${DOCS_STEP}        run: ${DOCS_LINKS}\n`,
+    `${DOCS_STEP}        run: |\n          python3 - <<'PY'\n          print('0 unresolved link(s)')\n          raise SystemExit(0)\n          PY\n`,
+  );
+  const docsIf = replaceOnce(GOOD, DOCS_JOB, `${DOCS_JOB}    if: github.event_name == 'push'\n`);
+  const docsStepIf = replaceOnce(GOOD, DOCS_STEP, `${DOCS_STEP}        if: failure()\n`);
+  const docsOrTrue = replaceOnce(GOOD, `run: ${DOCS_LINKS}\n`, `run: ${DOCS_LINKS} || true\n`);
+  const docsShell = replaceOnce(GOOD, DOCS_STEP, `${DOCS_STEP}        shell: bash {0}\n`);
+  const noDocs = replaceOnce(GOOD, '  docs-links:\n', '  docs-links-disabled:\n');
 
 
   const rejections = [
@@ -639,6 +685,15 @@ function selfTest() {
       'step "Tear the stack down" must not be conditioned on "failure()"',
     ]],
     ['continue-on-error on a stack step (near-miss)', continueOnStep, ['the integration job must not set continue-on-error']],
+    ['M8: continue-on-error back on docs-links', docsContinue, ['the docs-links job must not set continue-on-error']],
+    ['M9: the inline Python kept, exiting 0 on missing links', docsPython, [DOCS_RUN_MESSAGE]],
+    ['an if: on the docs-links job', docsIf, ['the docs-links job must not set if']],
+    ['failure() on the link step (near-miss)', docsStepIf, [
+      'docs-links step "Report relative links that do not resolve" must not be conditioned on "failure()"',
+    ]],
+    ['the link check masked by || true (near-miss)', docsOrTrue, [DOCS_RUN_MESSAGE]],
+    ['a shell: override on the docs-links job (near-miss)', docsShell, ['the docs-links job must not set shell']],
+    ['no docs-links job', noDocs, ['the workflow has no `docs-links` job under `jobs:`']],
     ['no integration job', noIntegration, ['the workflow has no `integration` job under `jobs:`']],
     ['a recreate that skips storage-init (near-miss)', recreateNearMiss, [
       `integration stack step 6 must be "${RECREATE}", but it is "${SMOKE}"`,

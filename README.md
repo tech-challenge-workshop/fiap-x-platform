@@ -235,7 +235,16 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 
 The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main`, without a token, since they are public. It then runs the build gate's steps 6 to 11 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, and the smoke and identity check again. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
 
-`node scripts/check-ci-governance.mjs` guards that: it fails when the `integration` job gains a condition other than `failure()` or `always()`, sets `continue-on-error`, references `SERVICES_READ_TOKEN`, or stops running the eight stack commands in order. CI's `topology` job runs it and its `--self-test`.
+`node scripts/check-ci-governance.mjs` guards that. It fails, naming the job or step, when:
+
+- the `integration` job sets `if:`, `shell:` or `continue-on-error`, or the workflow sets a default shell;
+- a step other than `Collect container logs` and `Upload container logs` (which may carry `failure()`) or `Tear the stack down` (which may carry `always()`) is conditioned, or a step that runs a stack command is;
+- a stack command is not the whole one-line `run:` of its own step, so that no `set +e` or `|| true` can surround it;
+- the workflow references `SERVICES_READ_TOKEN`;
+- the eight stack commands stop running in order;
+- the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step.
+
+Renaming one of the three conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
 
 The checks each repository's `protect main` ruleset must require are versioned in [`ci/required-checks.json`](ci/required-checks.json): `quality` and `image` for the four services, and `topology`, `docs-links` and `integration` for this repository. A job renamed in a workflow must be renamed there in the same change.
 
@@ -243,7 +252,7 @@ The checks each repository's `protect main` ruleset must require are versioned i
 - `node scripts/apply-required-checks.mjs --dry-run` prints, per repository, the checks it would add and remove, and changes nothing. `--apply` puts each differing ruleset back with only its required-checks list replaced; every other rule and the strict-policy flag are kept as read. Applying changes GitHub settings: run `--dry-run` first, `--apply` only with an explicit go-ahead, then `--live`.
 - Both have a `--self-test` that injects the rulesets and never calls GitHub.
 
-`docs-links` fails when any relative link in `README.md` or `docs/` does not resolve, so requiring it keeps the links at zero on every merge.
+`docs-links` runs `node scripts/check-docs-links.mjs`, which prints each relative link in `README.md` or `docs/` that does not resolve, then `N unresolved link(s)`, and exits 1 when N is not zero. Requiring it keeps the links at zero on every merge. Its `--self-test` writes a broken and a good tree to a temporary directory and requires the exact report and exit code for each, including from a spawned run; CI's `topology` job runs it.
 
 ### The build gate
 
@@ -261,7 +270,7 @@ The last task of each phase runs every check in this order, from the repository 
 10. `docker compose up -d --wait --force-recreate identity storage-init api`.
 11. The smoke and `node scripts/check-identity.mjs` again.
 12. `docker compose down -v`.
-13. The `docs-links` job's script from [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which must report `0 unresolved link(s)`.
+13. `node scripts/check-docs-links.mjs`, which must report `0 unresolved link(s)`, and its `--self-test`.
 14. `node scripts/check-ci-governance.mjs`, its `--self-test` and `--live`, and `node scripts/apply-required-checks.mjs --self-test`.
 
 Step 10 recreates rather than restarts. A recreated `identity` starts from an empty database on tmpfs and re-imports the realm, so `sub pinned` proves the demo users' ids survive it; a recreated `storage-init` reruns the bootstrap on a bucket that already exists; and a recreated `api` must find both again. A plain restart would keep each container's state and prove none of that. When a host port is taken, export the variables from [Host ports already in use](#host-ports-already-in-use) first; the same exports run the whole gate.
@@ -276,7 +285,8 @@ Step 10 recreates rather than restarts. A recreated `identity` starts from an em
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
 | `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
-| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier |
+| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check |
+
 | `ci/` | The required checks of each repository's `protect main` ruleset |
 | `fixtures/` | The committed source video the smoke uploads, the corrupted copy that must fail in processing, and their provenance ([`fixtures/README.md`](fixtures/README.md)) |
 | `db/` | The database bootstrap and the generated database creation script |
