@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getToken } from './get-token.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPTS_DIR, '..');
@@ -274,14 +275,37 @@ function seedSources() {
   return { videoKey, notAVideoKey };
 }
 
-async function postProcessingRequest(sourceStorageKey) {
+// AUTH-17 AC1: creating a request without a token must be refused with 401.
+// A 2xx means the API let an anonymous caller in; any other status is named.
+function assertAnonymousCreateRefused(status) {
+  const call = `POST ${API_URL}/processing-requests`;
+  if (status >= 200 && status < 300) {
+    throw new Error(`Anonymous creation accepted: ${call} without a token returned ${status}; the API must refuse it with 401`);
+  }
+  if (status !== 401) {
+    throw new Error(`Anonymous ${call} without a token returned ${status}, expected 401`);
+  }
+}
+
+// The same creation call as the authenticated one, with no Authorization
+// header. Only the status is observed; the check judges it.
+async function anonymousCreateStatus(sourceStorageKey) {
   const res = await fetch(`${API_URL}/processing-requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ownerUserId: 'smoke-user',
-      sourceStorageKey,
-    }),
+    body: JSON.stringify({ sourceStorageKey }),
+  });
+  await res.arrayBuffer();
+  return res.status;
+}
+
+// The owner is the token's subject (AUTH-17 AC2): the body carries no
+// ownerUserId.
+async function postProcessingRequest(sourceStorageKey, token) {
+  const res = await fetch(`${API_URL}/processing-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ sourceStorageKey }),
   });
 
   if (!res.ok) {
@@ -367,12 +391,21 @@ export const SMOKE_STEPS = [
     report: (ctx) => `Storage refused anonymous GET of ${BUCKET}/${ctx.videoKey} and of the ${BUCKET} listing (403)`,
   },
   {
+    name: 'anonymous refused',
+    observe: async (ctx) => {
+      ctx.anonymousCreate = await anonymousCreateStatus(ctx.videoKey);
+    },
+    check: (ctx) => assertAnonymousCreateRefused(observed(ctx, 'anonymousCreate')),
+    report: () => `API refused an anonymous POST /processing-requests (401)`,
+  },
+  {
     name: 'create requests',
     observe: async (ctx) => {
-      ctx.id = await postProcessingRequest(ctx.videoKey);
-      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey);
+      const token = await getToken('alice');
+      ctx.id = await postProcessingRequest(ctx.videoKey, token);
+      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey, token);
     },
-    report: (ctx) => `Created processing request ${ctx.id}\nCreated processing request ${ctx.rejectedId} for the non-video`,
+    report: (ctx) => `Created processing request ${ctx.id} as alice\nCreated processing request ${ctx.rejectedId} for the non-video as alice`,
   },
   {
     name: 'video completed',
@@ -474,6 +507,7 @@ function syntheticZip(entries) {
 // its check, fails the self-test naming it.
 const REQUIRED_STEPS = [
   'anonymous access',
+  'anonymous refused',
   'video completed',
   'key scope',
   'rejection',
@@ -505,6 +539,7 @@ async function selfTest() {
   const leftover = join(tmpdir(), 'fiapx-smoke-self-test');
   // Literal, not FORMATO_INVALIDO_REASON: a changed constant must fail here too.
   const sentence = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
+  const createCall = `POST ${API_URL}/processing-requests`;
 
   const rejections = [
     ['frame count 16', () => checkArchiveBytes(zipKey, syntheticZip(16)),
@@ -545,6 +580,12 @@ async function selfTest() {
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['delivery observed COMPLETED', () => assertDeliverySentence(id, { status: 'COMPLETED', failureReason: sentence }),
       `Delivery for ${id}: expected FAILED with ${JSON.stringify(sentence)}, observed COMPLETED with ${JSON.stringify(sentence)}`],
+    ['anonymous creation answered 201', () => assertAnonymousCreateRefused(201),
+      `Anonymous creation accepted: ${createCall} without a token returned 201; the API must refuse it with 401`],
+    ['anonymous creation answered 500', () => assertAnonymousCreateRefused(500),
+      `Anonymous ${createCall} without a token returned 500, expected 401`],
+    ['anonymous creation answered 403', () => assertAnonymousCreateRefused(403),
+      `Anonymous ${createCall} without a token returned 403, expected 401`],
   ];
 
   let scratch;
@@ -568,6 +609,7 @@ async function selfTest() {
     ['video request COMPLETED', () => assertCompleted(id, { status: 'COMPLETED', zipStorageKey: zipKey })],
     ['archive key under this request', () => assertArchiveKeyScoped(id, zipKey)],
     ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
+    ['anonymous creation refused with 401', () => assertAnonymousCreateRefused(401)],
   ];
 
   // The steps main() runs: each required step must be in SMOKE_STEPS with a
@@ -580,6 +622,7 @@ async function selfTest() {
   const good = {
     videoKey: 'sources/sample-8s.mp4',
     anonymous: { [objectUrl]: 403, [listingUrl]: 403 },
+    anonymousCreate: 401,
     id,
     rejectedId,
     completed: { status: 'COMPLETED', zipStorageKey: zipKey },
@@ -593,6 +636,8 @@ async function selfTest() {
   const stepRejections = [
     ['anonymous access', { anonymous: { [objectUrl]: 200, [listingUrl]: 403 } },
       `Anonymous access allowed: GET ${objectUrl} returned 200; the bucket must refuse requests without credentials`],
+    ['anonymous refused', { anonymousCreate: 201 },
+      `Anonymous creation accepted: ${createCall} without a token returned 201; the API must refuse it with 401`],
     ['video completed', { completed: { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } },
       `Request ${id} for the video: expected COMPLETED, observed FAILED (PROCESSAMENTO_FALHOU)`],
     ['key scope', { completed: { status: 'COMPLETED', zipStorageKey: 'zips/another-request/attempt/frames.zip' } },

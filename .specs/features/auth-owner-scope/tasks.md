@@ -162,11 +162,11 @@ T8 -> T9
 **Done when**:
 - [x] The script contains `idx_processing_request_owner_created` and no longer creates `idx_processing_request_owner`
 - [x] Applied to an empty database, it yields the same indexes as running the migrations
-- [ ] Build gate passes
+- [x] Build gate passes
 
 **Tests**: none
 **Gate**: build
-**Status**: ⚠️ Partial. The script is done and proven. The build gate is green except the real smoke, which T4 unblocks.
+**Status**: ✅ Complete. The build gate went fully green with T4 (see T4's evidence), the real smoke included.
 **Evidence**: generated from `processing-catalog` `bd9154c`. The script replays the migrations in order, so it still has the first migration's `CREATE INDEX … idx_processing_request_owner`, followed now by `DROP INDEX IF EXISTS idx_processing_request_owner`. That reads "no longer creates" as net effect. The script applied with `ON_ERROR_STOP=1` to an empty `postgres:17-alpine` with no published port (container removed). Its 7 indexes (name and definition) and its tables are identical to the stack's migrations-run database (ledger: all three Catalog migrations plus the Notification one). `idx_processing_request_owner_created` is present and `idx_processing_request_owner` absent. Build gate (with `POSTGRES_HOST_PORT=55432` and the T10 port override): config, sizing and its self-test, `up --build --wait`, seed, smoke `--self-test` (9 / 28 / 20), the second `up` (`alice`'s `sub` unchanged) and `down -v` all pass. The real smoke stops at `Create request failed: 401`: its creation is still anonymous against the now-authenticated API, which T4 changes.
 **Found during Execute**: `scripts/generate-db-script.mjs` silently dropped the new migration's `DROP INDEX`, because Prettier wrapped that call with a trailing comma and the pattern did not allow one. As generated, the old index would have survived, which failed both criteria above. The pattern now accepts the comma. The generator also fails when `up()` makes more `query()` calls than it could read. A copy with the old pattern exits 1 with `1789955000000-IndexProcessingRequestOwnerCreatedAt.ts: up() makes 2 query() calls but only 1 could be read`.
 
@@ -217,12 +217,14 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] Every S4 step still passes with creation authenticated
-- [ ] The self-test requires `anonymous refused` and rejects a 201 and a 500 with their exact messages
-- [ ] Quick gate passes
+- [x] Every S4 step still passes with creation authenticated
+- [x] The self-test requires `anonymous refused` and rejects a 201 and a 500 with their exact messages
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: creation now sends `alice`'s token from `getToken('alice')` and a body of `{sourceStorageKey}` only. The step `anonymous refused` posts the same body without a token and `assertAnonymousCreateRefused` requires 401: a 2xx fails `Anonymous creation accepted: POST <api>/processing-requests without a token returned 201; the API must refuse it with 401`, any other status `Anonymous POST <api>/processing-requests without a token returned 500, expected 401`. Self-test: 10 required steps, 32 bad inputs (201, 500, the near-miss 403, and the step given 201), 22 good inputs (401, and the step given good observations). A scratch copy whose step check does nothing fails the self-test naming the step. Build gate run in full (only the three host-port exports, no override): config, sizing and its self-test, `up --build --wait`, seed, the real smoke green with every S4 step plus `API refused an anonymous POST /processing-requests (401)` and both requests `created ... as alice`, the self-test, a second `up -d --wait` with `alice`'s `sub` `0f1c3a52-7a2e-4d8b-9c61-a11ce0000001` before and after, and `down -v`. That also closes T3's build gate.
 
 ---
 
