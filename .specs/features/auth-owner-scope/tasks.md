@@ -105,14 +105,17 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] `identity` healthy before `api` starts; the log shows `Realm 'fiapx' imported`
-- [ ] A token requested from the host has `iss = http://localhost:8080/realms/fiapx` and `aud` containing `fiapx-api`; one requested from inside the network has the same `iss`
-- [ ] `alice`'s `sub` is identical across two `docker compose up` runs with a re-created `identity` container
-- [ ] `registrationAllowed` is false in the realm and the client has no standard flow
-- [ ] Full gate passes (the API's own gate needs `fiap-x-api` T5 merged into its branch; before then, verify with the API service's healthcheck only)
+- [x] `identity` healthy before `api` starts; the log shows `Realm 'fiapx' imported`
+- [x] A token requested from the host has `iss = http://localhost:8080/realms/fiapx` and `aud` containing `fiapx-api`; one requested from inside the network has the same `iss`
+- [x] `alice`'s `sub` is identical across two `docker compose up` runs with a re-created `identity` container
+- [x] `registrationAllowed` is false in the realm and the client has no standard flow
+- [x] Full gate passes (the API's own gate needs `fiap-x-api` T5 merged into its branch; before then, verify with the API service's healthcheck only)
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**: Keycloak started at 04:01:26, `identity` was healthy at 04:01:27.93 and `api` started at 04:01:28.05. Tokens for `alice` from the host and from a curl container on `fiap-x-platform_default` both carry `iss` `http://localhost:8080/realms/fiapx`, `aud` `fiapx-api`, RS256 and a 300 s lifetime. `alice`'s `sub` stayed `0f1c3a52-…-a11ce0000001` across a `--force-recreate` and a plain restart (and so did `bob`'s). The admin API reads `registrationAllowed` false and `standardFlowEnabled` false. The API (`fiap-x-api` `684aeae`) answered 200 to `GET /processing-requests` with the token and 401 without it or with a tampered signature. It also accepted a token after `identity` was re-created with a new signing key.
+**Found during Execute**: a plain restart kept the embedded H2 database in the container layer, logged `Realm 'fiapx' already exists. Import skipped`, and so kept a hand change, against the spec's restart edge case. A `tmpfs` on `/opt/keycloak/data/h2` fixes it: after a `registrationAllowed` flip through the admin API and a restart, the realm was re-imported and read false again. A broken realm file makes Keycloak exit 1 (`Failed to run import`), so `identity` never turns healthy and `api` never starts.
 
 ---
 
