@@ -93,16 +93,16 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| CIG-01 | P1: Anonymous checkout, no skip path (V11) | - | Pending |
-| CIG-02 | P1: The stack steps run and fail the job (V11) | - | Pending |
-| CIG-03 | P2: Versioned required checks + live comparison (V12) | - | Pending |
-| CIG-04 | P2: Rulesets applied (V12) | - | Pending |
+| CIG-01 | P1: Anonymous checkout, no skip path (V11) | Tasks | In Tasks |
+| CIG-02 | P1: The stack steps run and fail the job (V11) | Tasks | In Tasks |
+| CIG-03 | P2: Versioned required checks + live comparison (V12) | Tasks | In Tasks |
+| CIG-04 | P2: Rulesets applied (V12) | Tasks | In Tasks |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 4 total, 0 mapped to tasks, 4 unmapped ⚠️ (mapped in Tasks)
+**Coverage:** 4 total, 4 mapped to tasks, 0 unmapped
 
 ---
 
