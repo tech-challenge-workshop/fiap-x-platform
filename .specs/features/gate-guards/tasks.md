@@ -250,13 +250,15 @@ dry run: nothing was changed
 
 **Done when**:
 
-- [ ] The self-test requires the new step. It rejects the `FORMATO_INVALIDO` sentence and a truncated sentence, and rows for another id (naming both ids)
-- [ ] A literal negative passes: a scratch smoke whose count query filters on the wrong column fails on the stack
-- [ ] The real smoke is green
-- [ ] Full gate passes
+- [x] The self-test requires the new step. It rejects the `FORMATO_INVALIDO` sentence and a truncated sentence, and rows for another id (naming both ids)
+- [x] A literal negative passes: a scratch smoke whose count query filters on the wrong column fails on the stack
+- [x] The real smoke is green
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+
+**Status**: ✅ Complete (2026-09-26). Smoke self-test 29 → 30 required steps, 168 → 176 bad inputs rejected, 58 → 59 good inputs accepted. `countDeliveries` runs `SELECT processing_request_id, count(*) … GROUP BY 1` and `listArchives` reads each key's `zips/<id>/` segment; both return `{ ids, …, queried }`, parsed by `deliveriesOf`/`listingOf` so the self-test feeds them psql and aws-cli text. `observedRowsFor` requires every id from the result to be the id under test (naming both), and falls back to `queried` only for an empty result. No row means count 0, which fails with `0 deliveries for <id>: expected exactly 1 record`; an empty listing reports `No archive under zips/<id>/`. New step `processing failure reason` (after `processing failure delivery`, in `REQUIRED_STEPS` and the README's table) reads the request as `alice` and requires 200, the body's own `processingRequestId`, and exactly `Nao foi possivel processar o video. Tente enviar novamente.`; the self-test rejects the `FORMATO_INVALIDO` sentence, the sentence without its final period, a 404, and another request's body. New row cases: a delivery row and an archive key for another id with the right query, a right row plus a foreign one, and an empty result queried for another id. Mutants on scratch copies, each killed by the self-test: `observedRowsFor` comparing `queried` instead of the rows (7 cases fail), `failureReason` compared by prefix (the truncated case fails), the body's id not compared (the other-request case fails); the step absent from README fails the documentation check. Real smoke green (`alice reading <id> through the API got 200 with failureReason Nao foi possivel processar o video. Tente enviar novamente.`). Literal negatives on the stack: the count query filtering on `event_id` exits 1 with `0 deliveries for <rejectedId>: expected exactly 1 record`; filtering on the request's `owner_user_id` exits 1 with `deliveries observed for <failedId of the previous run>, expected <rejectedId>`. Every `--self-test` passes. Deviation: `ids` (every row) in place of design.md's single `id` (SPEC_DEVIATION in the script). Beyond the task's file: the README's smoke description says thirty steps and how the two observations read their id.
 
 ---
 
