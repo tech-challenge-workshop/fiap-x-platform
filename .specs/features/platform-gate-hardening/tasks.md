@@ -454,12 +454,26 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] Exiting 0 on a mismatch fails the self-test
-- [ ] The real run still reads `docker compose config` when the variable is unset
-- [ ] Build gate passes
+- [x] Exiting 0 on a mismatch fails the self-test
+- [x] The real run still reads `docker compose config` when the variable is unset
+- [x] Build gate passes
 
 **Tests**: integration + self-test
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The spawn case, added before the variable existed, failed twice: the spawned script rendered the real configuration, exited 0, and printed nothing on stderr.
+- **Change.** `main()` takes `configJson`, which defaults to `process.env.SIZING_CONFIG_JSON`. When set, it stands in for the output of `docker compose config`; when unset, `exec` runs the command as before. Every check after that point is unchanged.
+- **Self-test.** From 12/7 to `12 bad inputs rejected with the expected message, 7 good inputs accepted, spawned failure exited non-zero`. The spawn injects `cpus: 2`, `FFMPEG_THREADS: "4"` and requires a non-zero exit and exactly `check-worker-sizing: worker cpus is 2 but FFMPEG_THREADS is 4; both must come from WORKER_CPUS\n` on stderr. The mismatch stops the script before `docker info`, so it needs no Docker.
+- **Real run unchanged.** Without the variable: `worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`. With `WORKER_CPUS=3`, the same run reports `cpus 3 … FFMPEG_THREADS 3`, so it still reads the rendered compose configuration.
+- **Literal negative.** A scratch copy whose `fail()` calls `process.exit(0)` fails the self-test: `spawned run with mismatched values exited 0, expected non-zero`.
+- **Build gate** (Phase 2 close), steps 1-13 green with every script that exists so far:
+  - 10 bootstrap scenarios;
+  - the smoke (24 steps) before and after `--force-recreate identity storage-init api`;
+  - `down -v`;
+  - docs-links `0 unresolved link(s)`.
+
+  Step 9, and `check-identity.mjs` in step 11, are skipped until T11.
 
 ---
 

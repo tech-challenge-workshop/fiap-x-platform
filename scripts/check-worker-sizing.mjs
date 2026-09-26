@@ -11,7 +11,8 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SELF = fileURLToPath(import.meta.url);
+const REPO_ROOT = join(dirname(SELF), '..');
 
 function fail(message) {
   console.error(`check-worker-sizing: ${message}`);
@@ -43,13 +44,17 @@ function engineCapacityProblem(cpus, engineCpus) {
 
 // Dependencies are injected so the self-test can drive this exact function
 // with simulated docker output: removing any check below then fails it, not
-// only a change to the two comparison functions.
-function main({ exec = spawnSync, fail: stop = fail, log = console.log } = {}) {
+// only a change to the two comparison functions. SIZING_CONFIG_JSON, when
+// set, stands in for the output of `docker compose config`, so the self-test
+// can spawn this script with a forced failure; unset, the real run is as before.
+function main({ exec = spawnSync, fail: stop = fail, log = console.log, configJson = process.env.SIZING_CONFIG_JSON } = {}) {
   const fail = stop;
-  const rendered = exec('docker', ['compose', 'config', '--format', 'json'], {
-    cwd: REPO_ROOT,
-    encoding: 'utf8',
-  });
+  const rendered = configJson !== undefined
+    ? { status: 0, stdout: configJson, stderr: '' }
+    : exec('docker', ['compose', 'config', '--format', 'json'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    });
   if (rendered.error) fail(`could not run docker: ${rendered.error.message}`);
   if (rendered.status !== 0) fail(`docker compose config failed:\n${rendered.stderr.trim()}`);
 
@@ -142,6 +147,16 @@ function selfTest() {
   );
 
   const failures = [];
+  // GATE-12: the script itself, spawned with a rendered configuration whose
+  // values disagree, must exit non-zero with the failure on stderr. The
+  // mismatch stops it before `docker info`, so no Docker is needed.
+  const mismatched = JSON.stringify({ services: { worker: { cpus: 2, environment: { FFMPEG_THREADS: '4' } } } });
+  const spawned = spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: { ...process.env, SIZING_CONFIG_JSON: mismatched } });
+  const spawnedMessage = 'check-worker-sizing: worker cpus is 2 but FFMPEG_THREADS is 4; both must come from WORKER_CPUS\n';
+  if (spawned.status === 0) failures.push('spawned run with mismatched values exited 0, expected non-zero');
+  if (spawned.stderr !== spawnedMessage) {
+    failures.push(`spawned run printed ${JSON.stringify(spawned.stderr)} on stderr, expected ${JSON.stringify(spawnedMessage)}`);
+  }
   for (const [name, run, expected] of rejections) {
     const message = run();
     if (message === undefined) {
@@ -160,7 +175,7 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    `check-worker-sizing self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted`,
+    `check-worker-sizing self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, spawned failure exited non-zero`,
   );
 }
 
