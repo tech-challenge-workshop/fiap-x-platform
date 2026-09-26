@@ -218,7 +218,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GATE-13 | P6: `sub` stable across an identity recreate (V24) | Execute | Implementing (T11 ✅ check; gate's before/after run in T14) |
 | GATE-14 | P6: `check-identity.mjs` (V25) | Execute | Implementing (T11 ✅) |
 | GATE-15 | P7: Spec B's fixes on the real stack | Execute | Implementing (T12 ✅) |
-| GATE-16 | P8: Processing failure end to end (V8) | Tasks | In Tasks |
+| GATE-16 | P8: Processing failure end to end (V8) | Execute | Implementing (T13 ✅) |
 | GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Tasks | In Tasks |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
