@@ -214,7 +214,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GATE-09 | P4: Exact delivery sentence (V17) | Execute | Implementing (T7 ✅) |
 | GATE-10 | P4: Exactly one object at the exact key (V18) | Execute | Implementing (T6 ✅) |
 | GATE-11 | P5: `main()` runs every step (V14) | Execute | Implementing (T8 ✅) |
-| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅, T4 ✅, T5 ✅, T9 ✅) |
+| GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅, T4 ✅, T5 ✅, T9 ✅, T10 ✅) |
 | GATE-13 | P6: `sub` stable across an identity recreate (V24) | Tasks | In Tasks |
 | GATE-14 | P6: `check-identity.mjs` (V25) | Tasks | In Tasks |
 | GATE-15 | P7: Spec B's fixes on the real stack | Tasks | In Tasks |
