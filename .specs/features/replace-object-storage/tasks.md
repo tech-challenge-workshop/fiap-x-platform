@@ -63,13 +63,16 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-02 (P2 AC1–AC3)
 
 **Done when**:
-- [ ] A second run is a no-op that reports both rules already configured
-- [ ] A bucket with a public policy makes it exit 1 naming the policy
-- [ ] A third lifecycle rule makes it exit 1 naming it; a missing one of ours is added
-- [ ] The read-back uses JMESPath (`length(Rules)`, `Rules[?Expiration.Days==\`7\`]`, the prefixes) — no text counting
+- [x] A second run is a no-op that reports both rules already configured
+- [x] A bucket with a public policy makes it exit 1 naming the policy
+- [x] A third lifecycle rule makes it exit 1 naming it; a missing one of ours is added
+- [x] The read-back uses JMESPath (`length(Rules)`, `Rules[?Expiration.Days==\`7\`]`, the prefixes) — no text counting
 
 **Tests**: integration
 **Gate**: quick
+
+**Evidence (2026-09-26)** against `storage` running RustFS 1.0.0: first run creates the bucket and the rules; a re-run reports `retention on sources/ already configured` and the same for `zips/`; a public GetObject policy → exit 1 naming the policy; a third rule on `tmp/` → exit 1 `refusing to overwrite them` (prefixes: tmp/); only `sources/` present, or no configuration at all → both rules written and read back as `sources/ 7`, `zips/ 7`. A first draft compared tab-separated aws-cli output against spaces and silently rewrote the rules on every run; caught by the re-run check above and fixed before this commit.
+**Status**: ✅ Complete
 
 ---
 
