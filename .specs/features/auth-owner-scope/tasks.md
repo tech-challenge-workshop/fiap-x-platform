@@ -50,6 +50,7 @@ T3
 ### Phase 2: The smoke proves authentication and owner scope
 
 ```
+T11 -> T4
 T4 -> T5
 T5 -> T6
 T6 -> T7
@@ -173,11 +174,38 @@ T8 -> T9
 
 ### Phase 2: The smoke proves authentication and owner scope
 
+### T11: Make the storage and worker host ports configurable
+
+**What**: Map `storage` as `${STORAGE_HOST_PORT:-9000}:9000` and `worker` as `${WORKER_HOST_PORT:-3002}:3002`, following T10, and make every script that reaches them from the host honour the same variables.
+**Where**: `compose.yaml`
+**Depends on**: None
+**Reuses**: T10's substitution and README note
+**Requirement**: AUTH-17 (the smoke must run on the stack to prove anything)
+
+**Why**: Added by the orchestrator after the Phase 1 batch found another project holding host ports 9000 (`fortal-minio`) and 3002 on the development machine, and ran its gates through an uncommitted override file. The user chose configurable host ports for 5432 (T10); the same reasoning applies. In-network addresses are unchanged.
+
+**Tools**:
+
+- MCP: NONE
+- Skill: NONE
+
+**Done when**:
+- [ ] Unset, `docker compose config` renders `9000:9000` and `3002:3002` as before
+- [ ] With `STORAGE_HOST_PORT` and `WORKER_HOST_PORT` set, the stack comes up healthy while other processes hold 9000 and 3002, with no override file
+- [ ] The smoke (and any script reaching storage or the worker from the host) derives its default URL from the same variables, so one set of exports runs the whole gate
+- [ ] The README lists all three host-port variables together
+- [ ] Full gate passes
+
+**Tests**: integration
+**Gate**: full
+
+---
+
 ### T4: Create as `alice` and prove anonymous creation is refused
 
 **What**: The smoke obtains `alice`'s token through `getToken`, sends it on creation without `ownerUserId`, and adds the step `anonymous refused` (`POST` without a token → 401).
 **Where**: `scripts/smoke-local-integration.mjs`
-**Depends on**: None
+**Depends on**: T11
 **Reuses**: `SMOKE_STEPS`, `runSteps`, `getToken` from T2
 **Requirement**: AUTH-17
 
@@ -311,10 +339,10 @@ T8 -> T9
 ## Phase Execution Map
 
 ```
-Phase 1 (T10 T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
+Phase 1 (T10 T1 T2 T3) then Phase 2 (T11 T4 T5 T6 T7 T8 T9)
 ```
 
-10 tasks pack into two batches: **Phase 1** (4) and **Phase 2** (6). T10 was added during Execute (host port conflict). Cross-repository order for S5: `processing-catalog`, then `fiap-x-api`, then this repository — Phase 1 needs the API's guard for its full gate and the Catalog's migration for T3; Phase 2 needs both services complete.
+11 tasks pack into two batches: **Phase 1** (4) and **Phase 2** (7). T10 and T11 were added during Execute (host port conflicts). Cross-repository order for S5: `processing-catalog`, then `fiap-x-api`, then this repository — Phase 1 needs the API's guard for its full gate and the Catalog's migration for T3; Phase 2 needs both services complete.
 
 ---
 
@@ -326,6 +354,7 @@ Phase 1 (T10 T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
 | T1: Identity service + realm + API wiring | 1 service, its realm file, 3 env vars | ⚠️ OK - cohesive; the realm is unverifiable without the service |
 | T2: Token helper | 1 script | ✅ Granular |
 | T3: Database script | 1 generated file | ✅ Granular |
+| T11: Configurable storage/worker host ports | 2 port mappings + script defaults | ✅ Granular |
 | T4: Authenticated creation + anonymous step | 1 step + token use | ✅ Granular |
 | T5: Bob + disjoint lists | 2 steps sharing one observation | ⚠️ OK - cohesive |
 | T6: Cross-owner 404 | 1 step | ✅ Granular |
@@ -343,7 +372,8 @@ Phase 1 (T10 T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
 | T1 | T10 | T10 → T1 | ✅ Match |
 | T2 | T1 | T1 → T2 | ✅ Match |
 | T3 | None | — | ✅ Match |
-| T4 | None | — | ✅ Match |
+| T11 | None | — | ✅ Match |
+| T4 | T11 | T11 → T4 | ✅ Match |
 | T5 | T4 | T4 → T5 | ✅ Match |
 | T6 | T5 | T5 → T6 | ✅ Match |
 | T7 | T6 | T6 → T7 | ✅ Match |
@@ -362,6 +392,7 @@ No task depends on a later phase. T4 uses `getToken` from T2, which phase orderi
 | T1 | Compose topology + realm | integration | integration | ✅ OK |
 | T2 | Scripts | integration | integration | ✅ OK |
 | T3 | Generated database script | none | none | ✅ OK |
+| T11 | Compose topology + scripts | integration | integration | ✅ OK |
 | T4 | Smoke assertions | integration | integration | ✅ OK |
 | T5 | Smoke assertions | integration | integration | ✅ OK |
 | T6 | Smoke assertions | integration | integration | ✅ OK |
