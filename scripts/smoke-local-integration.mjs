@@ -1575,6 +1575,16 @@ async function selfTest() {
   if (dryRun.status !== 0 || JSON.stringify(printed) !== JSON.stringify(REQUIRED_STEPS)) {
     failures.push(`dry run of main() exited ${dryRun.status} and printed ${JSON.stringify(printed)}, expected ${JSON.stringify(REQUIRED_STEPS)}; stderr: ${dryRun.stderr.trim()}`);
   }
+  // GATE-12: the live run, spawned against a port nothing listens on, must
+  // exit non-zero with the health failure on stderr: a failing step is fatal.
+  const unreachableEnv = { ...process.env, API_URL: 'http://127.0.0.1:9', HEALTH_TIMEOUT_MS: '1' };
+  delete unreachableEnv.SMOKE_DRY_RUN;
+  const unreachable = spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: unreachableEnv });
+  const healthFailure = 'API health check timed out\n';
+  if (unreachable.status === 0) failures.push('spawned run against an unreachable API exited 0, expected non-zero');
+  if (unreachable.stderr !== healthFailure) {
+    failures.push(`spawned run against an unreachable API printed ${JSON.stringify(unreachable.stderr)} on stderr, expected ${JSON.stringify(healthFailure)}`);
+  }
   for (const step of REQUIRED_STEPS) {
     if (!SMOKE_STEPS.some((candidate) => candidate.name === step && typeof candidate.check === 'function')) {
       failures.push(`required step "${step}" is missing from SMOKE_STEPS, or has no check`);
@@ -1605,7 +1615,7 @@ async function selfTest() {
     return;
   }
   console.log(
-    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run`,
+    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run, spawned failure exited non-zero`,
   );
 }
 
