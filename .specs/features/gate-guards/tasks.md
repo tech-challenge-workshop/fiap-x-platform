@@ -282,12 +282,47 @@ dry run: nothing was changed
 
 **Done when**:
 
-- [ ] Build gate green
+- [x] Build gate green
 - [ ] PR CI green (`topology`, `docs-links`, `integration`)
 - [ ] With the go-ahead: `--apply`, then `--live` passes, and the other rules are byte-identical to a before snapshot
 
 **Tests**: integration
 **Gate**: build
+
+**Status**: ⚠️ Partial (2026-09-26). Build gate green at `470a1e2`; the branch is not pushed, no PR is open, and `--apply` has not run. Siblings `fiap-x-api`, `processing-catalog`, `processing-worker` and `notification-service` on `main`, clean. Ports `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002`; started from `docker compose down -v`.
+
+| Step | Result |
+| --- | --- |
+| 1. `clean-appledouble.mjs` (workspace root) | exit 0 |
+| 2. `docker compose config -q` | exit 0 |
+| 3. `check-worker-sizing` + `--self-test` | `worker cpus 2 matches FFMPEG_THREADS 2, within the engine's 10 CPUs`; self-test 12 bad, 7 good, spawned failure non-zero |
+| 4. `check-no-storage-writes` + `--self-test` | `9 scripts under scripts/ checked; none writes into the bucket outside the API`; self-test 12 bad, 7 good, spawned failure non-zero |
+| 5. `generate-db-script --check` + `--self-test` | `db/create-database.sql is exactly what the migrations generate`; self-test 4 bad, 1 good, `--check` non-zero with a line removed |
+| 6. `docker compose up --build -d --wait` | exit 0 |
+| 7. `check-storage-bootstrap` + `--self-test` | `12 bootstrap scenarios passed; no fiapx-scenario-* bucket left`; self-test 12 scenarios, 38 bad, 19 good, 2 cleanup orders, spawned failure non-zero |
+| 8. Smoke + `--self-test` | exit 0, all 30 steps, `processing failure reason` included; self-test 30 steps, 176 bad, 59 good, dry run in order, README names every step |
+| 9. `check-identity` + `--self-test` | `check-identity: 6 identity checks passed`; self-test 6 checks, 23 bad, 6 good, spawned failure non-zero |
+| 10. `up -d --wait --force-recreate identity storage-init api` | exit 0 |
+| 11. Smoke and `check-identity` again | smoke exit 0 (30 steps); `6 identity checks passed` |
+| 12. `docker compose down -v` | exit 0 |
+| 13. `node scripts/check-docs-links.mjs` (the `docs-links` job's script) | `0 unresolved link(s)` |
+| `check-ci-governance` | `integration job runs the 8 stack commands in order, with no skip path and no token; docs-links runs node scripts/check-docs-links.mjs unconditionally` |
+| `check-ci-governance --self-test` | 28 bad workflows, 2 good; 12 bad rulesets, 3 good sets, 6 malformed checks files refused; spawned `--live` without `gh` auth exited 1 |
+| `check-docs-links --self-test` | broken tree 3 unresolved and exit 1, good tree 0 and exit 0, both spawned runs as expected |
+| `apply-required-checks --self-test` | passed: 5 change sets, the shrinking list replaced by exactly the versioned pairs (2 cases), a second apply changes nothing |
+| `check-ci-governance --live` | exit 1, as expected until the go-ahead `--apply` (not a gate failure) |
+
+`--live` (exit 1):
+
+```
+check-ci-governance: tech-challenge-workshop/fiap-x-api: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/processing-catalog: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/processing-worker: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/notification-service: missing [quality@15368, image@15368], unexpected [quality@-, image@-]
+check-ci-governance: tech-challenge-workshop/fiap-x-platform: missing [topology@15368, docs-links@15368, integration@15368], unexpected [topology@-, docs-links@-, integration@-]
+```
+
+Still to do: push and open the PR, then wait for a green CI. After that, and only with the user's go-ahead, run `--apply` and then `--live`.
 
 ---
 
