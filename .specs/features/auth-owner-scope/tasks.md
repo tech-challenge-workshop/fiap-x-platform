@@ -133,13 +133,15 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] `alice` and `bob` → a JWT on stdout, exit 0, nothing else on stdout
-- [ ] `mallory` / wrong password → exit 1 naming the user and Keycloak's `error_description`
-- [ ] `identity` stopped → exit 1 naming the `identity` service
-- [ ] Quick gate passes
+- [x] `alice` and `bob` → a JWT on stdout, exit 0, nothing else on stdout
+- [x] `mallory` / wrong password → exit 1 naming the user and Keycloak's `error_description`
+- [x] `identity` stopped → exit 1 naming the `identity` service
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: `alice` and `bob` exit 0 with stdout matching exactly one `header.payload.signature` line and empty stderr, and their `sub`s are the pinned ids. `mallory`, and `alice --password nope`, exit 1 with empty stdout and `get-token: the identity service (compose service "identity", http://localhost:8080) rejected user "<user>" with 400: Invalid user credentials`. With `identity` stopped, exit 1 with `... is unreachable (ECONNREFUSED) - start the stack with \`docker compose up -d --wait\``. An HTML answer exits 1 with `answered 405 with a body that is not JSON`, and no arguments exits 2 with the usage. Importing the module prints nothing and exports only `getToken(user, password = demo password)`, which throws the same messages. Quick gate: `node --check`, smoke self-test (9 / 28 / 20) and sizing self-test (12 / 7) pass.
 
 ---
 
