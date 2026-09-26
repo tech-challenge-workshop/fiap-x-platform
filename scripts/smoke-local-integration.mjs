@@ -112,12 +112,13 @@ function assertArchiveContents(zipKey, path) {
   return entries;
 }
 
-// Fetches the archive with mc (no SDK, no package.json). The transfer's
-// outcome is returned, not judged: the "archive count" step asserts on it.
+// Fetches the archive with aws-cli to stdout (no SDK, no package.json). The
+// transfer's outcome is returned, not judged: the "archive count" step
+// asserts on it.
 function transferArchive(zipKey) {
   const transfer = spawnSync(
     'docker',
-    ['compose', 'run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'cat', `local/${BUCKET}/${zipKey}`],
+    ['compose', 'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init', 's3', 'cp', '--only-show-errors', `s3://${BUCKET}/${zipKey}`, '-'],
     { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 },
   );
   if (transfer.error) throw new Error(`Could not run docker to fetch the archive: ${transfer.error.message}`);
@@ -149,9 +150,15 @@ function assertNoArchiveListing(id, listing) {
   if (listing) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${listing}`);
 }
 
+// Keys under the request's archive prefix, one per line; empty when there are
+// none (aws-cli prints "None" for an empty listing in text output).
 function listArchives(id) {
-  const prefix = `local/${BUCKET}/zips/${id}/`;
-  return dockerCompose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'mc', 'minio-init', 'ls', '--recursive', prefix]).trim();
+  const keys = dockerCompose([
+    'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
+    's3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`,
+    '--query', 'Contents[].Key', '--output', 'text',
+  ]).trim();
+  return keys === 'None' ? '' : keys.split(/\s+/).join('\n');
 }
 
 // The non-video must settle FAILED with FORMATO_INVALIDO; COMPLETED or any
@@ -503,8 +510,8 @@ async function selfTest() {
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 16 entries, expected 8`],
     ['frame count 7', () => checkArchiveBytes(zipKey, syntheticZip(7)),
       `Archive frame count mismatch: ${BUCKET}/${zipKey} holds 7 entries, expected 8`],
-    ['archive absent', () => assertArchiveTransferred(zipKey, { status: 1, stderr: Buffer.from('mc: <ERROR> Object does not exist.\n') }),
-      `Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (mc: <ERROR> Object does not exist.)`],
+    ['archive absent', () => assertArchiveTransferred(zipKey, { status: 1, stderr: Buffer.from(`fatal error: An error occurred (404) when calling the HeadObject operation: Key "${zipKey}" does not exist\n`) }),
+      `Archive absent: ${BUCKET}/${zipKey} could not be transferred from storage (fatal error: An error occurred (404) when calling the HeadObject operation: Key "${zipKey}" does not exist)`],
     ['archive unreadable', () => checkArchiveBytes(zipKey, Buffer.from('plain text, not an archive')),
       `Archive unreadable: ${BUCKET}/${zipKey} has no End of Central Directory record`],
     ['archive empty', () => checkArchiveBytes(zipKey, syntheticZip(0)),
