@@ -616,10 +616,11 @@ async function readAs(user, step, id) {
 
 // AUTH-17 AC4: bob reading alice's request must look exactly like reading a
 // request that does not exist, so the answer reveals nothing about it.
-function assertCrossOwnerNotFound(id, crossRead, randomRead) {
-  const call = `bob's GET ${API_URL}/processing-requests/${id}`;
+// UPL-17 AC6 applies the same rule to the download (suffix `/download`).
+function assertCrossOwnerNotFound(id, crossRead, randomRead, suffix = '') {
+  const call = `bob's GET ${API_URL}/processing-requests/${id}${suffix}`;
   if (randomRead.status !== 404) {
-    throw new Error(`bob's GET of a random id returned ${randomRead.status}, expected 404 to compare against`);
+    throw new Error(`bob's GET of a random id${suffix ? `'s ${suffix.slice(1)}` : ''} returned ${randomRead.status}, expected 404 to compare against`);
   }
   if (crossRead.status >= 200 && crossRead.status < 300) {
     throw new Error(`Owner scope leak: ${call} returned ${crossRead.status}; alice's request must be invisible to bob`);
@@ -630,6 +631,13 @@ function assertCrossOwnerNotFound(id, crossRead, randomRead) {
   if (crossRead.body !== randomRead.body) {
     throw new Error(`${call} returned 404 with ${crossRead.body}, but a random id gets ${randomRead.body}`);
   }
+}
+
+// Requests the download of one request with the user's token; the status and
+// the raw body text, so a check can compare two bodies byte for byte.
+async function downloadAs(user, step, id) {
+  const res = await fetchAs(user, step, `/processing-requests/${id}/download`);
+  return { status: res.status, body: res.text };
 }
 
 // Waits until the request is terminal and returns it whichever way it ended;
@@ -871,6 +879,15 @@ export const SMOKE_STEPS = [
     report: (ctx) => `bob reading alice's request ${ctx.id} got 404 with the same body as a random id`,
   },
   {
+    name: 'cross-owner download 404',
+    observe: async (ctx) => {
+      ctx.crossDownload = await downloadAs('bob', 'cross-owner download 404', ctx.id);
+      ctx.randomDownload = await downloadAs('bob', 'cross-owner download 404', randomUUID());
+    },
+    check: (ctx) => assertCrossOwnerNotFound(observed(ctx, 'id'), observed(ctx, 'crossDownload'), observed(ctx, 'randomDownload'), '/download'),
+    report: (ctx) => `bob requesting the download of alice's request ${ctx.id} got 404 with the same body as a random id`,
+  },
+  {
     name: 'no internal fields',
     check: (ctx) => assertNoInternalFields(observed(ctx, 'rejectedId'), observed(ctx, 'aliceList')),
     report: (ctx) => `alice's list carries no internal field, and ${ctx.rejectedId} carries the safe failureReason`,
@@ -929,6 +946,7 @@ const REQUIRED_STEPS = [
   'bob request created',
   'lists disjoint',
   'cross-owner read 404',
+  'cross-owner download 404',
   'no internal fields',
   'no leftovers',
 ];
@@ -1147,6 +1165,14 @@ async function selfTest() {
       `bob's GET ${readUrl} returned 404 with {"statusCode":404,"message":"Processing request belongs to another owner"}, but a random id gets ${notFound.body}`],
     ["cross-owner 404 whose body differs by one character", () => assertCrossOwnerNotFound(id, { status: 404, body: `${notFound.body} ` }, notFound),
       `bob's GET ${readUrl} returned 404 with ${notFound.body} , but a random id gets ${notFound.body}`],
+    ["cross-owner download answered 200", () => assertCrossOwnerNotFound(id, { status: 200, body: JSON.stringify({ url: 'http://localhost/fiapx/zips/x', expiresAt: '2026-09-26T12:05:00.000Z' }) }, notFound, '/download'),
+      `Owner scope leak: bob's GET ${readUrl}/download returned 200; alice's request must be invisible to bob`],
+    ["cross-owner download answered 409", () => assertCrossOwnerNotFound(id, { status: 409, body: '{"statusCode":409,"message":"Processing request is not completed"}' }, notFound, '/download'),
+      `bob's GET ${readUrl}/download returned 409, expected 404 as for a random id`],
+    ["cross-owner download 404 whose body differs by one character", () => assertCrossOwnerNotFound(id, { status: 404, body: notFound.body.replace('found', 'Found') }, notFound, '/download'),
+      `bob's GET ${readUrl}/download returned 404 with ${notFound.body.replace('found', 'Found')}, but a random id gets ${notFound.body}`],
+    ["random id's download answered 409", () => assertCrossOwnerNotFound(id, notFound, { status: 409, body: '{"statusCode":409,"message":"Processing request is not completed"}' }, '/download'),
+      `bob's GET of a random id's download returned 409, expected 404 to compare against`],
     ["random id answered 500", () => assertCrossOwnerNotFound(id, notFound, { status: 500, body: '{"statusCode":500,"message":"Internal server error"}' }),
       `bob's GET of a random id returned 500, expected 404 to compare against`],
     ...['sourceStorageKey', 'zipStorageKey', 'failureCode', 'ownerUserId'].map((field) => [
@@ -1207,6 +1233,7 @@ async function selfTest() {
     }],
     ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
     ['cross-owner read answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound })],
+    ['cross-owner download answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound }, '/download')],
     ['list without internal fields, rejected request with the sentence', () => assertNoInternalFields(rejectedId, lists.aliceList)],
     ['a 401 then a 200 with a fresh token', async () => {
       const issued = [];
@@ -1252,6 +1279,8 @@ async function selfTest() {
     bobList: lists.bobList,
     crossRead: { ...notFound },
     randomRead: { ...notFound },
+    crossDownload: { ...notFound },
+    randomDownload: { ...notFound },
     scratchDirs: [goneDir],
   };
   const stepRejections = [
@@ -1311,6 +1340,12 @@ async function selfTest() {
       `Owner scope leak: alice's list contains bob's request ${bobId}`],
     ['cross-owner read 404', { crossRead: { status: 403, body: '{"statusCode":403,"message":"Forbidden resource"}' } },
       `bob's GET ${readUrl} returned 403, expected 404 as for a random id`],
+    ['cross-owner download 404', { crossDownload: { status: 200, body: JSON.stringify({ url: 'http://localhost/fiapx/zips/x', expiresAt: '2026-09-26T12:05:00.000Z' }) } },
+      `Owner scope leak: bob's GET ${readUrl}/download returned 200; alice's request must be invisible to bob`],
+    ['cross-owner download 404', { crossDownload: { status: 409, body: '{"statusCode":409,"message":"Processing request is not completed"}' } },
+      `bob's GET ${readUrl}/download returned 409, expected 404 as for a random id`],
+    ['cross-owner download 404', { crossDownload: { status: 404, body: `${notFound.body} ` } },
+      `bob's GET ${readUrl}/download returned 404 with ${notFound.body} , but a random id gets ${notFound.body}`],
     ['no internal fields', { aliceList: withField('zipStorageKey', zipKey) },
       `alice's list exposes zipStorageKey on request ${olderAliceId}`],
     ['no leftovers', { scratchDirs: [goneDir, survivingDir] },

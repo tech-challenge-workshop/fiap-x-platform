@@ -370,11 +370,26 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] Self-test rejects a 200, a 409 and a 404 whose body differs by one character
-- [ ] Quick gate passes
+- [x] Self-test rejects a 200, a 409 and a 404 whose body differs by one character
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Step.** `cross-owner download 404` runs after `cross-owner read 404`. It has `bob` request the download of `alice`'s completed request and of a random id, and it keeps each status with its raw body text (`downloadAs`).
+  - Its check is S5's `assertCrossOwnerNotFound`, given the suffix `/download`. The random id must answer 404. The cross-owner answer fails as `Owner scope leak: …` on a 2xx and as `… expected 404 as for a random id` on any other status. It must also match the random id's body byte for byte.
+  - With the suffix empty, S5's messages are unchanged, and every existing case still passes with its old text.
+- **Self-test.** Before: 19 steps, 101 bad inputs, 42 good. After: 20 steps, 108 bad inputs, 44 good.
+  - The step is rejected when given a 200 carrying a URL, a 409 `Processing request is not completed`, and a 404 whose body has one trailing space.
+  - The helper is rejected directly when given a 200, a 409, a body that differs by one character's case (`Found`), and a random id's download answering 409.
+  - Scratch mutations fail the self-test: the step's check emptied, and the step comparing S5's read observations instead of the download's.
+- **Quick gate.** All of these pass:
+  - `node --check`
+  - the smoke's self-test at both ports
+  - the storage-write check and its self-test (10/6)
+  - the sizing self-test (12/7)
+- **Adequacy.** UPL-17 AC6 maps to `smoke-local-integration.mjs:620`–`:631` (the comparison), to the step cases at `:1343`–`:1347`, and to the direct cases at `:1168`–`:1170`.
 
 ---
 
