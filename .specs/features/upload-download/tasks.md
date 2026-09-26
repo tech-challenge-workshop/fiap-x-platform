@@ -76,12 +76,19 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] `docker compose config` renders the public endpoint with the default port unset and with `STORAGE_HOST_PORT=39000`
-- [ ] With the API from `feat/upload-download`: a part URL from `POST /uploads` targets `localhost:39000` and accepts a `PUT` from the host
-- [ ] Full gate passes
+- [x] `docker compose config` renders the public endpoint with the default port unset and with `STORAGE_HOST_PORT=39000`
+- [x] With the API from `feat/upload-download`: a part URL from `POST /uploads` targets `localhost:39000` and accepts a `PUT` from the host
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Config.** `docker compose config -q` passes. Unset, the `api` service renders `STORAGE_PUBLIC_ENDPOINT=http://localhost:9000`. With `STORAGE_HOST_PORT=39000`, it renders `http://localhost:39000`, and storage is published on `39000`. `STORAGE_ENDPOINT=http://storage:9000`, `STORAGE_BUCKET=fiapx` and the Worker's credentials are present. `depends_on.storage-init` is `service_completed_successfully`.
+- **Full gate.** Ran with `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002`, with `fiap-x-api` `db0ce83` and `processing-catalog` `432ee94`. `up --build -d --wait` brought every service to healthy. `storage-init` exited 0 at 05:50:50, and `api` started at 05:50:57.
+- **Probe.** `POST /uploads` as `alice` (token from `getToken`) with `{fileName:"t1-probe.mp4", contentType:"video/mp4", sizeBytes:27}` answered 201. It returned `partSize:16777216` and one part whose URL is `http://localhost:39000/fiapx/sources/<alice's sub>/<uploadId>.mp4?…`. A plain `PUT` of the bytes from the host answered 200 with an ETag.
+- **Not yet in the gate.** The `PUT` was a one-off probe. It becomes a gate command with T4's `upload confirmed` step, and T8 adds its internal-host negative (L-016).
+- **Interpretation.** The TTL overrides are left unset, so the API's defaults of 3600 s and 300 s apply. Setting them in compose would restate the defaults in a second place.
 
 ---
 
