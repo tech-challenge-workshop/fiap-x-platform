@@ -159,19 +159,19 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | - | Pending |
-| GRD-02 | P2: `docs-links` scripted and guarded (V51) | - | Pending |
-| GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | - | Pending |
-| GRD-04 | P4: Expiry-rule scenarios (V42) | - | Pending |
-| GRD-05 | P5: No token in failures (V43) | - | Pending |
-| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | - | Pending |
-| GRD-07 | P6: Wording (V52) | - | Pending |
+| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | Tasks | In Tasks |
+| GRD-02 | P2: `docs-links` scripted and guarded (V51) | Tasks | In Tasks |
+| GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | Tasks | In Tasks |
+| GRD-04 | P4: Expiry-rule scenarios (V42) | Tasks | In Tasks |
+| GRD-05 | P5: No token in failures (V43) | Tasks | In Tasks |
+| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Tasks | In Tasks |
+| GRD-07 | P6: Wording (V52) | Tasks | In Tasks |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 7 total, 0 mapped to tasks, 7 unmapped ⚠️ (mapped in Tasks)
+**Coverage:** 7 total, 7 mapped to tasks, 0 unmapped
 
 ---
 
