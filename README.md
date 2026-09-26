@@ -231,6 +231,20 @@ Only the host side moves. The services still reach `postgres:5432`, `storage:900
 
 This declared value is the contract S9a carries into the Worker's Kubernetes `limits`.
 
+### CI and the required checks
+
+The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main`, without a token, since they are public. It then runs the build gate's steps 6 to 11 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, and the smoke and identity check again. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
+
+`node scripts/check-ci-governance.mjs` guards that: it fails when the `integration` job gains a condition other than `failure()` or `always()`, sets `continue-on-error`, references `SERVICES_READ_TOKEN`, or stops running the eight stack commands in order. CI's `topology` job runs it and its `--self-test`.
+
+The checks each repository's `protect main` ruleset must require are versioned in [`ci/required-checks.json`](ci/required-checks.json): `quality` and `image` for the four services, and `topology`, `docs-links` and `integration` for this repository. A job renamed in a workflow must be renamed there in the same change.
+
+- `node scripts/check-ci-governance.mjs --live` reads the five rulesets through `gh api` and fails, naming the repository, when one is missing, inactive, not targeting the default branch alone, or requires a different set of checks: `<repo>: missing [..], unexpected [..]`. It needs `gh` authenticated, and fails saying so when it is not. It runs in the build gate, not in CI.
+- `node scripts/apply-required-checks.mjs --dry-run` prints, per repository, the checks it would add and remove, and changes nothing. `--apply` puts each differing ruleset back with only its required-checks list replaced; every other rule and the strict-policy flag are kept as read. Applying changes GitHub settings: run `--dry-run` first, `--apply` only with an explicit go-ahead, then `--live`.
+- Both have a `--self-test` that injects the rulesets and never calls GitHub.
+
+`docs-links` is informational: its job sets `continue-on-error`, so requiring it requires that it ran, not that every link resolves. The build gate's last step is what holds links to zero.
+
 ### The build gate
 
 The last task of each phase runs every check in this order, from the repository with the sibling repositories on `main`. It starts from an empty stack and ends by discarding it:
@@ -248,6 +262,7 @@ The last task of each phase runs every check in this order, from the repository 
 11. The smoke and `node scripts/check-identity.mjs` again.
 12. `docker compose down -v`.
 13. The `docs-links` job's script from [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which must report `0 unresolved link(s)`.
+14. `node scripts/check-ci-governance.mjs`, its `--self-test` and `--live`, and `node scripts/apply-required-checks.mjs --self-test`.
 
 Step 10 recreates rather than restarts. A recreated `identity` starts from an empty database on tmpfs and re-imports the realm, so `sub pinned` proves the demo users' ids survive it; a recreated `storage-init` reruns the bootstrap on a bucket that already exists; and a recreated `api` must find both again. A plain restart would keep each container's state and prove none of that. When a host port is taken, export the variables from [Host ports already in use](#host-ports-already-in-use) first; the same exports run the whole gate.
 
@@ -261,7 +276,8 @@ Step 10 recreates rather than restarts. A recreated `identity` starts from an em
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
 | `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
-| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check |
+| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier |
+| `ci/` | The required checks of each repository's `protect main` ruleset |
 | `fixtures/` | The committed source video the smoke uploads, the corrupted copy that must fail in processing, and their provenance ([`fixtures/README.md`](fixtures/README.md)) |
 | `db/` | The database bootstrap and the generated database creation script |
 | `storage/` | The object storage bootstrap |

@@ -185,14 +185,31 @@ Also add the real workflow check to `topology`.
 
 **Done when**:
 
-- [ ] `--dry-run` prints, for each repository, the checks it would add and changes nothing
+- [x] `--dry-run` prints, for each repository, the checks it would add and changes nothing
 - [ ] **With the user's go-ahead:** `--apply` updates all five rulesets, and every other rule (deletion, non_fast_forward, linear history, pull_request) is unchanged. Compare the full JSON before and after
 - [ ] `--live` then passes
-- [ ] README updated, with 0 unresolved links
+- [x] README updated, with 0 unresolved links
 - [ ] Build gate passes
 
 **Tests**: integration
 **Gate**: build
+**Status**: ⚠️ Complete except `--apply`, pending the user's go-ahead for the GitHub change. `--live` and the build gate follow the apply.
+**Evidence**:
+- **Red first.** The self-test was written against stubs (the ruleset returned as read, no changes, no output): 10 failures. The checks that hold for an identity transformation (other rules byte-identical, strict policy kept) and the mode dispatch were already green against the stub.
+- **Self-test.** `every other rule byte-identical, the checks list replaced exactly, a strict policy kept, a ruleset without the rule refused, 3 change sets computed, --dry-run wrote nothing, --apply wrote only the differing ruleset, a failed PUT stopped naming the repository, a duplicate ruleset refused, 3 spawned runs without a mode or authentication exited 1`. The ruleset is injected in the shape `gh api` returns, read-only fields included; the PUT body carries only `name`, `target`, `enforcement`, `bypass_actors`, `conditions` and `rules`, and each non-checks rule is compared as JSON text with the one read. The modes run against an injected fetch and PUT; nothing calls GitHub.
+- **Literal negatives** (scratch copies): other parameters dropped from the checks rule → 2 self-test failures; `--dry-run` also PUTs → 2; read-only fields sent → 1; the list appended to instead of replaced → 1.
+- **Real `--dry-run`** (read-only `gh api` GETs), exit 0:
+  ```
+  tech-challenge-workshop/fiap-x-api: ruleset "protect main" (23709829) would add [image], remove []; it would then require [quality, image]
+  tech-challenge-workshop/processing-catalog: ruleset "protect main" (23709816) would add [image], remove []; it would then require [quality, image]
+  tech-challenge-workshop/processing-worker: ruleset "protect main" (23709809) would add [image], remove []; it would then require [quality, image]
+  tech-challenge-workshop/notification-service: ruleset "protect main" (23709823) would add [image], remove []; it would then require [quality, image]
+  tech-challenge-workshop/fiap-x-platform: ruleset "protect main" (23709782) would add [docs-links, integration], remove []; it would then require [topology, docs-links, integration]
+  dry run: nothing was changed
+  ```
+  Afterwards every ruleset still shows its 2026-09-20 `updated_at` and its old list.
+- **README.** A "CI and the required checks" section: `integration` always runs the stack, the workflow check, `ci/required-checks.json`, `--live`, and the apply script's two modes. The build gate gains step 14; the layout gains `ci/`. The `docs-links` script reports `0 unresolved link(s)`. Every other script's `--self-test` still passes.
+- **Finding.** The `docs-links` job sets `continue-on-error: true`, so requiring it only requires that it ran; a broken link still merges. The README says so. Making it blocking is outside this task.
 
 ---
 
