@@ -242,11 +242,13 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] The self-test requires both steps and rejects a list containing the other user's id, naming it
-- [ ] Quick gate passes
+- [x] The self-test requires both steps and rejects a list containing the other user's id, naming it
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: `bob request created` creates the non-video as `bob`; `assertCreated` requires 201 with a `processingRequestId` and rejects 401, the near-miss 200 and a 201 without an id with their exact messages. `lists disjoint` reads both lists page by page (the API caps `pageSize` at 100) and `assertListsDisjoint` fails `Owner scope leak: alice's list contains bob's request <id>` or `Owner scope leak: bob's list contains alice's request <id>`, for this run's ids and for an older `alice` id only her list shows. It also requires each list to hold its owner's own requests (`alice's list is missing her own request <id>`, `bob's list is missing his own request <id>`), so an API that returns empty lists cannot pass. Self-test: 12 required steps, 42 bad inputs, 26 good inputs. Scratch copies whose step check skips `assertCreated`, or whose leak check for `alice` is disabled, fail the self-test. On the real stack the smoke is green and prints `alice lists 2 requests and bob 1; neither list holds the other's`. Quick gate (`node --check`, both self-tests) passes.
 
 ---
 

@@ -320,6 +320,67 @@ async function postProcessingRequest(sourceStorageKey, token) {
   return body.processingRequestId;
 }
 
+// A creation must answer 201 with the new id; the id is returned for the
+// steps that follow.
+function assertCreated(user, created) {
+  const call = `${user}'s POST ${API_URL}/processing-requests`;
+  if (created.status !== 201) throw new Error(`${call} returned ${created.status}, expected 201`);
+  const id = created.body?.processingRequestId;
+  if (typeof id !== 'string' || id === '') throw new Error(`${call} returned 201 without a processingRequestId`);
+  return id;
+}
+
+// Creates a request with the user's token. The answer is returned, not
+// judged: the step's check does that.
+async function createAs(user, sourceStorageKey) {
+  const res = await fetch(`${API_URL}/processing-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await getToken(user)}` },
+    body: JSON.stringify({ sourceStorageKey }),
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = text;
+  }
+  return { status: res.status, body };
+}
+
+// The API caps pageSize at 100, so a list is read page by page until every
+// item the total announces has been read.
+const LIST_PAGE_SIZE = 100;
+
+async function listAllAs(user) {
+  const token = await getToken(user);
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const res = await fetch(`${API_URL}/processing-requests?page=${page}&pageSize=${LIST_PAGE_SIZE}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`${user}'s GET ${API_URL}/processing-requests?page=${page} failed: ${res.status}`);
+    const body = await res.json();
+    items.push(...body.items);
+    if (body.items.length === 0 || items.length >= body.total) return items;
+  }
+}
+
+// AUTH-17 AC3. Each list must hold its owner's own requests, so an empty list
+// cannot pass for a scoped one, and neither may hold the other's.
+function assertListsDisjoint({ aliceIds, bobId, aliceList, bobList }) {
+  const aliceListed = new Set(aliceList.map((item) => item.processingRequestId));
+  const bobListed = new Set(bobList.map((item) => item.processingRequestId));
+  for (const id of aliceIds) {
+    if (!aliceListed.has(id)) throw new Error(`alice's list is missing her own request ${id}`);
+  }
+  if (!bobListed.has(bobId)) throw new Error(`bob's list is missing his own request ${bobId}`);
+  if (aliceListed.has(bobId)) throw new Error(`Owner scope leak: alice's list contains bob's request ${bobId}`);
+  for (const id of new Set([...aliceIds, ...aliceListed])) {
+    if (bobListed.has(id)) throw new Error(`Owner scope leak: bob's list contains alice's request ${id}`);
+  }
+}
+
 // Waits until the request is terminal and returns it whichever way it ended;
 // the caller decides which ending was expected. A request still in flight at
 // the deadline fails naming the status it was last seen in.
@@ -470,6 +531,30 @@ export const SMOKE_STEPS = [
     report: (ctx) => `Notification delivered once for ${ctx.rejectedId}: ${ctx.delivery.failureReason}`,
   },
   {
+    name: 'bob request created',
+    observe: async (ctx) => {
+      ctx.bobCreate = await createAs('bob', ctx.notAVideoKey);
+    },
+    check: (ctx) => {
+      ctx.bobId = assertCreated('bob', observed(ctx, 'bobCreate'));
+    },
+    report: (ctx) => `Created processing request ${ctx.bobId} as bob`,
+  },
+  {
+    name: 'lists disjoint',
+    observe: async (ctx) => {
+      ctx.aliceList = await listAllAs('alice');
+      ctx.bobList = await listAllAs('bob');
+    },
+    check: (ctx) => assertListsDisjoint({
+      aliceIds: [observed(ctx, 'id'), observed(ctx, 'rejectedId')],
+      bobId: observed(ctx, 'bobId'),
+      aliceList: observed(ctx, 'aliceList'),
+      bobList: observed(ctx, 'bobList'),
+    }),
+    report: (ctx) => `alice lists ${ctx.aliceList.length} requests and bob ${ctx.bobList.length}; neither list holds the other's`,
+  },
+  {
     name: 'no leftovers',
     observe: (ctx) => {
       ctx.scratchDirs = [...scratchDirs];
@@ -515,6 +600,8 @@ const REQUIRED_STEPS = [
   'no archive',
   'delivery sentence',
   'single delivery',
+  'bob request created',
+  'lists disjoint',
   'no leftovers',
 ];
 
@@ -540,6 +627,16 @@ async function selfTest() {
   // Literal, not FORMATO_INVALIDO_REASON: a changed constant must fail here too.
   const sentence = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
   const createCall = `POST ${API_URL}/processing-requests`;
+  const rejectedId = 'self-test-rejected';
+  const bobId = 'self-test-bob-request';
+  const olderAliceId = 'self-test-older-alice-request';
+  const item = (processingRequestId) => ({ processingRequestId, status: 'RECEIVED' });
+  const lists = {
+    aliceIds: [id, rejectedId],
+    bobId,
+    aliceList: [item(olderAliceId), item(id), item(rejectedId)],
+    bobList: [item(bobId)],
+  };
 
   const rejections = [
     ['frame count 16', () => checkArchiveBytes(zipKey, syntheticZip(16)),
@@ -586,6 +683,22 @@ async function selfTest() {
       `Anonymous ${createCall} without a token returned 500, expected 401`],
     ['anonymous creation answered 403', () => assertAnonymousCreateRefused(403),
       `Anonymous ${createCall} without a token returned 403, expected 401`],
+    ["bob's creation answered 401", () => assertCreated('bob', { status: 401, body: { statusCode: 401, message: 'Unauthorized' } }),
+      `bob's ${createCall} returned 401, expected 201`],
+    ["bob's creation answered 200", () => assertCreated('bob', { status: 200, body: { processingRequestId: bobId } }),
+      `bob's ${createCall} returned 200, expected 201`],
+    ["bob's creation answered 201 without an id", () => assertCreated('bob', { status: 201, body: { status: 'RECEIVED' } }),
+      `bob's ${createCall} returned 201 without a processingRequestId`],
+    ["alice's list holding bob's request", () => assertListsDisjoint({ ...lists, aliceList: [...lists.aliceList, item(bobId)] }),
+      `Owner scope leak: alice's list contains bob's request ${bobId}`],
+    ["bob's list holding alice's request", () => assertListsDisjoint({ ...lists, bobList: [...lists.bobList, item(id)] }),
+      `Owner scope leak: bob's list contains alice's request ${id}`],
+    ["bob's list holding an older alice request", () => assertListsDisjoint({ ...lists, bobList: [...lists.bobList, item(olderAliceId)] }),
+      `Owner scope leak: bob's list contains alice's request ${olderAliceId}`],
+    ["alice's list missing her request", () => assertListsDisjoint({ ...lists, aliceList: [item(id)] }),
+      `alice's list is missing her own request ${rejectedId}`],
+    ["bob's list missing his request", () => assertListsDisjoint({ ...lists, bobList: [] }),
+      `bob's list is missing his own request ${bobId}`],
   ];
 
   let scratch;
@@ -610,12 +723,16 @@ async function selfTest() {
     ['archive key under this request', () => assertArchiveKeyScoped(id, zipKey)],
     ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
     ['anonymous creation refused with 401', () => assertAnonymousCreateRefused(401)],
+    ["bob's creation answered 201 with an id", () => {
+      const created = assertCreated('bob', { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } });
+      if (created !== bobId) throw new Error(`returned ${created}, expected ${bobId}`);
+    }],
+    ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
   ];
 
   // The steps main() runs: each required step must be in SMOKE_STEPS with a
   // check, and its own check, run through runSteps, must reject a context
   // holding one bad observation and accept a context holding none.
-  const rejectedId = 'self-test-rejected';
   const survivingDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
   const goneDir = mkdtempSync(join(tmpdir(), 'fiapx-smoke-self-test-'));
   rmSync(goneDir, { recursive: true, force: true });
@@ -631,6 +748,10 @@ async function selfTest() {
     rejectedListing: '',
     delivery: { status: 'FAILED', failureReason: sentence },
     deliveries: 1,
+    bobCreate: { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } },
+    bobId,
+    aliceList: lists.aliceList,
+    bobList: lists.bobList,
     scratchDirs: [goneDir],
   };
   const stepRejections = [
@@ -652,6 +773,10 @@ async function selfTest() {
       `Delivery for ${rejectedId}: expected FAILED with ${JSON.stringify(sentence)}, observed FAILED with "Nao foi possivel processar o video."`],
     ['single delivery', { deliveries: 2 },
       `Delivery for ${rejectedId}: expected exactly 1 record, found 2`],
+    ['bob request created', { bobCreate: { status: 401, body: { statusCode: 401, message: 'Unauthorized' } } },
+      `bob's ${createCall} returned 401, expected 201`],
+    ['lists disjoint', { aliceList: [...lists.aliceList, item(bobId)] },
+      `Owner scope leak: alice's list contains bob's request ${bobId}`],
     ['no leftovers', { scratchDirs: [goneDir, survivingDir] },
       `Downloaded artefact left behind: ${survivingDir} still exists after cleanup`],
   ];
