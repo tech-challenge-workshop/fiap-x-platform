@@ -42,6 +42,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 ### Phase 1: Identity in the topology
 
 ```
+T10 -> T1
 T1 -> T2
 T3
 ```
@@ -62,11 +63,37 @@ T8 -> T9
 
 ### Phase 1: Identity in the topology
 
+### T10: Make the PostgreSQL host port configurable
+
+**What**: Map PostgreSQL as `${POSTGRES_HOST_PORT:-5432}:5432`, so a developer with another PostgreSQL on 5432 can run the stack without stopping it.
+**Where**: `compose.yaml`
+**Depends on**: None
+**Reuses**: The `${WORKER_CPUS:-2}` substitution pattern
+**Requirement**: AUTH-14 (the topology must start to prove anything)
+
+**Why**: Added by the orchestrator on 2026-09-26 at the user's choice. Another project's container (`fortal-postgres`) holds host port 5432 on the development machine, and the stack's `postgres` could not bind. The container port and every in-network address are unchanged; only the host mapping moves, and only when the variable is set.
+
+**Tools**:
+
+- MCP: NONE
+- Skill: NONE
+
+**Done when**:
+- [ ] Unset, `docker compose config` still renders `5432:5432`
+- [ ] With `POSTGRES_HOST_PORT=55432`, the stack comes up healthy while another process holds 5432, and the services still reach `postgres:5432` inside the network
+- [ ] The README says how to use it (and that the database e2e suites then need `DATABASE_PORT` set to the same value)
+- [ ] Full gate passes
+
+**Tests**: integration
+**Gate**: full
+
+---
+
 ### T1: Run Keycloak with the versioned realm and wire the API to it
 
 **What**: The `identity` service (`quay.io/keycloak/keycloak:26.7.4`, `start-dev --import-realm`, `KC_HOSTNAME=http://localhost:8080`, `bash`/`/dev/tcp` readiness probe on 9000), the realm file with `alice` and `bob` (pinned `id`s, profile fields, non-temporary passwords) and client `fiapx-cli` (public, password grant only, `fiapx-api` audience mapper), and the API's `OIDC_*` variables plus `depends_on: identity: service_healthy`.
 **Where**: `compose.yaml`, `identity/fiapx-realm.json`
-**Depends on**: None
+**Depends on**: T10
 **Reuses**: The spike's realm (`scratchpad/fiapx-realm.spike.json`), the service conventions in `compose.yaml`
 **Requirement**: AUTH-14, AUTH-15
 
@@ -274,10 +301,10 @@ T8 -> T9
 ## Phase Execution Map
 
 ```
-Phase 1 (T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
+Phase 1 (T10 T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
 ```
 
-9 tasks pack into two batches: **Phase 1** (3) and **Phase 2** (6). Cross-repository order for S5: `processing-catalog`, then `fiap-x-api`, then this repository — Phase 1 needs the API's guard for its full gate and the Catalog's migration for T3; Phase 2 needs both services complete.
+10 tasks pack into two batches: **Phase 1** (4) and **Phase 2** (6). T10 was added during Execute (host port conflict). Cross-repository order for S5: `processing-catalog`, then `fiap-x-api`, then this repository — Phase 1 needs the API's guard for its full gate and the Catalog's migration for T3; Phase 2 needs both services complete.
 
 ---
 
@@ -285,6 +312,7 @@ Phase 1 (T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
 
 | Task | Scope | Status |
 | --- | --- | --- |
+| T10: Configurable PostgreSQL host port | 1 port mapping | ✅ Granular |
 | T1: Identity service + realm + API wiring | 1 service, its realm file, 3 env vars | ⚠️ OK - cohesive; the realm is unverifiable without the service |
 | T2: Token helper | 1 script | ✅ Granular |
 | T3: Database script | 1 generated file | ✅ Granular |
@@ -301,7 +329,8 @@ Phase 1 (T1 T2 T3) then Phase 2 (T4 T5 T6 T7 T8 T9)
 
 | Task | Depends On (task body) | Diagram Shows (within phase) | Status |
 | --- | --- | --- | --- |
-| T1 | None | — | ✅ Match |
+| T10 | None | — | ✅ Match |
+| T1 | T10 | T10 → T1 | ✅ Match |
 | T2 | T1 | T1 → T2 | ✅ Match |
 | T3 | None | — | ✅ Match |
 | T4 | None | — | ✅ Match |
@@ -319,6 +348,7 @@ No task depends on a later phase. T4 uses `getToken` from T2, which phase orderi
 
 | Task | Code Layer Created/Modified | Matrix Requires | Task Says | Status |
 | --- | --- | --- | --- | --- |
+| T10 | Compose topology | integration | integration | ✅ OK |
 | T1 | Compose topology + realm | integration | integration | ✅ OK |
 | T2 | Scripts | integration | integration | ✅ OK |
 | T3 | Generated database script | none | none | ✅ OK |
