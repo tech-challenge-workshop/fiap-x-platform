@@ -107,16 +107,16 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| UPL-15 | P1: The API can sign URLs the client can use | Design | Pending |
-| UPL-16 | P2: Abandoned uploads are discarded | Design | Pending |
-| UPL-17 | P3: The smoke proves the real flow | Design | Pending |
-| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Design | Pending |
+| UPL-15 | P1: The API can sign URLs the client can use | Tasks | In Tasks |
+| UPL-16 | P2: Abandoned uploads are discarded | Tasks | In Tasks |
+| UPL-17 | P3: The smoke proves the real flow | Tasks | In Tasks |
+| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Tasks | In Tasks |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 4 total, 0 mapped to tasks, 4 unmapped ⚠️
+**Coverage:** 4 total, 4 mapped to tasks, 0 unmapped
 
 ---
 
