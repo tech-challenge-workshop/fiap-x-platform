@@ -107,10 +107,10 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| UPL-15 | P1: The API can sign URLs the client can use | Execute | Implementing (T1 and T8 done: `upload confirmed` and `download issued` require the published origin in the gate; internal-host negative fails `upload confirmed`; Verifier pending) |
-| UPL-16 | P2: Abandoned uploads are discarded | Execute | Implementing (T2 and T8 done: bootstrap re-run by the gate's force-recreate; README documents the rule; Verifier pending) |
-| UPL-17 | P3: The smoke proves the real flow | Execute | Implementing (T4-T8 done: upload, replay, key reuse, download, cross-owner download and the old route's removal in the smoke; three negatives fail their steps; Verifier pending) |
-| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Execute | Implementing (T3 and T4 done: script regenerated, seed deleted, `check-no-storage-writes.mjs` in the gate and CI; Verifier pending) |
+| UPL-15 | P1: The API can sign URLs the client can use | Validate | Verified |
+| UPL-16 | P2: Abandoned uploads are discarded | Validate | Implementing (open: V34, failure scenarios B2-B5 not in the gate; V36, extra actions on the abort rule accepted) |
+| UPL-17 | P3: The smoke proves the real flow | Validate | Implementing (open: V35, download not tied to this request's archive) |
+| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Validate | Implementing (open: V37, DB-script drift and the storage-write reader not gated) |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
