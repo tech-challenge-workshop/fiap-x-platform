@@ -106,14 +106,17 @@ T7
 
 **Done when**:
 
-- [ ] The script exits 0 on the real tree
-- [ ] Its self-test passes: broken tree → exit 1 with the exact message; good tree → exit 0; the spawned broken run exits non-zero
-- [ ] Restoring `continue-on-error` on `docs-links` fails the workflow check (M8), and so does making the script exit 0 on missing links (M9)
-- [ ] `yaml.safe_load` passes
-- [ ] Quick gate passes
+- [x] The script exits 0 on the real tree
+- [x] Its self-test passes: broken tree → exit 1 with the exact message; good tree → exit 0; the spawned broken run exits non-zero
+- [x] Restoring `continue-on-error` on `docs-links` fails the workflow check (M8), and so does making the script exit 0 on missing links (M9)
+- [x] `yaml.safe_load` passes
+- [x] Quick gate passes
 
 **Tests**: self-test
 **Gate**: quick
+
+**Status**: ✅ Complete (2026-09-26). `check-docs-links.mjs` self-test: 4 checks (broken tree exact report, good tree exact report, spawned broken exit 1, spawned good exit 0), all seen red against a stub first. Its output is byte-identical to the old inline Python on the real tree (`0 unresolved link(s)`) and on the broken fixture. Workflow self-test 21 → 28 bad workflows rejected (M8, M9 as the inline Python kept, a job `if:`, a step `if:`, `|| true`, `shell:`, no job), all seen red first; the real `ci.yml` was rejected until rewired. Literal negatives: M8 on a scratch `ci.yml`, the previous `ci.yml` with the inline Python, and a scratch script exiting 0 on missing links (its self-test fails) each exit 1. `yaml.safe_load` passes. Beyond the task's files: `topology` runs the new `--self-test` (so M9 is killed by a CI gate), `docs-links` gains `setup-node` 22, and the README's guard description and build-gate step 13 describe the new checks.
+
 
 ---
 
