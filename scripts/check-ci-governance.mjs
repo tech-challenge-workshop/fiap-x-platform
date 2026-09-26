@@ -15,11 +15,21 @@
 // scripts use only Node's standard library. A reformatted workflow that the
 // parser no longer understands fails loudly rather than passing.
 //
-// `--self-test` needs nothing external: it feeds the check bad, near-miss and
-// good workflows and requires the exact messages, and spawns this script with
-// CI_WORKFLOW_PATH pointing at a gated copy, which must exit non-zero.
+// Live check (`--live`, CIG-03). Reads CI_REQUIRED_CHECKS_PATH (default
+// ci/required-checks.json) and, through `gh api`, each repository's rulesets.
+// Each repository must have exactly one ruleset named `protect main`, active,
+// targeting only the default branch (`~DEFAULT_BRANCH`), whose required
+// status checks equal the file's list as a set. A difference is reported as
+// `<repo>: missing [..], unexpected [..]`. `gh` must be authenticated.
+//
+// `--self-test` needs nothing external: it feeds the workflow check bad,
+// near-miss and good workflows and the live comparison injected rulesets, and
+// requires the exact messages. It spawns this script with CI_WORKFLOW_PATH
+// pointing at a gated copy, which must exit non-zero, and with `--live` and an
+// empty gh configuration, which must fail on the authentication check before
+// any call to GitHub.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +39,12 @@ const REPO_ROOT = join(dirname(SELF), '..');
 const WORKFLOW_PATH = process.env.CI_WORKFLOW_PATH
   ? resolve(process.env.CI_WORKFLOW_PATH)
   : join(REPO_ROOT, '.github/workflows/ci.yml');
+export const CHECKS_PATH = process.env.CI_REQUIRED_CHECKS_PATH
+  ? resolve(process.env.CI_REQUIRED_CHECKS_PATH)
+  : join(REPO_ROOT, 'ci/required-checks.json');
+export const RULESET_NAME = 'protect main';
+const DEFAULT_BRANCH = '~DEFAULT_BRANCH';
+const GH_UNAUTHENTICATED = 'gh is not authenticated; --live reads the rulesets';
 
 const SMOKE = 'node scripts/smoke-local-integration.mjs';
 const IDENTITY = 'node scripts/check-identity.mjs';
@@ -159,6 +175,103 @@ function main() {
   console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token`);
 }
 
+// The versioned required checks: repository -> non-empty list of check names.
+export function readRequiredChecks(path = CHECKS_PATH) {
+  const checks = JSON.parse(readFileSync(path, 'utf8'));
+  if (checks === null || typeof checks !== 'object' || Array.isArray(checks) || Object.keys(checks).length === 0) {
+    throw new Error(`${path} must map each repository to its required checks`);
+  }
+  for (const [repo, list] of Object.entries(checks)) {
+    const valid = Array.isArray(list) && list.length > 0 && list.every((c) => typeof c === 'string' && c !== '');
+    if (!valid || new Set(list).size !== list.length) {
+      throw new Error(`${path}: ${repo} must list its required checks as distinct non-empty names`);
+    }
+  }
+  return checks;
+}
+
+const requiredContexts = (ruleset) => {
+  const rule = (ruleset.rules ?? []).find((r) => r.type === 'required_status_checks');
+  return (rule?.parameters?.required_status_checks ?? []).map((check) => check.context);
+};
+
+// Every problem with one repository's `protect main` ruleset, given the full
+// rulesets fetched for that repository. An empty list means it requires
+// exactly `expected`.
+export function rulesetProblems(repo, expected, rulesets) {
+  const named = rulesets.filter((ruleset) => ruleset.name === RULESET_NAME);
+  if (named.length === 0) return [`${repo}: no ruleset named "${RULESET_NAME}"`];
+  if (named.length > 1) return [`${repo}: ${named.length} rulesets are named "${RULESET_NAME}"; expected exactly one`];
+  const [ruleset] = named;
+  const problems = [];
+  if (ruleset.enforcement !== 'active') {
+    problems.push(`${repo}: ruleset "${RULESET_NAME}" is "${ruleset.enforcement}", not "active"`);
+  }
+  const include = ruleset.conditions?.ref_name?.include ?? [];
+  const exclude = ruleset.conditions?.ref_name?.exclude ?? [];
+  if (ruleset.target !== 'branch' || include.length !== 1 || include[0] !== DEFAULT_BRANCH || exclude.length !== 0) {
+    problems.push(
+      `${repo}: ruleset "${RULESET_NAME}" targets ${ruleset.target} ${JSON.stringify({ include, exclude })}, not the default branch alone (${DEFAULT_BRANCH})`,
+    );
+  }
+  const live = requiredContexts(ruleset);
+  const missing = expected.filter((check) => !live.includes(check));
+  const unexpected = [...new Set(live)].filter((check) => !expected.includes(check));
+  if (missing.length > 0 || unexpected.length > 0) {
+    problems.push(`${repo}: missing [${missing.join(', ')}], unexpected [${unexpected.join(', ')}]`);
+  }
+  return problems;
+}
+
+// Problems across every repository in `checks`; `rulesetsByRepo` holds the
+// fetched rulesets of each.
+export function liveProblems(checks, rulesetsByRepo) {
+  return Object.entries(checks).flatMap(([repo, expected]) => rulesetProblems(repo, expected, rulesetsByRepo[repo] ?? []));
+}
+
+// `gh` with the given arguments; stdout, or an Error naming the call.
+export function gh(args, input) {
+  const result = spawnSync('gh', args, { encoding: 'utf8', input, maxBuffer: 16 * 1024 * 1024 });
+  if (result.error) throw new Error(`could not run gh: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`gh ${args.join(' ')} exited ${result.status}: ${result.stderr.trim()}`);
+  return result.stdout;
+}
+
+export function ghAuthenticated() {
+  const result = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' });
+  return !result.error && result.status === 0;
+}
+
+// The full ruleset of every ruleset named `protect main` in the repository
+// (the list endpoint returns summaries without rules).
+export function fetchProtectMain(repo) {
+  const summaries = JSON.parse(gh(['api', `repos/${repo}/rulesets`]));
+  return summaries
+    .filter((summary) => summary.name === RULESET_NAME)
+    .map((summary) => JSON.parse(gh(['api', `repos/${repo}/rulesets/${summary.id}`])));
+}
+
+function live() {
+  if (!ghAuthenticated()) fail(GH_UNAUTHENTICATED);
+  let checks;
+  try {
+    checks = readRequiredChecks();
+  } catch (error) {
+    fail(error.message);
+  }
+  const rulesetsByRepo = {};
+  for (const repo of Object.keys(checks)) {
+    try {
+      rulesetsByRepo[repo] = fetchProtectMain(repo);
+    } catch (error) {
+      fail(`${repo}: ${error.message}`);
+    }
+  }
+  const problems = liveProblems(checks, rulesetsByRepo);
+  if (problems.length > 0) fail(problems.join('\ncheck-ci-governance: '));
+  console.log(`the ${Object.keys(checks).length} "${RULESET_NAME}" rulesets require exactly the checks in ci/required-checks.json`);
+}
+
 // A correct workflow, shaped as the rewritten ci.yml: the checkouts carry no
 // token, the stack commands run in order, logs are collected on failure and
 // the stack is torn down always.
@@ -237,6 +350,113 @@ const GATED = replaceOnce(
 );
 const GATED_MESSAGE = `line 24: the integration job is conditioned on "steps.access.outputs.available == 'true'"; only failure() or always() may gate its steps`;
 
+// A `protect main` ruleset as `gh api repos/<repo>/rulesets/<id>` returns it,
+// requiring `contexts`; `change` edits the copy before it is returned.
+const WORKER = 'tech-challenge-workshop/processing-worker';
+const PLATFORM = 'tech-challenge-workshop/fiap-x-platform';
+function liveRuleset(contexts, change = () => {}) {
+  const ruleset = {
+    id: 23709809,
+    name: 'protect main',
+    target: 'branch',
+    source_type: 'Repository',
+    source: WORKER,
+    enforcement: 'active',
+    conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+    rules: [
+      { type: 'deletion' },
+      { type: 'non_fast_forward' },
+      { type: 'required_linear_history' },
+      { type: 'pull_request', parameters: { required_approving_review_count: 0, allowed_merge_methods: ['merge', 'squash', 'rebase'] } },
+      {
+        type: 'required_status_checks',
+        parameters: {
+          strict_required_status_checks_policy: false,
+          do_not_enforce_on_create: false,
+          required_status_checks: contexts.map((context) => ({ context })),
+        },
+      },
+    ],
+    bypass_actors: [],
+  };
+  change(ruleset);
+  return ruleset;
+}
+
+// The required checks the spec decides (CIG-04 AC1, AC2); the versioned file
+// must say exactly this.
+const DECIDED_CHECKS = {
+  'tech-challenge-workshop/fiap-x-api': ['quality', 'image'],
+  'tech-challenge-workshop/processing-catalog': ['quality', 'image'],
+  'tech-challenge-workshop/processing-worker': ['quality', 'image'],
+  'tech-challenge-workshop/notification-service': ['quality', 'image'],
+  'tech-challenge-workshop/fiap-x-platform': ['topology', 'docs-links', 'integration'],
+};
+
+function liveSelfTest(failures) {
+  const want = ['quality', 'image'];
+  const rejections = [
+    ['a missing check', [liveRuleset(['quality'])], [`${WORKER}: missing [image], unexpected []`]],
+    ['an extra check', [liveRuleset(['quality', 'image', 'lint'])], [`${WORKER}: missing [], unexpected [lint]`]],
+    ['a ruleset on refs/heads/main instead of the default branch (near-miss)',
+      [liveRuleset(want, (r) => { r.conditions.ref_name.include = ['refs/heads/main']; })],
+      [`${WORKER}: ruleset "protect main" targets branch {"include":["refs/heads/main"],"exclude":[]}, not the default branch alone (~DEFAULT_BRANCH)`]],
+    ['a ruleset on tags (near-miss)',
+      [liveRuleset(want, (r) => { r.target = 'tag'; })],
+      [`${WORKER}: ruleset "protect main" targets tag {"include":["~DEFAULT_BRANCH"],"exclude":[]}, not the default branch alone (~DEFAULT_BRANCH)`]],
+    ['an inactive ruleset', [liveRuleset(want, (r) => { r.enforcement = 'evaluate'; })],
+      [`${WORKER}: ruleset "protect main" is "evaluate", not "active"`]],
+    ['no ruleset named protect main (near-miss name)', [liveRuleset(want, (r) => { r.name = 'protect-main'; })],
+      [`${WORKER}: no ruleset named "protect main"`]],
+    ['two rulesets named protect main', [liveRuleset(want), liveRuleset(want)],
+      [`${WORKER}: 2 rulesets are named "protect main"; expected exactly one`]],
+    ['no required_status_checks rule',
+      [liveRuleset(want, (r) => { r.rules = r.rules.filter((rule) => rule.type !== 'required_status_checks'); })],
+      [`${WORKER}: missing [quality, image], unexpected []`]],
+  ];
+  for (const [name, rulesets, expected] of rejections) {
+    const problems = rulesetProblems(WORKER, want, rulesets);
+    if (JSON.stringify(problems) !== JSON.stringify(expected)) {
+      failures.push(`live, ${name}: got ${JSON.stringify(problems)}, expected ${JSON.stringify(expected)}`);
+    }
+  }
+  const acceptances = [
+    ['an exact match', [liveRuleset(want)]],
+    ['an exact match in another order, beside an unrelated ruleset',
+      [liveRuleset(['image', 'quality']), liveRuleset(['release'], (r) => { r.name = 'protect tags'; r.target = 'tag'; })]],
+  ];
+  for (const [name, rulesets] of acceptances) {
+    const problems = rulesetProblems(WORKER, want, rulesets);
+    if (problems.length > 0) failures.push(`live, ${name}: rejected with ${JSON.stringify(problems)}`);
+  }
+
+  // Across repositories: only the one that differs is named (the spec's
+  // independent test removes `image` from one repository's versioned list).
+  const fetched = {
+    [WORKER]: [liveRuleset(['quality', 'image'])],
+    [PLATFORM]: [liveRuleset(['topology', 'docs-links', 'integration'])],
+  };
+  const oneDrifted = liveProblems({ [WORKER]: ['quality'], [PLATFORM]: ['topology', 'docs-links', 'integration'] }, fetched);
+  const oneDriftedExpected = [`${WORKER}: missing [], unexpected [image]`];
+  if (JSON.stringify(oneDrifted) !== JSON.stringify(oneDriftedExpected)) {
+    failures.push(`live, one repository drifted: got ${JSON.stringify(oneDrifted)}, expected ${JSON.stringify(oneDriftedExpected)}`);
+  }
+  const noneDrifted = liveProblems({ [WORKER]: ['quality', 'image'], [PLATFORM]: ['topology', 'docs-links', 'integration'] }, fetched);
+  if (noneDrifted.length > 0) failures.push(`live, every repository matches: rejected with ${JSON.stringify(noneDrifted)}`);
+
+  // The versioned file says what the spec decided.
+  let versioned;
+  try {
+    versioned = readRequiredChecks(CHECKS_PATH);
+  } catch (error) {
+    versioned = error.message;
+  }
+  if (JSON.stringify(versioned) !== JSON.stringify(DECIDED_CHECKS)) {
+    failures.push(`${CHECKS_PATH} holds ${JSON.stringify(versioned)}, expected ${JSON.stringify(DECIDED_CHECKS)}`);
+  }
+  return { rejected: rejections.length, accepted: acceptances.length + 1 };
+}
+
 function selfTest() {
   const lineOf = (text, fragment) => text.split('\n').findIndex((line) => line.includes(fragment)) + 1;
   const withToken = replaceOnce(
@@ -314,6 +534,8 @@ function selfTest() {
     if (problems.length > 0) failures.push(`${name}: rejected a good workflow with ${JSON.stringify(problems)}`);
   }
 
+  const liveCounts = liveSelfTest(failures);
+
   // The script itself, spawned on a gated copy, must exit non-zero with the
   // condition on stderr; spawned on the correct copy, it must exit 0.
   const dir = mkdtempSync(join(tmpdir(), 'check-ci-governance-'));
@@ -331,6 +553,18 @@ function selfTest() {
     }
     const good = spawn(goodPath);
     if (good.status !== 0) failures.push(`spawned run on a correct workflow exited ${good.status}: ${JSON.stringify(good.stderr)}`);
+
+    // `--live` with an empty gh configuration and no token in the
+    // environment: it must stop at the authentication check.
+    const env = { ...process.env, GH_CONFIG_DIR: dir };
+    for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN']) delete env[name];
+    const unauthenticated = spawnSync(process.execPath, [SELF, '--live'], { encoding: 'utf8', env });
+    const unauthenticatedStderr = `check-ci-governance: ${GH_UNAUTHENTICATED}\n`;
+    if (unauthenticated.status !== 1 || unauthenticated.stderr !== unauthenticatedStderr) {
+      failures.push(
+        `spawned --live without gh authentication exited ${unauthenticated.status} with ${JSON.stringify(unauthenticated.stderr)}, expected 1 with ${JSON.stringify(unauthenticatedStderr)}`,
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -340,12 +574,18 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    `check-ci-governance self-test passed: ${rejections.length} bad workflows rejected with the expected message, ${acceptances.length} good workflows accepted, spawned gated copy exited non-zero`,
+    `check-ci-governance self-test passed: ${rejections.length} bad workflows rejected with the expected message, ${acceptances.length} good workflows accepted, spawned gated copy exited non-zero; ` +
+      `${liveCounts.rejected} bad rulesets rejected with the expected message, ${liveCounts.accepted} good ruleset sets accepted, one drifted repository named alone, the versioned file matches the spec, spawned --live without gh authentication exited 1`,
   );
 }
 
-if (process.argv.includes('--self-test')) {
-  selfTest();
-} else {
-  main();
+// Run only when executed, not when apply-required-checks.mjs imports it.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(SELF)) {
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+  } else if (process.argv.includes('--live')) {
+    live();
+  } else {
+    main();
+  }
 }

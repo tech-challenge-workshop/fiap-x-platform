@@ -140,13 +140,28 @@ Also add the real workflow check to `topology`.
 
 **Done when**:
 
-- [ ] The self-test rejects a missing check, an extra check and a wrong target, and accepts an exact match. None of these call GitHub
-- [ ] `--live` currently fails, naming the missing `image`, `docs-links` and `integration`. This is the red-first step
-- [ ] `--live` fails with a clear message when `gh` is not authenticated
-- [ ] Quick gate passes
+- [x] The self-test rejects a missing check, an extra check and a wrong target, and accepts an exact match. None of these call GitHub
+- [x] `--live` currently fails, naming the missing `image`, `docs-links` and `integration`. This is the red-first step
+- [x] `--live` fails with a clear message when `gh` is not authenticated
+- [x] Quick gate passes
 
 **Tests**: self-test + integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The live cases were written against stubs that reported no problem and a `--live` that exited 0: 11 self-test failures (8 bad rulesets accepted, the drifted repository not named, the versioned file not read, the unauthenticated `--live` exiting 0).
+- **Self-test.** `8 bad rulesets rejected with the expected message, 3 good ruleset sets accepted, one drifted repository named alone, the versioned file matches the spec, spawned --live without gh authentication exited 1`, beside the 10 + 2 workflow cases. Bad: a missing check, an extra check, `refs/heads/main` instead of `~DEFAULT_BRANCH` (near-miss), target `tag` (near-miss), enforcement `evaluate`, the name `protect-main` (near-miss), two rulesets named `protect main`, no `required_status_checks` rule. Good: an exact match, the same checks in another order beside an unrelated ruleset, and five-repository input where all match. The rulesets are injected; nothing calls GitHub. The unauthenticated case spawns `--live` with an empty `GH_CONFIG_DIR` and no token variables, and requires exit 1 with `gh is not authenticated; --live reads the rulesets`.
+- **Red-first `--live`** (read-only `gh api` GETs), exit 1:
+  ```
+  check-ci-governance: tech-challenge-workshop/fiap-x-api: missing [image], unexpected []
+  check-ci-governance: tech-challenge-workshop/processing-catalog: missing [image], unexpected []
+  check-ci-governance: tech-challenge-workshop/processing-worker: missing [image], unexpected []
+  check-ci-governance: tech-challenge-workshop/notification-service: missing [image], unexpected []
+  check-ci-governance: tech-challenge-workshop/fiap-x-platform: missing [docs-links, integration], unexpected []
+  ```
+- **Literal negatives** (scratch copies): no target rule → 1 self-test failure; no enforcement rule → 1; `unexpected` always empty → 2; no authentication check → 1.
+- **Beyond the task.** The target must be `~DEFAULT_BRANCH` alone, on `branch`, with no exclusion; a duplicate `protect main` is rejected; the self-test also pins `ci/required-checks.json` to the spec's lists, so the file cannot be weakened without a red self-test. The script's modes now run only when it is executed, so `apply-required-checks.mjs` can import the ruleset helpers.
+- **Note for CI.** The `topology` job's `--self-test` now spawns `gh auth status`; `gh` is preinstalled on `ubuntu-latest`.
 
 ---
 

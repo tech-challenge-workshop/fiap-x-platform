@@ -1,0 +1,7 @@
+{
+  "tech-challenge-workshop/fiap-x-api": ["quality", "image"],
+  "tech-challenge-workshop/processing-catalog": ["quality", "image"],
+  "tech-challenge-workshop/processing-worker": ["quality", "image"],
+  "tech-challenge-workshop/notification-service": ["quality", "image"],
+  "tech-challenge-workshop/fiap-x-platform": ["topology", "docs-links", "integration"]
+}
