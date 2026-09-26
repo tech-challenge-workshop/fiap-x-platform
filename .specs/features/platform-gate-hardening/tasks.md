@@ -311,13 +311,24 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] The self-test rejects each observation taken for another id, with the exact "observed for X, expected Y" message
-- [ ] `archive object` rejects no keys, two keys, and one key under another name (near-miss); it accepts exactly the key
-- [ ] The real run is green
-- [ ] Full gate passes
+- [x] The self-test rejects each observation taken for another id, with the exact "observed for X, expected Y" message
+- [x] `archive object` rejects no keys, two keys, and one key under another name (near-miss); it accepts exactly the key
+- [x] The real run is green
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The new self-test cases, added before the helpers changed, failed 20 times: the two new required steps were missing, and every wrong-id observation was accepted or judged on its value.
+- **Change.** `observedFor(ctx, key, idKey)` requires `ctx[key].id === ctx[idKey]` and otherwise throws `<key> observed for X, expected Y`. It is used by every check that reads a Catalog record, a delivery, a count or a listing: `video completed`, `key scope`, `archive object`, `rejection`, `archive count`, `no archive`, `video delivery`, `delivery sentence` and `single delivery`.
+- **Where the id comes from.** `waitForTerminalStatus` and `waitForNotificationDelivery` take it from the record's own `processingRequestId`. `countDeliveries` and `listArchives` carry the id their query was bound to, since a count and a prefix listing hold no id of their own.
+- **`archive object`.** A new step after `key scope` lists `zips/<id>/` and requires exactly `[zipStorageKey]`: `Archive for X: expected exactly [...] under zips/X/, found [...]`.
+- **Changed existing checks.** `assertNoArchiveListing` takes the key array instead of the joined text. The check is unchanged: any key fails, and the message joins the keys as before.
+- **Deviation.** `video delivery` had no check, so it was not required. It now stores its record and checks its id, and it is in `REQUIRED_STEPS`.
+- **Self-test.** From 21/112/45 to `23 required steps present, 125 bad inputs rejected with the expected message, 47 good inputs accepted`. Ten wrong-id cases, one of them a near-miss (`<rejectedId>-2`). `archive object` rejects no keys, a second key and `<zipStorageKey>.tmp` (near-miss).
+- **Real run.** Green: `Exactly one object exists under zips/564a…/: zips/564a…/9a6c…/frames.zip`.
+- **Literal negative.** A scratch copy whose `observedFor` skips the comparison fails the self-test on all 10 wrong-id cases.
 
 ---
 
