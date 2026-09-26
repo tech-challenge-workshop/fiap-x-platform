@@ -159,16 +159,16 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | Execute | Implementing |
+| GRD-01 | P1: No skip or mask path in `integration` (V50, V51) | Validate | Implementing (open: V53, quoted/spaced YAML keys bypass the text guard; V54, the needs chain is unguarded) |
 
-| GRD-02 | P2: `docs-links` scripted and guarded (V51) | Execute | Implementing |
+| GRD-02 | P2: `docs-links` scripted and guarded (V51) | Validate | Implementing (open: V55, an env override can hollow out the link check) |
 
-| GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | Execute | Implementing |
+| GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | Validate | Verified |
 
-| GRD-04 | P4: Expiry-rule scenarios (V42) | Execute | Implementing |
-| GRD-05 | P5: No token in failures (V43) | Execute | Implementing |
-| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Execute | Implementing |
-| GRD-07 | P6: Wording (V52) | Execute | Implementing |
+| GRD-04 | P4: Expiry-rule scenarios (V42) | Validate | Implementing (open: V55, expire-sources has no variation scenario) |
+| GRD-05 | P5: No token in failures (V43) | Validate | Verified |
+| GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Validate | Verified |
+| GRD-07 | P6: Wording (V52) | Validate | Verified |
 
 
 **ID format:** `[CATEGORY]-[NUMBER]`

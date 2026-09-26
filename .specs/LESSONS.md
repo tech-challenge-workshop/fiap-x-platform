@@ -164,6 +164,18 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: scripts/apply-required-checks.mjs (ci)
 - last seen: 2026-09-26T22:31:31Z
 
+### L-026 - A guard over a structured file must parse it with a real parser; a regex over keys misses quoted or spaced keys that the consumer reads the same way.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: gate-guards
+- evidence: scripts/check-ci-governance.mjs:120 (ci)
+- last seen: 2026-09-26T23:57:18Z
+
+### L-027 - Guarding a CI job means guarding what can skip it from outside too: its needs chain and every job upstream.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: gate-guards
+- evidence: scripts/check-ci-governance.mjs:202 (ci)
+- last seen: 2026-09-26T23:57:18Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
