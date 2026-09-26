@@ -68,6 +68,36 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: N3w N5 N7 N8 scripts/smoke-local-integration.mjs:294,314,319,330
 - last seen: 2026-09-25T23:25:58Z
 
+### L-010 - Make each gate script's self-test run the script as a child process with a forced failure and require a non-zero exit code
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: R7e/R8a/R8b; scripts/smoke-local-integration.mjs:658-661
+- last seen: 2026-09-26T00:11:20Z
+
+### L-011 - Route every smoke observation through an injectable IO seam so the self-test proves it queries the right id
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: R1b; scripts/smoke-local-integration.mjs:426
+- last seen: 2026-09-26T00:11:20Z
+
+### L-012 - Give every exact-match assertion a near-miss bad case that shares the expected value's prefix
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: R5a/R5b/R5c; scripts/smoke-local-integration.mjs:183
+- last seen: 2026-09-26T00:11:20Z
+
+### L-013 - Word an idempotence criterion so that a non-deterministic key would violate it
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: spec.md:94 (R8c)
+- last seen: 2026-09-26T00:11:20Z
+
+### L-014 - Put every verification step the coverage matrix requires into the documented build gate
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · harmful: 0
+- features: real-media-processing
+- evidence: tasks.md:39 vs tasks.md:25 (M15)
+- last seen: 2026-09-26T00:11:20Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

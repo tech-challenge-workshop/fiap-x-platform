@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 10,
+  "next_id": 15,
   "lessons": [
     {
       "id": "L-001",
@@ -166,6 +166,96 @@
       ],
       "created": "2026-09-25T23:25:58Z",
       "last_seen": "2026-09-25T23:25:58Z"
+    },
+    {
+      "id": "L-010",
+      "key": "surviving_mutant::make each gate script s self test run the script as a child process with a forced failure and require a non zero exit code",
+      "text": "Make each gate script's self-test run the script as a child process with a forced failure and require a non-zero exit code",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "R7e/R8a/R8b; scripts/smoke-local-integration.mjs:658-661"
+      ],
+      "created": "2026-09-26T00:11:20Z",
+      "last_seen": "2026-09-26T00:11:20Z"
+    },
+    {
+      "id": "L-011",
+      "key": "surviving_mutant::route every smoke observation through an injectable io seam so the self test proves it queries the right id",
+      "text": "Route every smoke observation through an injectable IO seam so the self-test proves it queries the right id",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "R1b; scripts/smoke-local-integration.mjs:426"
+      ],
+      "created": "2026-09-26T00:11:20Z",
+      "last_seen": "2026-09-26T00:11:20Z"
+    },
+    {
+      "id": "L-012",
+      "key": "surviving_mutant::give every exact match assertion a near miss bad case that shares the expected value s prefix",
+      "text": "Give every exact-match assertion a near-miss bad case that shares the expected value's prefix",
+      "signal": "surviving_mutant",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "R5a/R5b/R5c; scripts/smoke-local-integration.mjs:183"
+      ],
+      "created": "2026-09-26T00:11:20Z",
+      "last_seen": "2026-09-26T00:11:20Z"
+    },
+    {
+      "id": "L-013",
+      "key": "spec_precision_gap::word an idempotence criterion so that a non deterministic key would violate it",
+      "text": "Word an idempotence criterion so that a non-deterministic key would violate it",
+      "signal": "spec_precision_gap",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "spec.md:94 (R8c)"
+      ],
+      "created": "2026-09-26T00:11:20Z",
+      "last_seen": "2026-09-26T00:11:20Z"
+    },
+    {
+      "id": "L-014",
+      "key": "spec_precision_gap::put every verification step the coverage matrix requires into the documented build gate",
+      "text": "Put every verification step the coverage matrix requires into the documented build gate",
+      "signal": "spec_precision_gap",
+      "scope": "",
+      "status": "candidate",
+      "features": [
+        "real-media-processing"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "tasks.md:39 vs tasks.md:25 (M15)"
+      ],
+      "created": "2026-09-26T00:11:20Z",
+      "last_seen": "2026-09-26T00:11:20Z"
     }
   ]
 }
