@@ -104,12 +104,15 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-02 (P2 AC5)
 
 **Done when**:
-- [ ] No `mc` or `minio` remains in the smoke
-- [ ] The self-test still reports 9 required steps and the same numbers of bad and good cases
-- [ ] Build gate passes, including the second `up`; the anonymous-access negative (a public bucket policy set by hand) makes the smoke exit 1 naming the exposure
+- [x] No `mc` or `minio` remains in the smoke
+- [x] The self-test still reports 9 required steps and the same numbers of bad and good cases
+- [x] Build gate passes, including the second `up`; the anonymous-access negative (a public bucket policy set by hand) makes the smoke exit 1 naming the exposure
 
 **Tests**: integration
 **Gate**: build
+
+**Evidence (2026-09-26)**, Build gate on RustFS 1.0.0 (processing-worker at `feat/real-media-processing`): sizing and its self-test green; `up --build -d --wait` healthy; seed printed both keys; smoke: `Storage refused anonymous GET … (403)`, `Catalog reached COMPLETED … with archive zips/<id>/<attempt>/frames.zip`, `holds 8 frames, as 8 s at 1 frame/s requires`, `Catalog reached FAILED (FORMATO_INVALIDO)`, `No archive exists under zips/<id>/`, `Notification delivered once …`, `No downloaded artefact left behind`; self-test `9 required steps present, 28 bad inputs rejected …, 20 good inputs accepted` (unchanged); second `up` → bootstrap `already configured` for both prefixes and the smoke green again. Negative: a public GetObject/ListBucket policy set by hand → smoke exit 1 with `Anonymous access allowed: GET http://localhost:9000/fiapx/sources/sample-8s.mp4 returned 200`. `down -v` afterwards.
+**Status**: ✅ Complete
 
 ---
 
