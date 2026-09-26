@@ -128,6 +128,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: scripts/smoke-local-integration.mjs:507 (smoke)
 - last seen: 2026-09-26T06:41:54Z
 
+### L-020 - When scenarios enumerate the variations of one owned rule, apply the same variations to every owned rule, or the other predicates go unguarded.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `storage` · harmful: 0
+- features: platform-gate-hardening
+- evidence: storage/bootstrap.sh:49 (storage)
+- last seen: 2026-09-26T17:47:51Z
+
+### L-021 - A check's failure message that quotes observed output must redact secrets the output may contain.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `gate` · harmful: 0
+- features: platform-gate-hardening
+- evidence: scripts/check-identity.mjs:94 (gate)
+- last seen: 2026-09-26T17:47:51Z
+
+### L-022 - An observation that echoes its query argument proves wiring, not the query; read the id from the result when it carries one.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `smoke` · harmful: 0
+- features: platform-gate-hardening
+- evidence: scripts/smoke-local-integration.mjs:170 (smoke)
+- last seen: 2026-09-26T17:47:51Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
