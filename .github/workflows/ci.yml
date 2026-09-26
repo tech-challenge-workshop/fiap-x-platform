@@ -37,6 +37,10 @@ jobs:
         run: node scripts/check-worker-sizing.mjs
       - name: Prove each sizing comparison rejects a bad value
         run: node scripts/check-worker-sizing.mjs --self-test
+      - name: Check no script writes into the bucket outside the API
+        run: node scripts/check-no-storage-writes.mjs
+      - name: Prove the storage-write check names each kind of write
+        run: node scripts/check-no-storage-writes.mjs --self-test
       - name: Check the smoke script parses
         run: node --check scripts/smoke-local-integration.mjs
       - name: Prove each smoke assertion rejects a bad input

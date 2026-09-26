@@ -27,13 +27,13 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 
 ## Gate Check Commands
 
-> Generated from codebase - confirm before Execute. On this machine run with `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002` (S5 T10/T11). The seed step leaves the gate in T4.
+> Generated from codebase - confirm before Execute. On this machine run with `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002` (S5 T10/T11). The seed step left the gate in T4, which added the storage-write check and its self-test (L-016).
 
 | Gate Level | When to Use | Command |
 | --- | --- | --- |
-| Quick | Script or document only | `node --check scripts/<changed>.mjs`, both `--self-test`s |
+| Quick | Script or document only | `node --check scripts/<changed>.mjs`, `node scripts/check-no-storage-writes.mjs`, the three `--self-test`s |
 | Full | Compose / bootstrap changes | `docker compose config -q` then `docker compose up --build -d --wait` |
-| Build | After a phase | `node clean-appledouble.mjs` (workspace root), `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/smoke-local-integration.mjs`, `node scripts/smoke-local-integration.mjs --self-test`, `docker compose up -d --wait --force-recreate identity storage-init` (L-015: a restart that recreates), the smoke again, `docker compose down -v` |
+| Build | After a phase | `node clean-appledouble.mjs` (workspace root), `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `node scripts/check-no-storage-writes.mjs`, `node scripts/check-no-storage-writes.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/smoke-local-integration.mjs`, `node scripts/smoke-local-integration.mjs --self-test`, `docker compose up -d --wait --force-recreate identity storage-init` (L-015: a restart that recreates), the smoke again, `docker compose down -v` |
 
 ---
 
@@ -144,11 +144,11 @@ T7 -> T8
 **Done when**:
 - [x] The script adds `idempotency_key` and `uq_processing_request_owner_idempotency`
 - [x] Applied to an empty database, the columns and indexes equal the migrations'
-- [ ] Build gate passes (after Phase 2's T4 makes the smoke use the upload flow; until then recorded as Partial, as S5's T3 was)
+- [x] Build gate passes (after Phase 2's T4 makes the smoke use the upload flow; until then recorded as Partial, as S5's T3 was)
 
 **Tests**: none
 **Gate**: build
-**Status**: ⚠️ Partial. The first two criteria are met. The build box is ticked by T4, once the smoke no longer calls the removed `POST /processing-requests`.
+**Status**: ✅ Complete. The build box was ticked by T4, whose build gate ran green with this script in the stack's database; see T4's evidence.
 **Evidence**:
 - **Generated script.** Generated from `processing-catalog` `432ee94`. The script gains a block `-- from 1789956000000-AddIdempotencyKey.ts` with `ALTER TABLE processing_request ADD COLUMN IF NOT EXISTS idempotency_key text NULL;` and `CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_idempotency ON processing_request (owner_user_id, idempotency_key);`. Nothing else changed. The generator's count guard passed: both `query()` calls were read.
 - **Empty-database comparison.** The script was applied with `ON_ERROR_STOP=1` to an empty `postgres:17-alpine` with no published port (container removed). Its columns and indexes, 34 rows of `information_schema.columns` plus `pg_indexes` for `catalog` and `notification` excluding the ledger, are identical to the stack's migration-run database. That database's ledger holds all four Catalog migrations and the Notification one. `idempotency_key` is `text`, nullable. The unique index is `(owner_user_id, idempotency_key)`.
@@ -179,14 +179,57 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] No script writes videos to storage outside the API (the seed is gone; a check asserts no `aws s3 cp`/`put-object` to `sources/` remains in `scripts/`)
-- [ ] Every S4/S5 step still passes with both requests created through uploads
-- [ ] Self-test requires both new steps and rejects a bad and a near-miss input each
-- [ ] T3's build box ticked once this gate is green
-- [ ] Build gate passes
+- [x] No script writes videos to storage outside the API (the seed is gone; a check asserts no `aws s3 cp`/`put-object` to `sources/` remains in `scripts/`)
+- [x] Every S4/S5 step still passes with both requests created through uploads
+- [x] Self-test requires both new steps and rejects a bad and a near-miss input each
+- [x] T3's build box ticked once this gate is green
+- [x] Build gate passes
 
 **Tests**: integration
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**:
+- **Seed removed.** `scripts/seed-source-video.mjs` is deleted. Nothing references it outside earlier features' records.
+- **Storage-write check.** `scripts/check-no-storage-writes.mjs` fails, naming the file and the kind of write, when a script under `scripts/` writes into the bucket. It flags an `aws s3 cp` whose last path is `s3://`, `s3 mv`/`sync`, `put-object`, `copy-object`, the multipart calls and SDK writes. It flags any write into the bucket, not only a literal `sources/` key, because the seed held its key in a constant on another line. Against the tree before the deletion it exited 1: `scripts/seed-source-video.mjs writes into the bucket outside the API (aws s3 cp into the bucket); …`. After the deletion it passes: `4 scripts under scripts/ checked`.
+  - Its `--self-test` passes with 10 bad and 6 good inputs. The seed's two calls verbatim, a shell copy, the archive read with its paths swapped (near-miss), `sync`, `put-object`, the multipart pair, `PutObjectCommand`, two writers among clean files, and `main` with the seed among the scripts are each named. The archive read to stdout, a read to a file, a listing and a `PUT` to an issued URL pass.
+  - Both commands are in the Build and Quick gates and in CI's `topology` job (L-002, L-016).
+- **Smoke.** Steps before: `api health`, `seed`, `anonymous access`, `anonymous refused`, `create requests`, `video completed`, `key scope`, `rejection`, `archive count`, `no archive`, `video delivery`, `delivery sentence`, `single delivery`, `bob request created`, `lists disjoint`, `cross-owner read 404`, `no internal fields`, `no leftovers`. Steps after: `api health`, `anonymous refused`, `old create gone`, `upload confirmed`, `anonymous access`, then the S4/S5 steps from `video completed` on, unchanged in order.
+  - `uploadThroughApi` starts an upload, then `PUT`s each part's slice to its URL from the host. `confirm` sends the `Idempotency-Key`. Neither judges its answer.
+  - `upload confirmed` uploads the fixture and the non-video as `alice`, each with its own key. `assertUploaded` requires 201 with an `uploadId` and part URLs, every URL on `STORAGE_ORIGIN` (named before its `PUT` is judged), and every `PUT` 200. `assertConfirmed` requires 201, a `processingRequestId` and `RECEIVED`. The source key for `anonymous access` is read from the part URL's path.
+  - `bob request created` goes through the same upload and the same two checks.
+  - `anonymous refused` now requires 401 on `POST /uploads`, `POST /uploads/:uploadId/complete` and `GET /processing-requests`, because creation is two calls now.
+  - `old create gone` requires `alice`'s `POST /processing-requests` to answer 404 with the message `Cannot POST /processing-requests`. A 2xx fails as `Old creation route still creates`.
+- **Self-test.** Before: 14 steps, 58 bad inputs, 31 good. After: 16 steps, 74 bad inputs, 37 good.
+  - The step `old create gone` is given 201 (bad) and a 404 `Processing request not found` (near-miss).
+  - The step `upload confirmed` is given a part URL on `http://storage:9000` (bad) and on `127.0.0.1` at the same port with `PUT` 403 (near-miss). It is also given the non-video confirmed with 200.
+  - Direct helper cases:
+    - old route: 201, 400, a 404 with another message, and a 404 for `/processing-requests/`
+    - upload: `PUT` 403, start 400, 201 without parts
+    - confirmation: `RECEIVE`, not `RECEIVED`
+    - anonymous calls: the confirmation 201 and a read 200
+  - One acceptance runs `upload confirmed` and requires the two ids and the source key it records (L-011).
+  - Scratch mutations fail the self-test: `old create gone`'s check emptied, the fixture's `assertUploaded` dropped, and the origin comparison disabled.
+- **Build gate.** Every command in the row above ran with the three port exports, and the gate was green:
+  - `clean-appledouble`, `config -q`
+  - sizing 12/7 and the storage-write check 10/6, each with its self-test
+  - `up --build -d --wait`
+  - the smoke, then its self-test (16/74/37)
+  - `up -d --wait --force-recreate identity storage-init`, then the smoke again
+  - `down -v`
+
+  Both real runs printed every step. The part URL was on `http://localhost:39000`, the fixture reached `COMPLETED` with 8 frames, and the non-video reached `FAILED (FORMATO_INVALIDO)` with one delivery. The second run listed 4 of `alice`'s requests and 2 of `bob`'s, disjoint. Services: `fiap-x-api` `db0ce83`, `processing-catalog` `432ee94`, Worker and Notification at `main`.
+- **Adequacy.** Each criterion maps to an assertion:
+  - no writer: `check-no-storage-writes.mjs:124` (`main` with the seed, rejected)
+  - old route gone: `smoke-local-integration.mjs:381`, `:1097`, `:1099`
+  - upload from the host on the published port: `:463`, `:1101`, `:1103`
+  - confirmation 201: `:475`, `:1105`
+  - both steps required: `:810`
+  - anonymous creation 401: `:279`, `:939`
+
+  Every new case maps to UPL-15 AC2, UPL-17 AC1/AC7/AC8, UPL-18 or AUTH-17 AC1; none is speculative.
+- **Deviations.**
+  - The check is a script of its own, not part of the smoke. It needs no stack, and it follows `check-worker-sizing.mjs`'s shape. So `scripts/check-no-storage-writes.mjs` and `.github/workflows/ci.yml` are touched beyond this task's **Where**.
+  - `anonymous refused` probes the two creation calls and a read instead of the removed route, whose absence `old create gone` now asserts.
 
 ---
 
