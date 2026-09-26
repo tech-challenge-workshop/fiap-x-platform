@@ -159,12 +159,15 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] The script contains `idx_processing_request_owner_created` and no longer creates `idx_processing_request_owner`
-- [ ] Applied to an empty database, it yields the same indexes as running the migrations
+- [x] The script contains `idx_processing_request_owner_created` and no longer creates `idx_processing_request_owner`
+- [x] Applied to an empty database, it yields the same indexes as running the migrations
 - [ ] Build gate passes
 
 **Tests**: none
 **Gate**: build
+**Status**: ⚠️ Partial. The script is done and proven. The build gate is green except the real smoke, which T4 unblocks.
+**Evidence**: generated from `processing-catalog` `bd9154c`. The script replays the migrations in order, so it still has the first migration's `CREATE INDEX … idx_processing_request_owner`, followed now by `DROP INDEX IF EXISTS idx_processing_request_owner`. That reads "no longer creates" as net effect. The script applied with `ON_ERROR_STOP=1` to an empty `postgres:17-alpine` with no published port (container removed). Its 7 indexes (name and definition) and its tables are identical to the stack's migrations-run database (ledger: all three Catalog migrations plus the Notification one). `idx_processing_request_owner_created` is present and `idx_processing_request_owner` absent. Build gate (with `POSTGRES_HOST_PORT=55432` and the T10 port override): config, sizing and its self-test, `up --build --wait`, seed, smoke `--self-test` (9 / 28 / 20), the second `up` (`alice`'s `sub` unchanged) and `down -v` all pass. The real smoke stops at `Create request failed: 401`: its creation is still anonymous against the now-authenticated API, which T4 changes.
+**Found during Execute**: `scripts/generate-db-script.mjs` silently dropped the new migration's `DROP INDEX`, because Prettier wrapped that call with a trailing comma and the pattern did not allow one. As generated, the old index would have survived, which failed both criteria above. The pattern now accepts the comma. The generator also fails when `up()` makes more `query()` calls than it could read. A copy with the old pattern exits 1 with `1789955000000-IndexProcessingRequestOwnerCreatedAt.ts: up() makes 2 query() calls but only 1 could be read`.
 
 ---
 
