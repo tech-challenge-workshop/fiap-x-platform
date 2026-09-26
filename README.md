@@ -40,18 +40,44 @@ node scripts/smoke-local-integration.mjs
 
 Compose builds each service from its sibling repository, so all five repositories must be checked out under the same parent directory.
 
+### Logging in as a demo user
+
+Every API route except `/health` needs a bearer token. The `identity` service (Keycloak, on `localhost:8080`) imports the `fiapx` realm from [`identity/fiapx-realm.json`](identity/fiapx-realm.json) on every start, so nothing changed by hand in its console survives a restart. The realm has two demo users and no self-registration:
+
+| User | Password |
+| --- | --- |
+| `alice` | `alice-dev-password` |
+| `bob` | `bob-dev-password` |
+
+Their ids are pinned in the realm file, so each user's `sub`, which the API records as a request's owner, stays the same across restarts. Get a token with one command; it prints only the access token:
+
+```sh
+TOKEN=$(node scripts/get-token.mjs alice)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/processing-requests
+```
+
+`--password <p>` overrides the demo password, and `IDENTITY_URL` overrides `http://localhost:8080`. A rejected user or password exits 1 naming the user and Keycloak's reason; an unreachable `identity` exits 1 naming the service. A token lasts 5 minutes.
+
+The script uses the OAuth password grant through the public client `fiapx-cli`. OAuth 2.1 discourages that grant. It is acceptable here only because the client and these passwords exist solely in the local development realm; the client has no browser flow and no secret, and nothing here reaches a deployed environment.
+
 ### What the smoke proves
 
-Each run creates two new requests and proves two outcomes, so neither can pass on a status alone:
+Each run creates two new requests as `alice` and one as `bob`. It proves two processing outcomes, so neither can pass on a status alone, and it proves that authentication and owner scope hold:
 
 - **An archive with the right frame count.** The fixture video must reach `COMPLETED`. The smoke then downloads the archive at the `zipStorageKey` the Catalog reports and counts its entries: 8 seconds at 1 frame per second gives 8. It fails naming which of three things it found: an archive that is absent, one that is unreadable, or one that is empty. A wrong count names both numbers.
 - **A rejection with the safe reason.** An object that is not a video must reach `FAILED` with `FORMATO_INVALIDO`. It must leave no archive, and the Notification Service must record exactly one delivery carrying the user-facing sentence.
 - **A private bucket.** An anonymous request for the seeded object and for the bucket listing must be refused with 403.
+- **Anonymous creation refused.** A `POST /processing-requests` without a token must answer 401.
+- **Disjoint lists.** `alice`'s list must hold her requests and not `bob`'s; `bob`'s must hold his and none of hers, from this run or an earlier one.
+- **A cross-owner read looks like a missing one.** `bob` reading `alice`'s request must get 404 with exactly the body a random id gets.
+- **No internal fields.** No item in `alice`'s list may carry `sourceStorageKey`, `zipStorageKey`, `failureCode` or `ownerUserId`, and her rejected request must carry exactly the user-facing sentence.
 - **No leftovers.** The smoke's own temporary directory must be gone after cleanup.
 
-The smoke is one ordered list of steps. Each step observes the stack, then checks what it observed. `node scripts/smoke-local-integration.mjs --self-test` needs no stack. It requires nine assertion steps to be in that list: anonymous access, the video completed, the archive key scoped to this request, the rejection, the archive count, no archive for the rejection, the delivery sentence, a single delivery, and no leftovers. It runs each step's own check against one bad observation and requires the exact failure message, then against good observations and requires a pass. It also calls each assertion helper directly with bad and good inputs. So a step that is removed, or a check that stops checking, fails the self-test. It does not reach the stack: whether an HTTP call or a `docker compose` command observes the right thing is proved only by the real run. CI's `topology` job and the build gate run it.
+The smoke logs in through `getToken` from `scripts/get-token.mjs`. It keeps one token per user, and when the API answers 401 it fetches a fresh token once and retries, so a token that expires during a long run does not fail it. A second 401 fails naming the step. It still reads `zipStorageKey` from the Catalog's local observation endpoint, because the API never exposes it.
 
-Both assertions were verified by making them fail: a Worker that stores no archive, and a Worker that validates nothing, each turn the smoke red. The smoke seeds its own source objects, so it needs nothing but a running stack.
+The smoke is one ordered list of steps. Each step observes the stack, then checks what it observed. `node scripts/smoke-local-integration.mjs --self-test` needs no stack. It requires fourteen assertion steps to be in that list: anonymous access, anonymous refused, the video completed, the archive key scoped to this request, the rejection, the archive count, no archive for the rejection, the delivery sentence, a single delivery, bob's request created, disjoint lists, the cross-owner 404, no internal fields, and no leftovers. It runs each step's own check against one bad observation and requires the exact failure message, then against good observations and requires a pass. It also calls each assertion helper directly with bad and good inputs. So a step that is removed, or a check that stops checking, fails the self-test. It also drives the token refresh with an injected token source: a 401 then a 200 must pass with a fresh token, and two 401s must fail. It does not reach the stack: whether an HTTP call or a `docker compose` command observes the right thing is proved only by the real run. CI's `topology` job and the build gate run it.
+
+Both processing assertions were verified by making them fail: a Worker that stores no archive, and a Worker that validates nothing, each turn the smoke red. The owner-scope assertions were verified the same way, against scratch copies of the API: one that also returns `bob`'s requests to `alice` fails `lists disjoint`, one that answers 403 to a cross-owner read fails `cross-owner read 404`, and one that lets a request without a token in fails `anonymous refused`. The smoke seeds its own source objects, so it needs nothing but a running stack.
 
 ### Object storage
 
@@ -127,7 +153,8 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 | `.specs/STATE.md` | Cross-repository decision log (AD-001 onward) |
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
-| `scripts/` | Local integration smoke test, source seeding, Worker sizing check |
+| `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
+| `scripts/` | Local integration smoke test, demo-user token helper, source seeding, Worker sizing check |
 | `fixtures/` | The committed source video and its provenance |
 | `storage/` | The object storage bootstrap |
 
