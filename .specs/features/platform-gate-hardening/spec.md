@@ -209,9 +209,9 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GATE-04 | P2: Database script drift check (V10, V37) | Execute | Implementing (T4 ✅) |
 | GATE-05 | P2: Script includes spec B's index | Execute | Implementing (T4 ✅) |
 | GATE-06 | P3: Storage-write check reads every script (V37) | Execute | Implementing (T5 ✅) |
-| GATE-07 | P4: Download tied to the request's archive (V35) | Tasks | In Tasks |
+| GATE-07 | P4: Download tied to the request's archive (V35) | Execute | Implementing (T7 ✅) |
 | GATE-08 | P4: Deliveries counted by the right id (V16) | Execute | Implementing (T6 ✅) |
-| GATE-09 | P4: Exact delivery sentence (V17) | Tasks | In Tasks |
+| GATE-09 | P4: Exact delivery sentence (V17) | Execute | Implementing (T7 ✅) |
 | GATE-10 | P4: Exactly one object at the exact key (V18) | Execute | Implementing (T6 ✅) |
 | GATE-11 | P5: `main()` runs every step (V14) | Tasks | In Tasks |
 | GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅, T4 ✅, T5 ✅) |
