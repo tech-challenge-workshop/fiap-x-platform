@@ -290,11 +290,13 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] The self-test rejects each forbidden field and a near-miss `failureReason` (lesson L-012)
-- [ ] Quick gate passes
+- [x] The self-test rejects each forbidden field and a near-miss `failureReason` (lesson L-012)
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: `no internal fields` checks the list `lists disjoint` already read, so it adds no request. `assertNoInternalFields` fails `alice's list exposes <field> on request <id>` for any of the four fields, present even as `null`. It then requires her rejected request with exactly `O arquivo enviado nao e um video MP4 ou MOV valido.`. The self-test names the four fields literally, so a field dropped from `INTERNAL_FIELDS` fails it. It rejects each field, `ownerUserId: null`, the sentence without its final period (L-012), a missing `failureReason`, and a list without the rejected request. Self-test: 14 required steps, 57 bad inputs, 30 good inputs. Scratch copies without `failureCode` in the list, or accepting any non-empty reason, fail the self-test. On the real stack the smoke is green and prints `alice's list carries no internal field, and <id> carries the safe failureReason`. Quick gate passes.
 
 ---
 
