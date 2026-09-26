@@ -21,7 +21,8 @@ const FORMATO_INVALIDO_REASON = 'O arquivo enviado nao e um video MP4 ou MOV val
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
-const STORAGE_URL = process.env.STORAGE_URL ?? 'http://localhost:9000';
+// STORAGE_HOST_PORT is the variable compose.yaml publishes storage on.
+const STORAGE_URL = process.env.STORAGE_URL ?? `http://localhost:${process.env.STORAGE_HOST_PORT ?? 9000}`;
 
 const HEALTH_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS ?? 30000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 60000);

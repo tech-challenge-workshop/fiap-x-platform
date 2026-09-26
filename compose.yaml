@@ -102,7 +102,8 @@ services:
     # Compose ignores outside Swarm.
     cpus: ${WORKER_CPUS:-2}
     ports:
-      - "3002:3002"
+      # WORKER_HOST_PORT moves only the host side, like POSTGRES_HOST_PORT.
+      - "${WORKER_HOST_PORT:-3002}:3002"
     environment:
       - PORT=3002
       - RABBITMQ_URL=amqp://rabbitmq:5672
@@ -210,7 +211,10 @@ services:
       - RUSTFS_ACCESS_KEY=fiapx-dev
       - RUSTFS_SECRET_KEY=fiapx-dev-secret
     ports:
-      - "9000:9000"
+      # STORAGE_HOST_PORT moves only the host side, like POSTGRES_HOST_PORT.
+      # The smoke reads the same variable to reach the bucket from the host;
+      # services and storage-init always use storage:9000 in the network.
+      - "${STORAGE_HOST_PORT:-9000}:9000"
     volumes:
       - storage-data:/data
     healthcheck:

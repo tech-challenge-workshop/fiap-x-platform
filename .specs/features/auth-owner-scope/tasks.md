@@ -190,14 +190,16 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] Unset, `docker compose config` renders `9000:9000` and `3002:3002` as before
-- [ ] With `STORAGE_HOST_PORT` and `WORKER_HOST_PORT` set, the stack comes up healthy while other processes hold 9000 and 3002, with no override file
-- [ ] The smoke (and any script reaching storage or the worker from the host) derives its default URL from the same variables, so one set of exports runs the whole gate
-- [ ] The README lists all three host-port variables together
-- [ ] Full gate passes
+- [x] Unset, `docker compose config` renders `9000:9000` and `3002:3002` as before
+- [x] With `STORAGE_HOST_PORT` and `WORKER_HOST_PORT` set, the stack comes up healthy while other processes hold 9000 and 3002, with no override file
+- [x] The smoke (and any script reaching storage or the worker from the host) derives its default URL from the same variables, so one set of exports runs the whole gate
+- [x] The README lists all three host-port variables together
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**: unset, `docker compose config` renders `published: "9000"` and `"3002"`; with the variables set, `"39000"` and `"33002"` (and `"55432"`). With `fortal-minio` on 127.0.0.1:9000 and a listener on *:3002, `docker compose config -q` and `up --build -d --wait` with only `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002` exported brought every service to healthy, `storage` on `39000->9000` and `worker` on `33002->3002`, with no override file. The smoke is the only script reaching either from the host (the seed and the archive checks go through `storage-init` in the network; nothing calls the worker from the host). Its `STORAGE_URL` now defaults to `http://localhost:${STORAGE_HOST_PORT ?? 9000}`: with `STORAGE_HOST_PORT=39000` the `anonymous access` step passed (403 on the object and the listing), and with `STORAGE_HOST_PORT=1` the same step failed with `fetch failed`. The run then stopped at `Create request failed: 401`, which T4 fixes. Quick checks: `node --check`, smoke self-test (9 / 28 / 20), sizing self-test (12 / 7) and the sizing check pass.
 
 ---
 
