@@ -578,14 +578,22 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] The committed fixture's SHA-256 matches, and the README's command reproduces it
-- [ ] The self-test rejects `COMPLETED`, `FAILED (FORMATO_INVALIDO)` (the edge case), an archive key, two deliveries, and the `FORMATO_INVALIDO` sentence
-- [ ] The real run is green
-- [ ] Literal negative: with the valid fixture in its place, `processing failure` fails naming `COMPLETED`
-- [ ] Full gate passes
+- [x] The committed fixture's SHA-256 matches, and the README's command reproduces it
+- [x] The self-test rejects `COMPLETED`, `FAILED (FORMATO_INVALIDO)` (the edge case), an archive key, two deliveries, and the `FORMATO_INVALIDO` sentence
+- [x] The real run is green
+- [x] Literal negative: with the valid fixture in its place, `processing failure` fails naming `COMPLETED`
+- [ ] Full gate passes (not run in T13: it ends in `down -v`, and the stack stays up; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete (full gate pending, see above)
+**Evidence**:
+- **Fixture.** `fixtures/corrupted-8s.mp4` was generated with the command now in `fixtures/README.md` (`python:3-alpine` in a container: walk the top-level boxes, zero the `mdat` payload `[i+8, i+size)`). 39,863 bytes; `shasum -a 256` gives `24123d94709fc8323c7245e759f4648e60d82427e014890bfe9175ea49259454`, as the spike recorded. The README records its properties, the command, and why it fails where it does (FFprobe reads `moov`: exit 0, mp4 family, 8 s, video stream, so validation accepts it; FFmpeg decodes the zeroed `mdat`: exit 69, 0 frames, so the Worker emits `PROCESSAMENTO_FALHOU`; the ZIP builder also refuses 0 files).
+- **Red first.** With the three names in `REQUIRED_STEPS` and the self-test cases written, before the steps and `assertProcessingFailed` existed, the self-test failed 30 times (dry run unequal to `REQUIRED_STEPS`, the three steps missing, every new bad and good input) and exited 1.
+- **Change.** `processing failure`, `processing failure archive` and `processing failure delivery` run after `single delivery`. The first uploads and confirms the corrupted fixture as alice (`video/mp4`) and waits for the terminal status only once the confirmation named a request; its check runs `assertUploaded`, `assertConfirmed` (recording `ctx.failedId`), then `assertProcessingFailed`, which names `COMPLETED` or `FAILED (FORMATO_INVALIDO)`. The archive step lists `zips/<failedId>/` and requires no key (`assertNoArchiveListing` takes a label, `Failed`; the existing message is unchanged). The delivery step reads the record and the count, each through `observedFor(…, 'failedId')`. `assertDeliverySentence` takes the failure code and reads the sentence from `FAILURE_REASONS` (`FORMATO_INVALIDO`, `PROCESSAMENTO_FALHOU`), defaulting to `FORMATO_INVALIDO`, so its existing messages are unchanged. `lists disjoint` now requires alice's list to hold `failedId` too. The totals checks (`confirmation replay`, `second key replays`) measure before and after their own call, which runs before the new upload, so they need no change.
+- **Self-test.** From 26/145/50 to `29 required steps present, 166 bad inputs rejected with the expected message, 57 good inputs accepted, main() ran every step in order in a dry run, spawned failure exited non-zero`. New bad inputs: `COMPLETED`, `FAILED (FORMATO_INVALIDO)`, `FAILED` without a code, the terminal status observed for another id, a confirmation `200`, a PUT `403`; an archive key, a listing for another id; two and zero deliveries, the `FORMATO_INVALIDO` sentence, the processing sentence without its final period and `Nao foi possivel processar o video.` (near-misses), a record and a count taken for another id; alice's list missing `failedId`, bob's list holding it. The processing sentence is a literal, not the script's constant.
+- **Real run.** Green on the stack (Worker image from `processing-worker` `main`): `Catalog reached FAILED (PROCESSAMENTO_FALHOU) for <id>, alice's upload of the corrupted video`, `No archive exists under zips/<id>/`, `Notification delivered once for <id>: Nao foi possivel processar o video. Tente enviar novamente.`; `alice lists 9 requests and bob 3`.
+- **Literal negative.** A scratch copy of the smoke in `scripts/` whose corrupted-fixture path pointed at `sample-8s.mp4`: it failed `processing failure` with `Request <id> for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed COMPLETED` and exited 1, every earlier step green. The copy was deleted; the committed smoke was never changed.
 
 ---
 

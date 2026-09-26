@@ -20,6 +20,13 @@ const EXPECTED_FRAMES = FIXTURE_SECONDS * FRAMES_PER_SECOND;
 // processing-catalog src/domain/failure-reason.ts: the user-facing text the
 // Catalog maps from FORMATO_INVALIDO and carries on the terminal event.
 const FORMATO_INVALIDO_REASON = 'O arquivo enviado nao e um video MP4 ou MOV valido.';
+// GATE-16: the sentence the Catalog maps from PROCESSAMENTO_FALHOU.
+const PROCESSAMENTO_FALHOU_REASON = 'Nao foi possivel processar o video. Tente enviar novamente.';
+// The user-facing sentence each failure code must be delivered with.
+const FAILURE_REASONS = {
+  FORMATO_INVALIDO: FORMATO_INVALIDO_REASON,
+  PROCESSAMENTO_FALHOU: PROCESSAMENTO_FALHOU_REASON,
+};
 
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
@@ -34,6 +41,9 @@ const STORAGE_ORIGIN = new URL(STORAGE_URL).origin;
 // committed fixture, and a non-video under an .mp4 name that the Worker must
 // reject. Neither reaches storage any other way (UPL-18).
 const FIXTURE_PATH = join(REPO_ROOT, 'fixtures', 'sample-8s.mp4');
+// GATE-16: the sample with its mdat payload zeroed (fixtures/README.md).
+// FFprobe accepts it and FFmpeg fails on it, so it fails in processing.
+const CORRUPTED_FIXTURE_PATH = join(REPO_ROOT, 'fixtures', 'corrupted-8s.mp4');
 const NOT_A_VIDEO_FILE = {
   bytes: Buffer.from('This is plain text under an .mp4 name. The Worker must reject it.\n'),
   fileName: 'not-a-video.mp4',
@@ -141,9 +151,9 @@ function dockerCompose(args, input) {
   return result.stdout;
 }
 
-// A rejected request must leave nothing under its archive prefix.
-function assertNoArchiveListing(id, keys) {
-  if (keys.length > 0) throw new Error(`Rejected request ${id} left an archive under zips/${id}/:\n${keys.join('\n')}`);
+// A rejected or failed request must leave nothing under its archive prefix.
+function assertNoArchiveListing(id, keys, label = 'Rejected') {
+  if (keys.length > 0) throw new Error(`${label} request ${id} left an archive under zips/${id}/:\n${keys.join('\n')}`);
 }
 
 // GATE-10: the request's prefix must hold exactly one object, at exactly the
@@ -216,6 +226,15 @@ function assertRejected(id, request) {
   }
 }
 
+// GATE-16: the corrupted video must settle FAILED with PROCESSAMENTO_FALHOU,
+// which only the processing path emits. COMPLETED, or FORMATO_INVALIDO from
+// validation, fails naming what was observed.
+function assertProcessingFailed(id, request) {
+  if (request.status !== 'FAILED' || request.failureCode !== 'PROCESSAMENTO_FALHOU') {
+    throw new Error(`Request ${id} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed ${describe(request)}`);
+  }
+}
+
 // The video must settle COMPLETED; anything else fails naming what was observed.
 function assertCompleted(id, request) {
   if (request.status !== 'COMPLETED') {
@@ -232,11 +251,14 @@ function assertArchiveKeyScoped(id, zipKey) {
 }
 
 // RM-19 AC2: the Catalog stores the code, not the sentence, so the exact
-// sentence is observed on the Notification delivery record.
-function assertDeliverySentence(id, delivery) {
-  if (delivery.status !== 'FAILED' || delivery.failureReason !== FORMATO_INVALIDO_REASON) {
+// sentence is observed on the Notification delivery record, as the one the
+// request's failure code maps to.
+function assertDeliverySentence(id, delivery, code = 'FORMATO_INVALIDO') {
+  const reason = FAILURE_REASONS[code];
+  if (reason === undefined) throw new Error(`No user-facing sentence is known for failure code ${code}`);
+  if (delivery.status !== 'FAILED' || delivery.failureReason !== reason) {
     throw new Error(
-      `Delivery for ${id}: expected FAILED with ${JSON.stringify(FORMATO_INVALIDO_REASON)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
+      `Delivery for ${id}: expected FAILED with ${JSON.stringify(reason)}, observed ${delivery.status} with ${JSON.stringify(delivery.failureReason)}`,
     );
   }
 }
@@ -1050,6 +1072,47 @@ export const SMOKE_STEPS = [
     report: (ctx) => `Notification delivered once for ${ctx.rejectedId}: ${ctx.delivery.failureReason}`,
   },
   {
+    name: 'processing failure',
+    // GATE-16. The wait starts only once the confirmation named a request;
+    // otherwise the check fails on the upload or the confirmation first.
+    observe: async (ctx) => {
+      const corrupted = { bytes: readFileSync(CORRUPTED_FIXTURE_PATH), fileName: 'corrupted-8s.mp4', contentType: 'video/mp4' };
+      ctx.failedUpload = await uploadAndConfirm('alice', 'processing failure', corrupted);
+      const { status, body } = ctx.failedUpload.confirmation;
+      if (status === 201 && typeof body?.processingRequestId === 'string') {
+        ctx.processingFailed = await waitForTerminalStatus(body.processingRequestId);
+      }
+    },
+    check: (ctx) => {
+      const upload = observed(ctx, 'failedUpload');
+      assertUploaded('alice', 'the corrupted video', upload);
+      ctx.failedId = assertConfirmed('alice', 'the corrupted video', upload.confirmation);
+      assertProcessingFailed(observed(ctx, 'failedId'), observedFor(ctx, 'processingFailed', 'failedId'));
+    },
+    report: (ctx) => `Catalog reached FAILED (PROCESSAMENTO_FALHOU) for ${ctx.failedId}, alice's upload of the corrupted video`,
+  },
+  {
+    name: 'processing failure archive',
+    observe: (ctx) => {
+      ctx.failedListing = listArchives(ctx.failedId);
+    },
+    check: (ctx) => assertNoArchiveListing(observed(ctx, 'failedId'), observedFor(ctx, 'failedListing', 'failedId').keys, 'Failed'),
+    report: (ctx) => `No archive exists under zips/${ctx.failedId}/`,
+  },
+  {
+    name: 'processing failure delivery',
+    observe: async (ctx) => {
+      ctx.failedDelivery = await waitForNotificationDelivery(ctx.failedId);
+      ctx.failedDeliveries = countDeliveries(ctx.failedId);
+    },
+    check: (ctx) => {
+      const failedId = observed(ctx, 'failedId');
+      assertDeliverySentence(failedId, observedFor(ctx, 'failedDelivery', 'failedId'), 'PROCESSAMENTO_FALHOU');
+      assertSingleDelivery(failedId, observedFor(ctx, 'failedDeliveries', 'failedId').count);
+    },
+    report: (ctx) => `Notification delivered once for ${ctx.failedId}: ${ctx.failedDelivery.failureReason}`,
+  },
+  {
     name: 'bob request created',
     observe: async (ctx) => {
       ctx.bobUpload = await uploadAndConfirm('bob', 'bob request created', NOT_A_VIDEO_FILE);
@@ -1068,7 +1131,7 @@ export const SMOKE_STEPS = [
       ctx.bobList = await listAllAs('bob', 'lists disjoint');
     },
     check: (ctx) => assertListsDisjoint({
-      aliceIds: [observed(ctx, 'id'), observed(ctx, 'rejectedId')],
+      aliceIds: [observed(ctx, 'id'), observed(ctx, 'rejectedId'), observed(ctx, 'failedId')],
       bobId: observed(ctx, 'bobId'),
       aliceList: observed(ctx, 'aliceList'),
       bobList: observed(ctx, 'bobList'),
@@ -1169,6 +1232,9 @@ const REQUIRED_STEPS = [
   'video delivery',
   'delivery sentence',
   'single delivery',
+  'processing failure',
+  'processing failure archive',
+  'processing failure delivery',
   'bob request created',
   'lists disjoint',
   'cross-owner read 404',
@@ -1208,6 +1274,10 @@ async function selfTest() {
   const goneBody = { message: 'Cannot POST /processing-requests', error: 'Not Found', statusCode: 404 };
   const rejectedId = 'self-test-rejected';
   const bobId = 'self-test-bob-request';
+  // GATE-16: the corrupted video's request. Literal, not
+  // PROCESSAMENTO_FALHOU_REASON: a changed constant must fail here too.
+  const failedId = 'self-test-processing-failed';
+  const processingSentence = 'Nao foi possivel processar o video. Tente enviar novamente.';
   const olderAliceId = 'self-test-older-alice-request';
   const item = (processingRequestId) => ({ processingRequestId, status: 'RECEIVED' });
   const readUrl = `${API_URL}/processing-requests/${id}`;
@@ -1254,6 +1324,7 @@ async function selfTest() {
   const videoUpload = upload('self-test-video-upload', id);
   const rejectedUpload = upload('self-test-non-video-upload', rejectedId);
   const bobUpload = upload('self-test-bob-upload', bobId);
+  const failedUpload = upload('self-test-corrupted-upload', failedId);
   // A download as the API and storage answer it: issued 5 minutes ahead of the
   // moment the answer arrived, and the URL serving an 8-entry archive.
   const downloadCall = `alice's GET ${API_URL}/processing-requests/${id}/download`;
@@ -1295,9 +1366,12 @@ async function selfTest() {
     };
   };
   const lists = {
-    aliceIds: [id, rejectedId],
+    aliceIds: [id, rejectedId, failedId],
     bobId,
-    aliceList: [item(olderAliceId), item(id), { ...item(rejectedId), status: 'FAILED', failureReason: sentence }],
+    aliceList: [
+      item(olderAliceId), item(id), { ...item(rejectedId), status: 'FAILED', failureReason: sentence },
+      { ...item(failedId), status: 'FAILED', failureReason: processingSentence },
+    ],
     bobList: [item(bobId)],
   };
 
@@ -1453,6 +1527,18 @@ async function selfTest() {
       `alice's rejected request ${rejectedId} carries failureReason undefined, expected ${JSON.stringify(sentence)}`],
     ['rejected request absent from the list', () => assertNoInternalFields(rejectedId, [item(olderAliceId), item(id)]),
       `alice's list is missing her rejected request ${rejectedId}`],
+    ['corrupted video observed COMPLETED', () => assertProcessingFailed(failedId, { status: 'COMPLETED', zipStorageKey: zipKey }),
+      `Request ${failedId} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed COMPLETED`],
+    ['corrupted video FAILED (FORMATO_INVALIDO)', () => assertProcessingFailed(failedId, { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' }),
+      `Request ${failedId} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed FAILED (FORMATO_INVALIDO)`],
+    ['corrupted video FAILED without a code', () => assertProcessingFailed(failedId, { status: 'FAILED' }),
+      `Request ${failedId} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed FAILED`],
+    ['processing failure delivery with the FORMATO_INVALIDO sentence', () => assertDeliverySentence(failedId, { status: 'FAILED', failureReason: sentence }, 'PROCESSAMENTO_FALHOU'),
+      `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with ${JSON.stringify(sentence)}`],
+    ['processing failure delivery given the sentence without its final period', () => assertDeliverySentence(failedId, { status: 'FAILED', failureReason: processingSentence.slice(0, -1) }, 'PROCESSAMENTO_FALHOU'),
+      `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with ${JSON.stringify(processingSentence.slice(0, -1))}`],
+    ['archive present for the failed request', () => assertNoArchiveListing(failedId, archiveKeys(failedId), 'Failed'),
+      `Failed request ${failedId} left an archive under zips/${failedId}/:\n${archiveKeys(failedId).join('\n')}`],
     ['a 401 again after a fresh token', () => withFreshToken(fakeTokens([]), 'bob', 'lists disjoint', async () => ({ status: 401 })),
       `Step "lists disjoint": bob's request was refused with 401 twice, the second time with a freshly issued token`],
   ];
@@ -1478,6 +1564,14 @@ async function selfTest() {
     ['video request COMPLETED', () => assertCompleted(id, { status: 'COMPLETED', zipStorageKey: zipKey })],
     ['archive key under this request', () => assertArchiveKeyScoped(id, zipKey)],
     ['delivery FAILED with the sentence', () => assertDeliverySentence(id, { status: 'FAILED', failureReason: sentence })],
+    ['corrupted video FAILED (PROCESSAMENTO_FALHOU)', () => assertProcessingFailed(failedId, { status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' })],
+    ['processing failure delivery FAILED with its sentence', () => assertDeliverySentence(failedId, { status: 'FAILED', failureReason: processingSentence }, 'PROCESSAMENTO_FALHOU')],
+    ['no archive for the failed request', () => assertNoArchiveListing(failedId, [], 'Failed')],
+    ['processing failure records its id', async () => {
+      const ctx = { failedUpload, processingFailed: { id: failedId, status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' } };
+      await runStepCheck('processing failure', ctx);
+      if (ctx.failedId !== failedId) throw new Error(`recorded ${ctx.failedId}, expected ${failedId}`);
+    }],
     ['anonymous call refused with 401', () => assertAnonymousCallRefused(uploadsCall, 401)],
     ["bob's confirmation answered 201 with an id", () => {
       const created = assertConfirmed('bob', 'the non-video', { status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } });
@@ -1558,6 +1652,12 @@ async function selfTest() {
     randomDownload: { ...notFound },
     scratchDirs: [goneDir],
     lifecycle: lifecycleOf(ownedRules),
+    failedUpload,
+    failedId,
+    processingFailed: { id: failedId, status: 'FAILED', failureCode: 'PROCESSAMENTO_FALHOU' },
+    failedListing: { id: failedId, keys: [] },
+    failedDelivery: { id: failedId, status: 'FAILED', failureReason: processingSentence },
+    failedDeliveries: { id: failedId, count: 1 },
   };
   const stepRejections = [
     ['api health', { health: 503 }, 'API health answered 503, expected 200'],
@@ -1676,6 +1776,37 @@ async function selfTest() {
       `${reuseCall} returned 409 with ${JSON.stringify({ ...reusedBody, message: 'Idempotency-Key is already used' })}, expected the message ${JSON.stringify(reusedBody.message)}`],
     ['key reuse conflict', { reuse: { ...reuse({ status: 409, body: reusedBody }), puts: [{ partNumber: 1, url: partUrl('self-test-reuse-upload'), status: 403 }] } },
       `PUT of part 1 for the second upload to ${STORAGE_ORIGIN} returned 403, expected 200`],
+    // GATE-16: the corrupted video must fail in processing, and nowhere else.
+    ['processing failure', { processingFailed: { id: failedId, status: 'COMPLETED', zipStorageKey: `zips/${failedId}/attempt/frames.zip` } },
+      `Request ${failedId} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed COMPLETED`],
+    ['processing failure', { processingFailed: { id: failedId, status: 'FAILED', failureCode: 'FORMATO_INVALIDO' } },
+      `Request ${failedId} for the corrupted video: expected FAILED (PROCESSAMENTO_FALHOU), observed FAILED (FORMATO_INVALIDO)`],
+    ['processing failure', { processingFailed: { ...good.processingFailed, id: rejectedId } },
+      `processingFailed observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure', { failedUpload: upload('self-test-corrupted-upload', failedId, { confirmation: { status: 200, body: { processingRequestId: failedId, status: 'RECEIVED' } } }) },
+      `alice's confirmation of the upload of the corrupted video returned 200, expected 201`],
+    ['processing failure', { failedUpload: upload('self-test-corrupted-upload', failedId, { putStatus: 403 }) },
+      `PUT of part 1 for the corrupted video to ${STORAGE_ORIGIN} returned 403, expected 200`],
+    ['processing failure archive', { failedListing: { id: failedId, keys: archiveKeys(failedId) } },
+      `Failed request ${failedId} left an archive under zips/${failedId}/:\n${archiveKeys(failedId).join('\n')}`],
+    ['processing failure archive', { failedListing: { id: rejectedId, keys: [] } },
+      `failedListing observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure delivery', { failedDeliveries: { id: failedId, count: 2 } },
+      `Delivery for ${failedId}: expected exactly 1 record, found 2`],
+    ['processing failure delivery', { failedDeliveries: { id: failedId, count: 0 } },
+      `Delivery for ${failedId}: expected exactly 1 record, found 0`],
+    ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, failureReason: sentence } },
+      `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with ${JSON.stringify(sentence)}`],
+    ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, failureReason: 'Nao foi possivel processar o video.' } },
+      `Delivery for ${failedId}: expected FAILED with ${JSON.stringify(processingSentence)}, observed FAILED with "Nao foi possivel processar o video."`],
+    ['processing failure delivery', { failedDelivery: { ...good.failedDelivery, id: rejectedId } },
+      `failedDelivery observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure delivery', { failedDeliveries: { id: rejectedId, count: 1 } },
+      `failedDeliveries observed for ${rejectedId}, expected ${failedId}`],
+    ['lists disjoint', { aliceList: lists.aliceList.filter((listed) => listed.processingRequestId !== failedId) },
+      `alice's list is missing her own request ${failedId}`],
+    ['lists disjoint', { bobList: [...lists.bobList, item(failedId)] },
+      `Owner scope leak: bob's list contains alice's request ${failedId}`],
     ['bob request created', { bobUpload: upload('self-test-bob-upload', bobId, { confirmation: { status: 401, body: { statusCode: 401, message: 'Unauthorized' } } }) },
       `bob's confirmation of the upload of the non-video returned 401, expected 201`],
     ['lists disjoint', { aliceList: [...lists.aliceList, item(bobId)] },
