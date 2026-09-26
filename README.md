@@ -10,10 +10,10 @@ FIAP X receives an authenticated video, extracts one frame per second, and deliv
 
 | Repository | Responsibility |
 | --- | --- |
-| [`fiap-x-api`](../fiap-x-api) | HTTP edge: JWT validation, presigned upload/download URLs, idempotent upload confirmation, owner-scoped status |
-| [`processing-catalog`](../processing-catalog) | Owns the `ProcessingRequest` lifecycle, its state machine, and reliable event publication through a transactional outbox |
-| [`processing-worker`](../processing-worker) | FFprobe validation, FFmpeg frame extraction, ZIP packaging, and object storage |
-| [`notification-service`](../notification-service) | Sends one completion or failure email per terminal event, idempotently |
+| [`fiap-x-api`](https://github.com/tech-challenge-workshop/fiap-x-api) | HTTP edge: JWT validation, presigned upload/download URLs, idempotent upload confirmation, owner-scoped status |
+| [`processing-catalog`](https://github.com/tech-challenge-workshop/processing-catalog) | Owns the `ProcessingRequest` lifecycle, its state machine, and reliable event publication through a transactional outbox |
+| [`processing-worker`](https://github.com/tech-challenge-workshop/processing-worker) | FFprobe validation, FFmpeg frame extraction, ZIP packaging, and object storage |
+| [`notification-service`](https://github.com/tech-challenge-workshop/notification-service) | Sends one completion or failure email per terminal event, idempotently |
 
 The four services communicate exclusively over versioned AMQP contracts and one HTTP call from the API to the Catalog. They share no database tables and no code.
 
