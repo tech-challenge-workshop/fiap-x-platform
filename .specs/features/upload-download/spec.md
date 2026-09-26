@@ -109,7 +109,7 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 | --- | --- | --- | --- |
 | UPL-15 | P1: The API can sign URLs the client can use | Execute | Implementing (T1 done; T8 proves it in the gate) |
 | UPL-16 | P2: Abandoned uploads are discarded | Execute | Implementing (T2 done; T8 documents it and runs it in the gate) |
-| UPL-17 | P3: The smoke proves the real flow | Execute | Implementing (T4: upload, confirmation and the old route's removal; T5: replay and key reuse) |
+| UPL-17 | P3: The smoke proves the real flow | Execute | Implementing (T4: upload, confirmation and the old route's removal; T5: replay and key reuse; T6: download through its URL) |
 | UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Execute | Implementing (T3 and T4 done: script regenerated, seed deleted, `check-no-storage-writes.mjs` in the gate; T8 proves it again) |
 
 **ID format:** `[CATEGORY]-[NUMBER]`

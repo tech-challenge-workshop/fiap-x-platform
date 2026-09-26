@@ -301,11 +301,58 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] Self-test rejects a body without `url`, an `expiresAt` in the past, a URL answering 403, and an archive with 7 entries
-- [ ] Quick gate passes
+- [x] Self-test rejects a body without `url`, an `expiresAt` in the past, a URL answering 403, and an archive with 7 entries
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Step.** `download issued` runs right after the idempotency steps, while the fixture is still processing, so the real run exercises the 409 edge case.
+  - `waitForDownload` polls `alice`'s `GET …/download`. It counts each 409 as not yet, returns the first other answer unjudged with the time it arrived, and fails naming the id if 409 lasts past `POLL_TIMEOUT_MS`.
+  - `fetchArchive` GETs the issued URL from the host.
+  - `assertDownloadIssued` requires:
+    - 200
+    - a `url`
+    - an `expiresAt` that parses and is after the answer's arrival
+    - the URL on `STORAGE_ORIGIN`
+    - the fetch answering 200
+
+    A 404 from the URL is reported as `Archive absent: …`, the S4 cause, now observed through the URL.
+- **Archive check.** `archive count` counts the bytes the URL served, with the same EOCD reader and the same unreadable, empty and mismatch messages. `transferArchive` and its `aws s3 cp` are gone, and nothing in the smoke reads storage with aws-cli except the `list-objects-v2` behind `no archive`.
+- **Interpretation.** The task text puts the count in `download issued`. It stays in the required S4 step `archive count`, which now reads the bytes `download issued` fetched. Folding it in would remove a required step.
+- **Self-test.** Before: 18 steps, 90 bad inputs, 41 good. After: 19 steps, 101 bad inputs, 42 good.
+  - The step `download issued` is rejected when given:
+    - a body without `url`
+    - `expiresAt` one second before the answer (near-miss)
+    - the URL answering 403
+    - the URL on `127.0.0.1` at the published port (near-miss)
+  - The step `archive count` is rejected when given 7 entries.
+  - The helpers are rejected directly when given:
+    - 409
+    - an `expiresAt` equal to the answer's time
+    - an `expiresAt` that is not a date
+    - the internal host
+    - a 404 (`Archive absent`)
+  - Scratch mutations fail the self-test:
+    - the future comparison loosened to `<`
+    - the fetch-status check disabled
+    - the `url` check dropped
+    - the step's check emptied
+    - `archive count` counting a synthetic archive instead of the fetched bytes
+- **Quick gate.** All of these pass:
+  - `node --check`
+  - the smoke's self-test at both ports
+  - the storage-write check (4 scripts, and still green without `aws s3 cp`) and its self-test (10/6)
+  - the sizing self-test (12/7)
+- **Adequacy.** Each check maps to a line in `smoke-local-integration.mjs`:
+  - AC5, the URL is fetched from the host: `:523`, `:1284`
+  - the entries are counted through it: `:805`, `:1278`
+  - `url`: `:512`, `:1280`
+  - `expiresAt` in the future: `:515`, `:1282`
+  - 409 while polling: `:536`
+
+  Each maps to UPL-17 AC5, AC8 or the 409 edge case.
 
 ---
 
