@@ -131,6 +131,10 @@ ALTER TABLE processing_request
 CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_idempotency
         ON processing_request (owner_user_id, idempotency_key);
 
+-- from 1789957000000-UniqueOwnerSource.ts
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_source
+        ON processing_request (owner_user_id, source_storage_key);
+
 -- ============================================================
 -- notification-service (schema: notification)
 -- ============================================================

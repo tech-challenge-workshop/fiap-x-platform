@@ -7,11 +7,29 @@
  * drifts from them, and the drift stays invisible until an evaluator runs it.
  * The source of truth is each service's own migrations, plus the bootstrap
  * that creates the schemas and their roles.
+ *
+ * `--check` generates in memory and exits 1, naming the file and the first
+ * line that differs, when the committed script is not what the migrations
+ * generate. The build gate runs it, so a migration added without
+ * regenerating turns the gate red.
+ *
+ * `--self-test` needs neither the sibling repositories nor Docker: it feeds
+ * the comparison good, bad and near-miss scripts, and spawns this script on a
+ * temporary tree (DB_SCRIPT_ROOT) to require that `--check` passes on what it
+ * generated and exits 1 once a line is removed.
  */
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync as readFileNow, rmSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+// DB_SCRIPT_ROOT stands in for this repository's root, with the service
+// repositories beside it, so the self-test can run the script on a tree it
+// built. Unset, it is this repository.
+const ROOT = resolve(process.env.DB_SCRIPT_ROOT ?? join(import.meta.dirname, '..'));
+const OUT_NAME = 'db/create-database.sql';
 const OUT = join(ROOT, 'db', 'create-database.sql');
 const BOOTSTRAP = join(ROOT, 'db', 'init', '01-schemas.sql');
 
@@ -95,7 +113,7 @@ async function migrationsFor(service) {
   return blocks;
 }
 
-async function main() {
+async function generate() {
   const bootstrap = await readFile(BOOTSTRAP, 'utf8');
 
   const parts = [
@@ -139,11 +157,116 @@ async function main() {
   }
 
   parts.push('RESET search_path;', '');
-  await writeFile(OUT, parts.join('\n'), 'utf8');
+  return parts.join('\n');
+}
+
+// The first line where the committed script differs from the generated one,
+// or undefined when they are identical. A missing line reads as the end of
+// the file.
+function driftProblem(generated, committed) {
+  if (generated === committed) return undefined;
+  const want = generated.split('\n');
+  const have = committed.split('\n');
+  let line = 0;
+  while (line < want.length && line < have.length && want[line] === have[line]) line += 1;
+  const shown = (lines) => (line < lines.length ? JSON.stringify(lines[line]) : 'the end of the file');
+  return `${OUT_NAME} is not what the migrations generate: first difference at line ${line + 1}, `
+    + `expected ${shown(want)}, found ${shown(have)}; regenerate it with node scripts/generate-db-script.mjs`;
+}
+
+async function main() {
+  const generated = await generate();
+  if (process.argv.includes('--check')) {
+    let committed;
+    try {
+      committed = await readFile(OUT, 'utf8');
+    } catch {
+      throw new Error(`${OUT_NAME} is missing; regenerate it with node scripts/generate-db-script.mjs`);
+    }
+    const problem = driftProblem(generated, committed);
+    if (problem) throw new Error(problem);
+    console.log(`${OUT_NAME} is exactly what the migrations generate`);
+    return;
+  }
+  await writeFile(OUT, generated, 'utf8');
   console.log(`Wrote ${OUT}`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+function selfTest() {
+  const script = '-- header\nCREATE TABLE a (id int);\n\nRESET search_path;\n';
+  const fix = 'regenerate it with node scripts/generate-db-script.mjs';
+  const rejections = [
+    ['one line removed', () => driftProblem(script, script.replace('CREATE TABLE a (id int);\n', '')),
+      `db/create-database.sql is not what the migrations generate: first difference at line 2, expected "CREATE TABLE a (id int);", found ""; ${fix}`],
+    ['one character changed (near-miss)', () => driftProblem(script, script.replace('(id int)', '(id bigint)')),
+      `db/create-database.sql is not what the migrations generate: first difference at line 2, expected "CREATE TABLE a (id int);", found "CREATE TABLE a (id bigint);"; ${fix}`],
+    ['the last line lost (near-miss: every earlier line equal)', () => driftProblem(script, script.slice(0, -1)),
+      `db/create-database.sql is not what the migrations generate: first difference at line 5, expected "", found the end of the file; ${fix}`],
+    ['a line added at the end', () => driftProblem(script, `${script}-- extra\n`),
+      `db/create-database.sql is not what the migrations generate: first difference at line 5, expected "", found "-- extra"; ${fix}`],
+  ];
+  const acceptances = [['identical', () => driftProblem(script, `${script}`)]];
+
+  const failures = [];
+  for (const [name, run, expected] of rejections) {
+    const message = run();
+    if (message === undefined) failures.push(`${name}: accepted, expected rejection with ${JSON.stringify(expected)}`);
+    else if (message !== expected) failures.push(`${name}: rejected with ${JSON.stringify(message)}, expected ${JSON.stringify(expected)}`);
+  }
+  for (const [name, run] of acceptances) {
+    const message = run();
+    if (message !== undefined) failures.push(`${name}: rejected a good input with ${JSON.stringify(message)}`);
+  }
+
+  // The script itself on a temporary tree: generate, then --check passes;
+  // remove one line, then --check exits 1 naming the file and the line.
+  const tree = mkdtempSync(join(tmpdir(), 'fiapx-db-self-test-'));
+  try {
+    const platform = join(tree, 'fiap-x-platform');
+    const write = (path, text) => {
+      mkdirSync(resolve(path, '..'), { recursive: true });
+      writeFileSync(path, text);
+    };
+    const migration = (sql) => `export class M { public async up(queryRunner) { await queryRunner.query(\`${sql}\`); }\n  public async down(queryRunner) { await queryRunner.query(\`DROP TABLE t\`); } }\n`;
+    write(join(platform, 'db', 'init', '01-schemas.sql'), 'CREATE SCHEMA IF NOT EXISTS catalog;\n');
+    write(join(tree, 'processing-catalog', 'src/infrastructure/persistence/migrations', '1-CreateA.ts'), migration('CREATE TABLE a (id int)'));
+    write(join(tree, 'notification-service', 'src/notifications/infrastructure/persistence/migrations', '1-CreateB.ts'), migration('CREATE TABLE b (id int)'));
+    const run = (...args) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], {
+      encoding: 'utf8', env: { ...process.env, DB_SCRIPT_ROOT: platform },
+    });
+    const generated = run();
+    const clean = run('--check');
+    if (generated.status !== 0 || clean.status !== 0) {
+      failures.push(`--check on a freshly generated script exited ${clean.status} (generation exited ${generated.status}): ${(generated.stderr + clean.stderr).trim()}`);
+    }
+    const out = join(platform, 'db', 'create-database.sql');
+    const text = readFileNow(out, 'utf8');
+    writeFileSync(out, text.replace('CREATE TABLE a (id int);\n', ''));
+    const tampered = run('--check');
+    const expected = `db/create-database.sql is not what the migrations generate: first difference at line ${text.split('\n').indexOf('CREATE TABLE a (id int);') + 1}, expected "CREATE TABLE a (id int);"`;
+    if (tampered.status === 0) failures.push('--check on a script with one line removed exited 0, expected non-zero');
+    if (!tampered.stderr.startsWith(expected)) {
+      failures.push(`--check on a script with one line removed printed ${JSON.stringify(tampered.stderr)}, expected it to start ${JSON.stringify(expected)}`);
+    }
+  } finally {
+    rmSync(tree, { recursive: true, force: true });
+  }
+
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(`generate-db-script self-test failed: ${failure}`);
+    process.exit(1);
+  }
+  console.log(
+    `generate-db-script self-test passed: ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good input accepted, `
+      + '--check passed on a generated script and exited non-zero with one line removed',
+  );
+}
+
+if (process.argv.includes('--self-test')) {
+  selfTest();
+} else {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

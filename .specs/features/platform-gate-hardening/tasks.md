@@ -232,15 +232,22 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 **Done when**:
 
-- [ ] `--check` passes on the regenerated file
-- [ ] Deleting one line from the file fails `--check`, naming the file
-- [ ] The script contains `uq_processing_request_owner_source`
-- [ ] Applied to an empty `postgres:17-alpine`, the script yields the same columns and indexes as the migrated stack
-- [ ] The self-test spawns `--check` against a tampered copy and requires a non-zero exit
-- [ ] Full gate passes
+- [x] `--check` passes on the regenerated file
+- [x] Deleting one line from the file fails `--check`, naming the file
+- [x] The script contains `uq_processing_request_owner_source`
+- [x] Applied to an empty `postgres:17-alpine`, the script yields the same columns and indexes as the migrated stack
+- [x] The self-test spawns `--check` against a tampered copy and requires a non-zero exit
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Drift was real.** Before the regeneration, `--check` on the committed file exited 1: `first difference at line 134, expected "-- from 1789957000000-UniqueOwnerSource.ts"`. The regeneration adds exactly that block, 4 lines: `CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_source ON processing_request (owner_user_id, source_storage_key)`. Afterwards: `db/create-database.sql is exactly what the migrations generate`.
+- **One line deleted.** Line 100 removed from the committed file: `--check` exited 1 with `db/create-database.sql is not what the migrations generate: first difference at line 100, expected "        event_id              text        PRIMARY KEY,", found …`. File restored, `--check` green again.
+- **Applied to an empty database.** A scratch `postgres:17-alpine` on port 55439 took the script with `ON_ERROR_STOP=1`. Its columns (`information_schema.columns`) and indexes (`pg_indexes`) in `catalog` and `notification`, TypeORM's `migrations` table excluded, gave 35 lines, identical to the migrated stack's (`diff` empty, `uq_processing_request_owner_source` in both). The container was removed.
+- **Self-test.** `4 bad inputs rejected with the expected message, 1 good input accepted, --check passed on a generated script and exited non-zero with one line removed`. It needs neither the sibling repositories nor Docker: `DB_SCRIPT_ROOT` points the script at a temporary tree with one migration per service. Added to CI's `topology` job; `--check` itself needs the siblings, so it runs only in the build gate (step 5).
+- **Literal negative.** A scratch copy whose comparison never reports drift fails all six self-test cases, including the spawned `--check` exiting 0.
 
 ---
 
