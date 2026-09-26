@@ -300,20 +300,68 @@ async function anonymousCreateStatus(sourceStorageKey) {
   return res.status;
 }
 
-// The owner is the token's subject (AUTH-17 AC2): the body carries no
-// ownerUserId.
-async function postProcessingRequest(sourceStorageKey, token) {
-  const res = await fetch(`${API_URL}/processing-requests`, {
+// One token per user, fetched when a step first needs it. refresh() replaces
+// it: a token lasts 5 minutes, and one issued before identity restarted is
+// signed with a key the API no longer trusts. fetchToken is injectable so the
+// self-test can drive the refresh path without a stack.
+function createTokenSource(fetchToken = getToken) {
+  const cache = new Map();
+  return {
+    async get(user) {
+      if (!cache.has(user)) cache.set(user, await fetchToken(user));
+      return cache.get(user);
+    },
+    async refresh(user) {
+      cache.set(user, await fetchToken(user));
+      return cache.get(user);
+    },
+  };
+}
+
+// Runs call(token) with the user's token. On a 401 it fetches a fresh token
+// once and runs call again; a second 401 fails naming the step (spec edge
+// case: a token expiring during a long run).
+async function withFreshToken(tokens, user, step, call) {
+  const first = await call(await tokens.get(user));
+  if (first.status !== 401) return first;
+  const second = await call(await tokens.refresh(user));
+  if (second.status === 401) {
+    throw new Error(`Step "${step}": ${user}'s request was refused with 401 twice, the second time with a freshly issued token`);
+  }
+  return second;
+}
+
+const tokens = createTokenSource();
+
+// An API call as user: the status and the raw body text.
+function fetchAs(user, step, path, init = {}) {
+  return withFreshToken(tokens, user, step, async (token) => {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
+    });
+    return { status: res.status, text: await res.text() };
+  });
+}
+
+function createRequestAs(user, step, sourceStorageKey) {
+  return fetchAs(user, step, '/processing-requests', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sourceStorageKey }),
   });
+}
 
-  if (!res.ok) {
+// The owner is the token's subject (AUTH-17 AC2): the body carries no
+// ownerUserId.
+async function postProcessingRequest(sourceStorageKey) {
+  const res = await createRequestAs('alice', 'create requests', sourceStorageKey);
+
+  if (res.status < 200 || res.status >= 300) {
     throw new Error(`Create request failed: ${res.status}`);
   }
 
-  const body = await res.json();
+  const body = JSON.parse(res.text);
   if (!body.processingRequestId) {
     throw new Error('Create response missing processingRequestId');
   }
@@ -333,18 +381,13 @@ function assertCreated(user, created) {
 
 // Creates a request with the user's token. The answer is returned, not
 // judged: the step's check does that.
-async function createAs(user, sourceStorageKey) {
-  const res = await fetch(`${API_URL}/processing-requests`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await getToken(user)}` },
-    body: JSON.stringify({ sourceStorageKey }),
-  });
-  const text = await res.text();
+async function createAs(user, step, sourceStorageKey) {
+  const res = await createRequestAs(user, step, sourceStorageKey);
   let body;
   try {
-    body = JSON.parse(text);
+    body = JSON.parse(res.text);
   } catch {
-    body = text;
+    body = res.text;
   }
   return { status: res.status, body };
 }
@@ -353,15 +396,12 @@ async function createAs(user, sourceStorageKey) {
 // item the total announces has been read.
 const LIST_PAGE_SIZE = 100;
 
-async function listAllAs(user) {
-  const token = await getToken(user);
+async function listAllAs(user, step) {
   const items = [];
   for (let page = 1; ; page += 1) {
-    const res = await fetch(`${API_URL}/processing-requests?page=${page}&pageSize=${LIST_PAGE_SIZE}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetchAs(user, step, `/processing-requests?page=${page}&pageSize=${LIST_PAGE_SIZE}`);
     if (res.status !== 200) throw new Error(`${user}'s GET ${API_URL}/processing-requests?page=${page} failed: ${res.status}`);
-    const body = await res.json();
+    const body = JSON.parse(res.text);
     items.push(...body.items);
     if (body.items.length === 0 || items.length >= body.total) return items;
   }
@@ -406,11 +446,9 @@ function assertNoInternalFields(rejectedId, list) {
 
 // Reads one request with the user's token and returns the status and the raw
 // body text, so a check can compare two bodies byte for byte.
-async function readAs(user, id) {
-  const res = await fetch(`${API_URL}/processing-requests/${id}`, {
-    headers: { Authorization: `Bearer ${await getToken(user)}` },
-  });
-  return { status: res.status, body: await res.text() };
+async function readAs(user, step, id) {
+  const res = await fetchAs(user, step, `/processing-requests/${id}`);
+  return { status: res.status, body: res.text };
 }
 
 // AUTH-17 AC4: bob reading alice's request must look exactly like reading a
@@ -512,9 +550,8 @@ export const SMOKE_STEPS = [
   {
     name: 'create requests',
     observe: async (ctx) => {
-      const token = await getToken('alice');
-      ctx.id = await postProcessingRequest(ctx.videoKey, token);
-      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey, token);
+      ctx.id = await postProcessingRequest(ctx.videoKey);
+      ctx.rejectedId = await postProcessingRequest(ctx.notAVideoKey);
     },
     report: (ctx) => `Created processing request ${ctx.id} as alice\nCreated processing request ${ctx.rejectedId} for the non-video as alice`,
   },
@@ -583,7 +620,7 @@ export const SMOKE_STEPS = [
   {
     name: 'bob request created',
     observe: async (ctx) => {
-      ctx.bobCreate = await createAs('bob', ctx.notAVideoKey);
+      ctx.bobCreate = await createAs('bob', 'bob request created', ctx.notAVideoKey);
     },
     check: (ctx) => {
       ctx.bobId = assertCreated('bob', observed(ctx, 'bobCreate'));
@@ -593,8 +630,8 @@ export const SMOKE_STEPS = [
   {
     name: 'lists disjoint',
     observe: async (ctx) => {
-      ctx.aliceList = await listAllAs('alice');
-      ctx.bobList = await listAllAs('bob');
+      ctx.aliceList = await listAllAs('alice', 'lists disjoint');
+      ctx.bobList = await listAllAs('bob', 'lists disjoint');
     },
     check: (ctx) => assertListsDisjoint({
       aliceIds: [observed(ctx, 'id'), observed(ctx, 'rejectedId')],
@@ -607,8 +644,8 @@ export const SMOKE_STEPS = [
   {
     name: 'cross-owner read 404',
     observe: async (ctx) => {
-      ctx.crossRead = await readAs('bob', ctx.id);
-      ctx.randomRead = await readAs('bob', randomUUID());
+      ctx.crossRead = await readAs('bob', 'cross-owner read 404', ctx.id);
+      ctx.randomRead = await readAs('bob', 'cross-owner read 404', randomUUID());
     },
     check: (ctx) => assertCrossOwnerNotFound(observed(ctx, 'id'), observed(ctx, 'crossRead'), observed(ctx, 'randomRead')),
     report: (ctx) => `bob reading alice's request ${ctx.id} got 404 with the same body as a random id`,
@@ -698,6 +735,11 @@ async function selfTest() {
   const olderAliceId = 'self-test-older-alice-request';
   const item = (processingRequestId) => ({ processingRequestId, status: 'RECEIVED' });
   const readUrl = `${API_URL}/processing-requests/${id}`;
+  // A token source whose tokens are numbered in the order they were issued.
+  const fakeTokens = (issued) => createTokenSource(async (user) => {
+    issued.push(user);
+    return `${user}-token-${issued.length}`;
+  });
   // alice's good list with one change: a field added to her older request,
   // or another failureReason on the rejected one.
   const withField = (field, value) => lists.aliceList.map((listed) => (
@@ -794,6 +836,8 @@ async function selfTest() {
       `alice's rejected request ${rejectedId} carries failureReason undefined, expected ${JSON.stringify(sentence)}`],
     ['rejected request absent from the list', () => assertNoInternalFields(rejectedId, [item(olderAliceId), item(id)]),
       `alice's list is missing her rejected request ${rejectedId}`],
+    ['a 401 again after a fresh token', () => withFreshToken(fakeTokens([]), 'bob', 'lists disjoint', async () => ({ status: 401 })),
+      `Step "lists disjoint": bob's request was refused with 401 twice, the second time with a freshly issued token`],
   ];
 
   let scratch;
@@ -825,6 +869,17 @@ async function selfTest() {
     ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
     ['cross-owner read answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound })],
     ['list without internal fields, rejected request with the sentence', () => assertNoInternalFields(rejectedId, lists.aliceList)],
+    ['a 401 then a 200 with a fresh token', async () => {
+      const issued = [];
+      const used = [];
+      const answer = await withFreshToken(fakeTokens(issued), 'alice', 'create requests', async (token) => {
+        used.push(token);
+        return { status: used.length === 1 ? 401 : 200 };
+      });
+      const expected = JSON.stringify(['alice-token-1', 'alice-token-2']);
+      if (answer.status !== 200) throw new Error(`returned status ${answer.status}, expected 200`);
+      if (JSON.stringify(used) !== expected) throw new Error(`called with ${JSON.stringify(used)}, expected ${expected}`);
+    }],
   ];
 
   // The steps main() runs: each required step must be in SMOKE_STEPS with a

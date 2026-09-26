@@ -314,11 +314,13 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] The self-test drives the refresh path with an injected token source: a first 401 followed by a 200 passes; two 401s fail naming the step
-- [ ] Quick gate passes
+- [x] The self-test drives the refresh path with an injected token source: a first 401 followed by a 200 passes; two 401s fail naming the step
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: every authenticated call (alice's two creations, bob's creation, both lists, both reads) goes through `withFreshToken` and a `createTokenSource(fetchToken = getToken)` that caches one token per user. On a 401 it refetches once and retries. A second 401 fails `Step "<step>": <user>'s request was refused with 401 twice, the second time with a freshly issued token`. The self-test injects a source that numbers its tokens. A 401 then a 200 must return the 200 after calls with `alice-token-1` then `alice-token-2`, and two 401s must fail naming `lists disjoint`. Self-test: 14 required steps, 58 bad inputs, 31 good inputs. Scratch copies that retry with the cached token, or never retry, fail it. On the real stack, a scratch copy whose source first hands each user a token with a tampered signature (the API answers it 401) refetched for `alice` and for `bob` and ran green. The unmodified smoke is green too. Found during Execute: right after `identity` was re-created, the API still accepted a token issued before (it keeps the previous signing key cached), so a restart does not reliably yield a 401 to test with; the tampered token does. Quick gate passes.
 
 ---
 
