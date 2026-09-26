@@ -523,8 +523,7 @@ function assertConfirmed(user, what, confirmation) {
 // UPL-17 AC2: replaying the first confirmation with its key answers 200 with
 // the request that confirmation created, and alice gains no request. A 201 is
 // named for what it means: the replay created a second request.
-function assertReplayed(firstId, replay, totals) {
-  const call = "alice's replayed confirmation (same upload, same Idempotency-Key)";
+function assertReplayed(firstId, replay, totals, call = "alice's replayed confirmation (same upload, same Idempotency-Key)") {
   if (replay.status === 201) throw new Error(`Replay created a request: ${call} returned 201, expected 200`);
   if (replay.status !== 200) throw new Error(`${call} returned ${replay.status}, expected 200`);
   const id = replay.body?.processingRequestId;
@@ -534,6 +533,76 @@ function assertReplayed(firstId, replay, totals) {
   if (totals.after !== totals.before) {
     throw new Error(`Replay created a request: alice had ${totals.before} requests before the replay and ${totals.after} after`);
   }
+}
+
+// GATE-15: a confirmed upload confirmed again with a second key answers as a
+// replay of the first: 200, the same request, and alice gains no request.
+const SECOND_KEY_CALL = "alice's confirmation of the fixture's confirmed upload with a second Idempotency-Key";
+
+function assertSecondKeyReplayed(firstId, replay, totals) {
+  assertReplayed(firstId, replay, totals, SECOND_KEY_CALL);
+}
+
+// GATE-15: an upload whose parts are not all 16 MiB but the last is refused
+// with exactly this 400, and is aborted: confirming it again finds no upload.
+// A 502 or 500 means the rejection escaped as a storage failure.
+const PART_SIZE_BYTES = 16777216;
+const INVALID_PARTS_DECLARED_BYTES = 20 * 1024 * 1024;
+const INVALID_PARTS_BODY = {
+  statusCode: 400,
+  message: `Uploaded parts are invalid: every part except the last must be ${PART_SIZE_BYTES} bytes`,
+};
+const UPLOAD_GONE_BODY = { statusCode: 404, message: 'Upload not found' };
+const INVALID_PARTS_CALL = "alice's confirmation of a 20 MiB upload whose part 1 holds 1 byte";
+
+// The same JSON body, whatever the order of its fields.
+function sameBody(body, expected) {
+  const canonical = (value) => (value && typeof value === 'object'
+    ? JSON.stringify(Object.keys(value).sort().map((key) => [key, value[key]]))
+    : JSON.stringify(value));
+  return canonical(body) === canonical(expected);
+}
+
+function assertInvalidPartsRejected(invalid) {
+  assertUploaded('alice', 'the invalid parts', invalid);
+  const { confirmation, retry } = invalid;
+  if (confirmation.status >= 200 && confirmation.status < 300) {
+    throw new Error(`Invalid parts accepted: ${INVALID_PARTS_CALL} returned ${confirmation.status}, expected 400`);
+  }
+  if (confirmation.status !== 400) throw new Error(`${INVALID_PARTS_CALL} returned ${confirmation.status}, expected 400`);
+  if (!sameBody(confirmation.body, INVALID_PARTS_BODY)) {
+    throw new Error(`${INVALID_PARTS_CALL} returned 400 with ${JSON.stringify(confirmation.body)}, expected ${JSON.stringify(INVALID_PARTS_BODY)}`);
+  }
+  const retryCall = `${INVALID_PARTS_CALL}, retried`;
+  if (retry.status !== 404) {
+    throw new Error(`${retryCall} returned ${retry.status}, expected 404: an upload rejected for its parts must be gone`);
+  }
+  if (!sameBody(retry.body, UPLOAD_GONE_BODY)) {
+    throw new Error(`${retryCall} returned 404 with ${JSON.stringify(retry.body)}, expected ${JSON.stringify(UPLOAD_GONE_BODY)}`);
+  }
+}
+
+// Starts a 20 MiB upload as alice, PUTs 1 byte as part 1 and 4 MiB as part 2,
+// then confirms it twice with one fresh key. Every answer is returned
+// unjudged.
+async function uploadInvalidParts(user, step) {
+  const res = await fetchAs(user, step, '/uploads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName: 'invalid-parts.mp4', contentType: 'video/mp4', sizeBytes: INVALID_PARTS_DECLARED_BYTES }),
+  });
+  const start = { status: res.status, body: parseBody(res.text) };
+  const sizes = { 1: 1, 2: 4 * 1024 * 1024 };
+  const puts = [];
+  if (start.status === 201) {
+    for (const { partNumber, url } of start.body.parts ?? []) {
+      puts.push({ partNumber, url, status: await putPart(url, Buffer.alloc(sizes[partNumber] ?? 0)) });
+    }
+  }
+  const key = `smoke-${randomUUID()}`;
+  const confirmation = await confirm(user, step, start.body?.uploadId, key);
+  const retry = await confirm(user, step, start.body?.uploadId, key);
+  return { start, puts, key, confirmation, retry };
 }
 
 // UPL-17 AC3: a key already spent on one upload is refused on another with
@@ -831,6 +900,23 @@ export const SMOKE_STEPS = [
       `alice's confirmation replayed with the same key answered 200 with ${ctx.id}; she still has ${ctx.totalAfterReplay} requests`,
   },
   {
+    name: 'second key replays',
+    // After confirmation replay, and measured on its own before and after, so
+    // neither step's total sees the other's call.
+    observe: async (ctx) => {
+      const { start } = ctx.videoUpload;
+      ctx.totalBeforeSecondKey = await totalAs('alice', 'second key replays');
+      ctx.secondKeyReplay = await confirm('alice', 'second key replays', start.body?.uploadId, `smoke-${randomUUID()}`);
+      ctx.totalAfterSecondKey = await totalAs('alice', 'second key replays');
+    },
+    check: (ctx) => assertSecondKeyReplayed(observed(ctx, 'id'), observed(ctx, 'secondKeyReplay'), {
+      before: observed(ctx, 'totalBeforeSecondKey'),
+      after: observed(ctx, 'totalAfterSecondKey'),
+    }),
+    report: (ctx) =>
+      `alice's confirmed upload confirmed with a second key answered 200 with ${ctx.id}; she still has ${ctx.totalAfterSecondKey} requests`,
+  },
+  {
     name: 'key reuse conflict',
     observe: async (ctx) => {
       const second = await uploadThroughApi('alice', 'key reuse conflict', NOT_A_VIDEO_FILE);
@@ -843,6 +929,14 @@ export const SMOKE_STEPS = [
       assertKeyReuseConflict(reuse.confirmation);
     },
     report: () => `alice's second upload confirmed with the fixture's key answered 409 (${KEY_REUSED})`,
+  },
+  {
+    name: 'invalid parts rejected',
+    observe: async (ctx) => {
+      ctx.invalidParts = await uploadInvalidParts('alice', 'invalid parts rejected');
+    },
+    check: (ctx) => assertInvalidPartsRejected(observed(ctx, 'invalidParts')),
+    report: () => `alice's 20 MiB upload with a 1-byte part 1 was refused with 400 (${INVALID_PARTS_BODY.message}), and its retry found no upload (404)`,
   },
   {
     name: 'download issued',
@@ -1060,7 +1154,9 @@ const REQUIRED_STEPS = [
   'old create gone',
   'upload confirmed',
   'confirmation replay',
+  'second key replays',
   'key reuse conflict',
+  'invalid parts rejected',
   'download issued',
   'anonymous access',
   'bucket lifecycle',
@@ -1181,6 +1277,23 @@ async function selfTest() {
   const reuseCall = "alice's confirmation of a second upload with the fixture's Idempotency-Key";
   const replayed = { status: 200, body: { processingRequestId: id, status: 'RECEIVED' } };
   const reuse = (confirmation) => upload('self-test-reuse-upload', undefined, { confirmation });
+  // GATE-15. Literal, not INVALID_PARTS_BODY or UPLOAD_GONE_BODY: a changed
+  // constant must fail here too.
+  const secondKeyCall = "alice's confirmation of the fixture's confirmed upload with a second Idempotency-Key";
+  const invalidPartsCall = "alice's confirmation of a 20 MiB upload whose part 1 holds 1 byte";
+  const invalidRetryCall = `${invalidPartsCall}, retried`;
+  const invalidBody = { statusCode: 400, message: 'Uploaded parts are invalid: every part except the last must be 16777216 bytes' };
+  const uploadGoneBody = { statusCode: 404, message: 'Upload not found' };
+  const invalidUpload = (confirmation, retry) => {
+    const base = upload('self-test-invalid-upload');
+    const parts = [1, 2].map((partNumber) => ({ partNumber, url: `${partUrl('self-test-invalid-upload')}&partNumber=${partNumber}` }));
+    return {
+      start: { status: 201, body: { ...base.start.body, parts } },
+      puts: parts.map((part) => ({ ...part, status: 200 })),
+      confirmation: confirmation ?? { status: 400, body: invalidBody },
+      retry: retry ?? { status: 404, body: uploadGoneBody },
+    };
+  };
   const lists = {
     aliceIds: [id, rejectedId],
     bobId,
@@ -1419,6 +1532,10 @@ async function selfTest() {
     replay: replayed,
     totalBeforeReplay: 3,
     totalAfterReplay: 3,
+    secondKeyReplay: replayed,
+    totalBeforeSecondKey: 3,
+    totalAfterSecondKey: 3,
+    invalidParts: invalidUpload(),
     reuse: reuse({ status: 409, body: reusedBody }),
     id,
     rejectedId,
@@ -1529,6 +1646,28 @@ async function selfTest() {
       `${replayCall} returned processing request "${id}-2", expected ${id}, the one the first confirmation created`],
     ['confirmation replay', { totalAfterReplay: 4 },
       `Replay created a request: alice had 3 requests before the replay and 4 after`],
+    ['second key replays', { secondKeyReplay: { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, totalAfterSecondKey: 4 },
+      `Replay created a request: ${secondKeyCall} returned 201, expected 200`],
+    ['second key replays', { secondKeyReplay: { status: 200, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } } },
+      `${secondKeyCall} returned processing request "${id}-2", expected ${id}, the one the first confirmation created`],
+    ['second key replays', { totalAfterSecondKey: 4 },
+      `Replay created a request: alice had 3 requests before the replay and 4 after`],
+    ['second key replays', { secondKeyReplay: { status: 409, body: reusedBody } },
+      `${secondKeyCall} returned 409, expected 200`],
+    ['invalid parts rejected', { invalidParts: invalidUpload({ status: 502, body: { statusCode: 502, message: 'Bad Gateway' } }) },
+      `${invalidPartsCall} returned 502, expected 400`],
+    ['invalid parts rejected', { invalidParts: invalidUpload({ status: 201, body: { processingRequestId: `${id}-3`, status: 'RECEIVED' } }) },
+      `Invalid parts accepted: ${invalidPartsCall} returned 201, expected 400`],
+    ['invalid parts rejected', { invalidParts: invalidUpload({ status: 400, body: { statusCode: 400, message: 'No part has been uploaded' } }) },
+      `${invalidPartsCall} returned 400 with ${JSON.stringify({ statusCode: 400, message: 'No part has been uploaded' })}, expected ${JSON.stringify(invalidBody)}`],
+    ['invalid parts rejected', { invalidParts: invalidUpload({ status: 400, body: { ...invalidBody, message: invalidBody.message.replace('16777216', '16 MiB') } }) },
+      `${invalidPartsCall} returned 400 with ${JSON.stringify({ ...invalidBody, message: invalidBody.message.replace('16777216', '16 MiB') })}, expected ${JSON.stringify(invalidBody)}`],
+    ['invalid parts rejected', { invalidParts: invalidUpload(undefined, { status: 400, body: invalidBody }) },
+      `${invalidRetryCall} returned 400, expected 404: an upload rejected for its parts must be gone`],
+    ['invalid parts rejected', { invalidParts: invalidUpload(undefined, { status: 404, body: notFoundBody }) },
+      `${invalidRetryCall} returned 404 with ${JSON.stringify(notFoundBody)}, expected ${JSON.stringify(uploadGoneBody)}`],
+    ['invalid parts rejected', { invalidParts: { ...invalidUpload(), puts: invalidUpload().puts.map((put) => ({ ...put, status: 403 })) } },
+      `PUT of part 1 for the invalid parts to ${STORAGE_ORIGIN} returned 403, expected 200`],
     ['key reuse conflict', { reuse: reuse({ status: 200, body: { processingRequestId: id, status: 'RECEIVED' } }) },
       `Key reused: ${reuseCall} returned 200, expected 409`],
     ['key reuse conflict', { reuse: reuse({ status: 201, body: { processingRequestId: bobId, status: 'RECEIVED' } }) },

@@ -542,12 +542,19 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] The self-test requires both steps and rejects these: a `502`, a `400` with another message (near-miss), a retry `400`, a replay `201`, another id, and a grown total
-- [ ] The real run is green
-- [ ] Full gate passes
+- [x] The self-test requires both steps and rejects these: a `502`, a `400` with another message (near-miss), a retry `400`, a replay `201`, another id, and a grown total
+- [x] The real run is green
+- [ ] Full gate passes (not run in T12: it ends in `down -v`, and the stack stays up for T13; runs at T14)
 
 **Tests**: integration + self-test
 **Gate**: full
+**Status**: ✅ Complete (full gate pending, see above)
+**Evidence**:
+- **Red first.** With both names in `REQUIRED_STEPS` and the self-test cases written, before the steps existed, the self-test failed 16 times (dry run unequal to `REQUIRED_STEPS`, both steps missing, every bad and good input) and exited 1.
+- **Change.** `second key replays` runs right after `confirmation replay`: it confirms `ctx.videoUpload` with a fresh key and measures alice's total before and after its own call, so neither step's total sees the other's confirmation. Its check is `assertReplayed` with its own call name (`assertReplayed` takes the call as an optional fourth argument; the existing messages are unchanged). `invalid parts rejected` runs after `key reuse conflict`: `uploadInvalidParts` starts a 20971520-byte upload, PUTs 1 byte to part 1 and 4194304 bytes to part 2, and confirms twice with one fresh key. `assertInvalidPartsRejected` requires the upload started and both PUTs answered 200 (`assertUploaded`), then exactly `400 {"statusCode":400,"message":"Uploaded parts are invalid: every part except the last must be 16777216 bytes"}` (field order ignored, no extra field), then exactly `404 {"statusCode":404,"message":"Upload not found"}`. A 2xx first answer is named `Invalid parts accepted`.
+- **Self-test.** From 24/134/48 to `26 required steps present, 145 bad inputs rejected with the expected message, 50 good inputs accepted, main() ran every step in order in a dry run, spawned failure exited non-zero`. New bad inputs: second key `201` (with a grown total), another id, a grown total, a `409`; invalid parts `502`, `201`, `400 No part has been uploaded`, `400` with `16 MiB` for `16777216` (near-miss), retry `400`, retry `404 Processing request not found` (near-miss), a PUT `403`. The expected messages and bodies are literals, not the script's constants.
+- **Real run.** Green on the stack (API built from `fiap-x-api` `323fc3a`): `alice's confirmed upload confirmed with a second key answered 200 with <id>; she still has N requests` and `alice's 20 MiB upload with a 1-byte part 1 was refused with 400 (…16777216 bytes), and its retry found no upload (404)`.
+- **Literal negative.** A scratch copy of `fiap-x-api` (scratchpad, `git archive HEAD`) whose `complete-upload.service.ts` throws `BadGatewayException` for rejected parts, built through a compose override `api.build`: the smoke failed `invalid parts rejected` with `alice's confirmation of a 20 MiB upload whose part 1 holds 1 byte returned 502, expected 400` and exited 1, every earlier step green. The real API was rebuilt with `docker compose up -d --build --wait api`, and the smoke and the self-test were green again.
 
 ---
 

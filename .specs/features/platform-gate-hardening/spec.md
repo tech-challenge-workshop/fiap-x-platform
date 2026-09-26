@@ -217,7 +217,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GATE-12 | P5: Every gate script exits non-zero on failure (V15) | Execute | Implementing (T1 ✅, T4 ✅, T5 ✅, T9 ✅, T10 ✅, T11 ✅) |
 | GATE-13 | P6: `sub` stable across an identity recreate (V24) | Execute | Implementing (T11 ✅ check; gate's before/after run in T14) |
 | GATE-14 | P6: `check-identity.mjs` (V25) | Execute | Implementing (T11 ✅) |
-| GATE-15 | P7: Spec B's fixes on the real stack | Tasks | In Tasks |
+| GATE-15 | P7: Spec B's fixes on the real stack | Execute | Implementing (T12 ✅) |
 | GATE-16 | P8: Processing failure end to end (V8) | Tasks | In Tasks |
 | GATE-17 | P9: Recreate includes the API; README current (V18, V37) | Tasks | In Tasks |
 
