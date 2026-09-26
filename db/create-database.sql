@@ -124,6 +124,13 @@ CREATE INDEX IF NOT EXISTS idx_processing_request_owner_created
 
 DROP INDEX IF EXISTS idx_processing_request_owner;
 
+-- from 1789956000000-AddIdempotencyKey.ts
+ALTER TABLE processing_request
+        ADD COLUMN IF NOT EXISTS idempotency_key text NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_idempotency
+        ON processing_request (owner_user_id, idempotency_key);
+
 -- ============================================================
 -- notification-service (schema: notification)
 -- ============================================================

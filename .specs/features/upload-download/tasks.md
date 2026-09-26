@@ -142,12 +142,24 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] The script adds `idempotency_key` and `uq_processing_request_owner_idempotency`
-- [ ] Applied to an empty database, the columns and indexes equal the migrations'
+- [x] The script adds `idempotency_key` and `uq_processing_request_owner_idempotency`
+- [x] Applied to an empty database, the columns and indexes equal the migrations'
 - [ ] Build gate passes (after Phase 2's T4 makes the smoke use the upload flow; until then recorded as Partial, as S5's T3 was)
 
 **Tests**: none
 **Gate**: build
+**Status**: ⚠️ Partial. The first two criteria are met. The build box is ticked by T4, once the smoke no longer calls the removed `POST /processing-requests`.
+**Evidence**:
+- **Generated script.** Generated from `processing-catalog` `432ee94`. The script gains a block `-- from 1789956000000-AddIdempotencyKey.ts` with `ALTER TABLE processing_request ADD COLUMN IF NOT EXISTS idempotency_key text NULL;` and `CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_idempotency ON processing_request (owner_user_id, idempotency_key);`. Nothing else changed. The generator's count guard passed: both `query()` calls were read.
+- **Empty-database comparison.** The script was applied with `ON_ERROR_STOP=1` to an empty `postgres:17-alpine` with no published port (container removed). Its columns and indexes, 34 rows of `information_schema.columns` plus `pg_indexes` for `catalog` and `notification` excluding the ledger, are identical to the stack's migration-run database. That database's ledger holds all four Catalog migrations and the Notification one. `idempotency_key` is `text`, nullable. The unique index is `(owner_user_id, idempotency_key)`.
+- **Build gate.** Ran with the port overrides. These all pass:
+  - `clean-appledouble`, `config -q`
+  - the sizing check and its self-test (12 / 7)
+  - `up --build -d --wait`
+  - smoke `--self-test` (14 / 58 / 31)
+  - `up -d --wait --force-recreate identity storage-init`: the recreated bootstrap reports all three rules already configured
+  - `down -v`
+- **Where the smoke stops.** Both real smoke runs stop at `Anonymous POST http://localhost:3000/processing-requests without a token returned 404, expected 401`. The step before creation already sees the removed endpoint, which T4 replaces with the upload flow.
 
 ---
 
