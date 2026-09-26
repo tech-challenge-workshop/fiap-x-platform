@@ -11,7 +11,11 @@
 //                         development credentials admin/admin, never printed).
 //   h2 on tmpfs           the identity's embedded database is on tmpfs, so a
 //                         restart re-imports the realm.
-//   api after identity    compose starts the API only once identity is healthy.
+//   api after identity    compose starts the API only once identity is healthy,
+//                         proven by reading `depends_on` … `service_healthy`
+//                         from the rendered compose, not by observing start
+//                         times.
+
 //   get-token cli         `node scripts/get-token.mjs alice` prints one JWT line
 //                         and nothing else, and names the compose service
 //                         `identity` when it cannot reach it.
@@ -40,6 +44,12 @@ const H2_DIR = '/opt/keycloak/data/h2';
 const UNREACHABLE_URL = 'http://127.0.0.1:9';
 const UNREACHABLE_PREFIX = `get-token: the identity service (compose service "identity", ${UNREACHABLE_URL}) is unreachable`;
 const JWT_LINE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\n$/;
+const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+// Every JWT in `text` replaced by `<jwt: N chars>`: a failure shows the shape
+// of what a command printed, never a live token (GRD-05). Every message that
+// quotes a command's stdout or stderr goes through it.
+export const redact = (text) => text.replace(JWT, (token) => `<jwt: ${token.length} chars>`);
 
 // --- checks: each judges one observation and throws naming what it found ---
 
@@ -89,17 +99,18 @@ function assertApiAfterIdentity(config) {
 // { status, stdout, stderr }.
 function assertGetTokenCli({ ok, unreachable }) {
   const call = 'node scripts/get-token.mjs alice';
-  if (ok.status !== 0) throw new Error(`${call} exited ${ok.status}, expected 0; stderr: ${ok.stderr.trim()}`);
+  const fail = (message) => { throw new Error(redact(message)); };
+  if (ok.status !== 0) fail(`${call} exited ${ok.status}, expected 0; stderr: ${ok.stderr.trim()}`);
   if (!JWT_LINE.test(ok.stdout)) {
-    throw new Error(`${call} printed ${JSON.stringify(ok.stdout)} on stdout, expected exactly one JWT line`);
+    fail(`${call} printed ${JSON.stringify(ok.stdout)} on stdout, expected exactly one JWT line`);
   }
   const offline = `IDENTITY_URL=${UNREACHABLE_URL} ${call}`;
-  if (unreachable.status === 0) throw new Error(`${offline} exited 0, expected non-zero`);
+  if (unreachable.status === 0) fail(`${offline} exited 0, expected non-zero`);
   if (unreachable.stdout !== '') {
-    throw new Error(`${offline} printed ${JSON.stringify(unreachable.stdout)} on stdout, expected nothing`);
+    fail(`${offline} printed ${JSON.stringify(unreachable.stdout)} on stdout, expected nothing`);
   }
   if (!unreachable.stderr.startsWith(UNREACHABLE_PREFIX)) {
-    throw new Error(`${offline} printed ${JSON.stringify(unreachable.stderr)} on stderr, expected a message starting ${JSON.stringify(UNREACHABLE_PREFIX)}`);
+    fail(`${offline} printed ${JSON.stringify(unreachable.stderr)} on stderr, expected a message starting ${JSON.stringify(UNREACHABLE_PREFIX)}`);
   }
 }
 
@@ -113,7 +124,7 @@ function run(command, args, options = {}) {
 
 function compose(args) {
   const result = run('docker', ['compose', ...args]);
-  if (result.status !== 0) throw new Error(`docker compose ${args[0]} failed: ${(result.stderr || result.stdout).trim()}`);
+  if (result.status !== 0) throw new Error(redact(`docker compose ${args[0]} failed: ${(result.stderr || result.stdout).trim()}`));
   return result.stdout;
 }
 
@@ -164,7 +175,7 @@ function observeTmpfs() {
   const id = compose(['ps', '-q', 'identity']).trim();
   if (id === '') throw new Error('no identity container is running');
   const out = run('docker', ['inspect', '--format', '{{json .HostConfig.Tmpfs}}', id]);
-  if (out.status !== 0) throw new Error(`docker inspect of the identity container failed: ${out.stderr.trim()}`);
+  if (out.status !== 0) throw new Error(redact(`docker inspect of the identity container failed: ${out.stderr.trim()}`));
   return JSON.parse(out.stdout);
 }
 
@@ -202,7 +213,7 @@ async function main() {
       check(await observe());
       console.log(`check-identity: ${name} passed`);
     } catch (err) {
-      failures.push(`${name} failed: ${err.message}`);
+      failures.push(redact(`${name} failed: ${err.message}`));
     }
   }
   if (failures.length > 0) {
@@ -223,6 +234,15 @@ async function selfTest() {
     { user: 'bob', pinned: bobPinned, sub: bobSub },
   ];
   const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2lnbmF0dXJl';
+  const redacted = (token) => `<jwt: ${token.length} chars>`;
+  // A token shaped like the ones identity issues: an RS256 header with a key
+  // id, a payload with the claims the API reads, and a 256-byte signature.
+  const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const realJwt = [
+    b64({ alg: 'RS256', typ: 'JWT', kid: 'q1w2e3r4t5y6u7i8o9p0' }),
+    b64({ exp: 1790000000, iat: 1789999700, iss: EXPECTED_ISSUER, sub: alicePinned, preferred_username: 'alice', azp: 'fiapx-cli' }),
+    Buffer.alloc(256, 7).toString('base64url'),
+  ].join('.');
   const offlineMessage = `${UNREACHABLE_PREFIX} (ECONNREFUSED) - start the stack with \`docker compose up -d --wait\`\n`;
   const cli = ({ ok = {}, unreachable = {} } = {}) => ({
     ok: { status: 0, stdout: `${jwt}\n`, stderr: '', ...ok },
@@ -261,9 +281,15 @@ async function selfTest() {
     ['api after identity', 'started, not healthy (near-miss)', composeConfig({ condition: 'service_started' }),
       'api depends on identity with condition "service_started", expected "service_healthy": the API must not start before the identity is healthy'],
     ['get-token cli', 'a label before the token', cli({ ok: { stdout: `token: ${jwt}\n` } }),
-      `node scripts/get-token.mjs alice printed ${JSON.stringify(`token: ${jwt}\n`)} on stdout, expected exactly one JWT line`],
+      `node scripts/get-token.mjs alice printed ${JSON.stringify(`token: ${redacted(jwt)}\n`)} on stdout, expected exactly one JWT line`],
+    ['get-token cli', 'a label before a real-shaped token', cli({ ok: { stdout: `token: ${realJwt}\n` } }),
+      `node scripts/get-token.mjs alice printed ${JSON.stringify(`token: ${redacted(realJwt)}\n`)} on stdout, expected exactly one JWT line`],
     ['get-token cli', 'the token then a second line (near-miss)', cli({ ok: { stdout: `${jwt}\nexpires in 300 s\n` } }),
-      `node scripts/get-token.mjs alice printed ${JSON.stringify(`${jwt}\nexpires in 300 s\n`)} on stdout, expected exactly one JWT line`],
+      `node scripts/get-token.mjs alice printed ${JSON.stringify(`${redacted(jwt)}\nexpires in 300 s\n`)} on stdout, expected exactly one JWT line`],
+    ['get-token cli', 'a failed run quoting a token on stderr (near-miss)', cli({ ok: { status: 1, stdout: '', stderr: `get-token: refresh failed for ${realJwt}\n` } }),
+      `node scripts/get-token.mjs alice exited 1, expected 0; stderr: get-token: refresh failed for ${redacted(realJwt)}`],
+    ['get-token cli', 'a token printed while identity is unreachable (near-miss)', cli({ unreachable: { stdout: `${realJwt}\n` } }),
+      `${offline} printed ${JSON.stringify(`${redacted(realJwt)}\n`)} on stdout, expected nothing`],
     ['get-token cli', 'a token of two segments (near-miss)', cli({ ok: { stdout: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0\n' } }),
       'node scripts/get-token.mjs alice printed "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0\\n" on stdout, expected exactly one JWT line'],
     ['get-token cli', 'exit 1 for a reachable identity', cli({ ok: { status: 1, stdout: '', stderr: 'get-token: rejected\n' } }),
@@ -300,7 +326,13 @@ async function selfTest() {
       failures.push(`${name} given ${what}: accepted, expected rejection with ${JSON.stringify(expected)}`);
     } catch (err) {
       if (err.message !== expected) failures.push(`${name} given ${what}: rejected with ${JSON.stringify(err.message)}, expected ${JSON.stringify(expected)}`);
+      // No failure message may quote a token (GRD-05).
+      for (const token of [jwt, realJwt]) {
+        if (err.message.includes(token)) failures.push(`${name} given ${what}: the message quotes a ${token.length}-char token`);
+
+      }
     }
+
   }
   for (const [name, what, observation] of acceptances) {
     try {
@@ -342,7 +374,8 @@ if (process.argv.includes('--self-test')) {
   });
 } else {
   main().catch((err) => {
-    console.error(`check-identity: ${err.message}`);
+    console.error(redact(`check-identity: ${err.message}`));
+
     process.exitCode = 1;
   });
 }

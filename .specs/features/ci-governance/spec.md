@@ -4,7 +4,7 @@
 
 Two gaps weaken the CI.
 
-- **The platform's `integration` job has never run the stack in CI.** Without `SERVICES_READ_TOKEN` it prints a note and passes, so a green check proves nothing (V11). All five repositories are public, so no token is needed at all.
+- **The platform's `integration` job has never run the stack in CI.** Without `SERVICES_READ_TOKEN` it prints a note and passes, so a green check proves nothing (V11). All five repositories are public, so no personal access token or secret is needed; `actions/checkout` uses the job's default `GITHUB_TOKEN`.
 - **The `protect main` rulesets require too little.** The services require only `quality`, so a broken image can merge (V12). The platform requires only `topology`, so a broken README link or a broken stack can merge.
 
 ## Goals
@@ -28,7 +28,8 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 | Assumption / decision | Chosen default | Rationale | Confirmed? |
 | --- | --- | --- | --- |
-| Token | The job no longer reads `SERVICES_READ_TOKEN`; it checks out the four public service repositories anonymously | Decided; the repositories are public | y |
+| Token | The job no longer reads `SERVICES_READ_TOKEN`; it checks out the four public service repositories with no personal access token or secret; `actions/checkout` uses the job's default `GITHUB_TOKEN` |
+ Decided; the repositories are public | y |
 | Which service revision the job uses | Each service repository's `main` | The platform validates itself against the services as merged | y |
 | What the job runs | The build gate's stack steps from `platform-gate-hardening`: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, the smoke and identity check again, and tear down | Spec C deferred running these in CI to this feature | y |
 | Required checks | Services: `quality`, `image`. Platform: `topology`, `docs-links`, `integration` | Decided | y |
@@ -49,7 +50,8 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 
 **Acceptance Criteria**:
 
-1. WHEN the `integration` job runs THEN it SHALL check out the four service repositories without a token.
+1. WHEN the `integration` job runs THEN it SHALL check out the four service repositories with no personal access token or secret; `actions/checkout` uses the job's default `GITHUB_TOKEN`.
+
 2. WHEN the job runs THEN it SHALL bring the stack up and run, in order:
    - the storage-bootstrap scenarios;
    - the database drift check;
