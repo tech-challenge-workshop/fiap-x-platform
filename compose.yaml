@@ -13,6 +13,17 @@ services:
       - OIDC_ISSUER=http://localhost:8080/realms/fiapx
       - OIDC_AUDIENCE=fiapx-api
       - OIDC_JWKS_URL=http://identity:8080/realms/fiapx/protocol/openid-connect/certs
+      # Two storage addresses. The API's own calls go to storage:9000 inside
+      # the network; the URLs it signs name the port published on the host,
+      # because a presigned URL only works on the host it was signed for.
+      # Both come from STORAGE_HOST_PORT, so they cannot drift apart.
+      # Local development credentials only, the Worker's: nothing here reaches
+      # a deployed environment (AD-005).
+      - STORAGE_ENDPOINT=http://storage:9000
+      - STORAGE_PUBLIC_ENDPOINT=http://localhost:${STORAGE_HOST_PORT:-9000}
+      - STORAGE_BUCKET=fiapx
+      - STORAGE_ACCESS_KEY=fiapx-dev
+      - STORAGE_SECRET_KEY=fiapx-dev-secret
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -20,6 +31,8 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
       interval: 5s
