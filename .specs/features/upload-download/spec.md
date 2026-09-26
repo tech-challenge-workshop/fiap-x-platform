@@ -107,10 +107,10 @@ Decisions from the gray-area discussion of 2026-09-26 are in `context.md` beside
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| UPL-15 | P1: The API can sign URLs the client can use | Execute | Implementing (T1 done; T8 proves it in the gate) |
-| UPL-16 | P2: Abandoned uploads are discarded | Execute | Implementing (T2 done; T8 documents it and runs it in the gate) |
-| UPL-17 | P3: The smoke proves the real flow | Execute | Implementing (T4: upload, confirmation and the old route's removal; T5: replay and key reuse; T6: download through its URL; T7: cross-owner download 404) |
-| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Execute | Implementing (T3 and T4 done: script regenerated, seed deleted, `check-no-storage-writes.mjs` in the gate; T8 proves it again) |
+| UPL-15 | P1: The API can sign URLs the client can use | Execute | Implementing (T1 and T8 done: `upload confirmed` and `download issued` require the published origin in the gate; internal-host negative fails `upload confirmed`; Verifier pending) |
+| UPL-16 | P2: Abandoned uploads are discarded | Execute | Implementing (T2 and T8 done: bootstrap re-run by the gate's force-recreate; README documents the rule; Verifier pending) |
+| UPL-17 | P3: The smoke proves the real flow | Execute | Implementing (T4-T8 done: upload, replay, key reuse, download, cross-owner download and the old route's removal in the smoke; three negatives fail their steps; Verifier pending) |
+| UPL-18 | P3: No script writes videos outside the API (seed removed; database script regenerated) | Execute | Implementing (T3 and T4 done: script regenerated, seed deleted, `check-no-storage-writes.mjs` in the gate and CI; Verifier pending) |
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 

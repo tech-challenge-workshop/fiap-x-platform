@@ -33,7 +33,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 | --- | --- | --- |
 | Quick | Script or document only | `node --check scripts/<changed>.mjs`, `node scripts/check-no-storage-writes.mjs`, the three `--self-test`s |
 | Full | Compose / bootstrap changes | `docker compose config -q` then `docker compose up --build -d --wait` |
-| Build | After a phase | `node clean-appledouble.mjs` (workspace root), `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `node scripts/check-no-storage-writes.mjs`, `node scripts/check-no-storage-writes.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/smoke-local-integration.mjs`, `node scripts/smoke-local-integration.mjs --self-test`, `docker compose up -d --wait --force-recreate identity storage-init` (L-015: a restart that recreates), the smoke again, `docker compose down -v` |
+| Build | After a phase | `node clean-appledouble.mjs` (workspace root), `docker compose config -q`, `node scripts/check-worker-sizing.mjs`, `node scripts/check-worker-sizing.mjs --self-test`, `node scripts/check-no-storage-writes.mjs`, `node scripts/check-no-storage-writes.mjs --self-test`, `docker compose up --build -d --wait`, `node scripts/smoke-local-integration.mjs`, `node scripts/smoke-local-integration.mjs --self-test`, `docker compose up -d --wait --force-recreate identity storage-init` (L-015: a restart that recreates), the smoke again, `docker compose down -v`, and the `docs-links` job's script from `.github/workflows/ci.yml` reporting `0 unresolved link(s)` |
 
 ---
 
@@ -407,12 +407,58 @@ T7 -> T8
 - Skill: NONE
 
 **Done when**:
-- [ ] Build gate green, including the force-recreate step
-- [ ] Negatives: replay creating a second request fails `confirmation replay`; a URL signed for the internal host fails `upload confirmed`; `bob` receiving a URL fails `cross-owner download 404`
-- [ ] README updated; links resolve
+- [x] Build gate green, including the force-recreate step
+- [x] Negatives: replay creating a second request fails `confirmation replay`; a URL signed for the internal host fails `upload confirmed`; `bob` receiving a URL fails `cross-owner download 404`
+- [x] README updated; links resolve
 
 **Tests**: none
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**:
+- **Build gate.** Every command in the Build row ran with the three port exports, and the gate was green:
+  - `clean-appledouble`, `config -q`
+  - sizing 12/7
+  - the storage-write check (4 scripts) and its self-test (10/6)
+  - `up --build -d --wait`
+  - the smoke, then its self-test (20/108/44)
+  - `up -d --wait --force-recreate identity storage-init`, then the smoke again
+  - `down -v`
+  - `docs-links`: `0 unresolved link(s)`
+
+  The docs check joined the row here because the matrix assigns it to the gate (L-016). Services: `fiap-x-api` at `db0ce83`'s code, `processing-catalog` `432ee94`, Worker and Notification at `main`. `fiap-x-api` moved to `22d8bbb` during the run, but that commit changes only `.specs/`, which its `.dockerignore` excludes.
+- **What the real runs showed.** Both runs printed all 20 assertion steps:
+  - The part URL was on `http://localhost:39000`, and its `PUT` was accepted from the host.
+  - The replay answered 200 with the same id, and the total was unchanged (2, then 4 after the recreate).
+  - The key on a second upload answered 409 with the exact message.
+  - The download was issued after 2 not-yet answers (409). So the edge case ran for real, not only in the self-test.
+  - The URL served 66999 bytes to the host: 8 frames through the EOCD reader.
+  - `bob` got the constant 404 on the download.
+
+  The second run, after identity and the bootstrap were recreated, shows the rules re-applied and the API still signing for the public endpoint (spec edge case).
+- **Negatives.** Each ran on a scratch copy of `fiap-x-api` (`rsync` without `node_modules`/`dist`/`.git`, AppleDouble cleaned). Each copy was built through a compose override whose `api.build` pointed at the copy, and the smoke ran against it. Each mutation failed exactly its named step:
+  - **Replay creates a second request.** `CompleteUploadService` sends the Catalog `${idempotencyKey}-${randomUUID()}`. Result: `confirmation replay` fails with `Replay created a request: alice's replayed confirmation (same upload, same Idempotency-Key) returned 201, expected 200`.
+  - **URLs signed for the internal host.** The presigner is built on `config.endpoint`. Result: `upload confirmed` fails with `Part 1 URL for the fixture targets http://storage:9000, expected http://localhost:39000: the API must sign for the storage port published on the host`.
+  - **`bob` receives a URL.** `DownloadService` falls back to the Catalog's unscoped record when the owned lookup finds nothing. Every earlier step passes, and `cross-owner download 404` fails with `Owner scope leak: bob's GET http://localhost:3000/processing-requests/<id>/download returned 200; alice's request must be invisible to bob`.
+
+  After each negative, the real API was rebuilt (`up --build -d --wait api`). The final smoke against it was green, and then `down -v` ran. The real `fiap-x-api` tree stayed clean throughout.
+- **README.** A new section, "Uploading a video and downloading its frames", covers:
+  - the four calls, with example requests
+  - formats and the 500 MB limit
+  - the size-mismatch rule and the idempotency rules
+  - the URL lifetimes: 1 hour for parts and 5 minutes for the download, with `UPLOAD_URL_TTL_SECONDS`/`DOWNLOAD_URL_TTL_SECONDS` as the API's defaults
+  - the owner-only 404 and 409
+  - the 1-day abort rule
+  - signing for `STORAGE_HOST_PORT`
+  - the removal of `POST /processing-requests` and of `seed-source-video.mjs`, and `check-no-storage-writes.mjs`
+
+  Other README changes:
+  - "What the smoke proves" lists the new assertions, the twenty required steps and the three S6 negatives.
+  - "Object storage" names the per-owner source keys and the third rule, with the bootstrap's three owned rules and the API's wait on it.
+  - "Seeding a source video" and the seed line under host ports are removed.
+  - The layout row names the storage-write check.
+
+  The `docs-links` script reports `0 unresolved link(s)`, and the in-page link `#object-storage` matches the `### Object storage` heading.
+- **Open item (L-005).** The negatives ran from scratch files (`negatives.sh`, three override files) and are not versioned. No task names a location for them, as with T2's harness.
 
 ---
 
