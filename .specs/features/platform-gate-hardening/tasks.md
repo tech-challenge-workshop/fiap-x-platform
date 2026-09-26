@@ -267,14 +267,22 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 **Done when**:
 
-- [ ] The nested writing script fails the check, naming `nested/writes.mjs`; without it, the check passes
-- [ ] An empty directory exits 1 with `no script was read under scripts/`
-- [ ] A reader that returns no files fails the self-test (literal negative)
-- [ ] The spawned run exits non-zero
-- [ ] Build gate passes
+- [x] The nested writing script fails the check, naming `nested/writes.mjs`; without it, the check passes
+- [x] An empty directory exits 1 with `no script was read under scripts/`
+- [x] A reader that returns no files fails the self-test (literal negative)
+- [x] The spawned run exits non-zero
+- [x] Build gate passes
 
 **Tests**: integration + self-test
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** The new self-test cases, added before the reader changed, failed four times: the nested writer and the empty directory were accepted, and the spawned run exited 0 with nothing on stderr.
+- **Change.** `readScripts(dir)` walks subdirectories, still skipping `._*` and itself, and names files `scripts/<relative path>`. `SCRIPTS_DIR` re-roots it. Zero files read → `no script was read under scripts/`, exit 1.
+- **Self-test.** From 10/6 to `12 bad inputs rejected with the expected message, 7 good inputs accepted, spawned failure exited non-zero`. The real reader runs on temporary trees: `nested/writes.mjs` with `aws s3 cp … s3://fiapx/sources/clip.mp4` is named as `scripts/nested/writes.mjs`; the same tree without it passes; an empty directory fails. The spawned run with `SCRIPTS_DIR` on that tree must exit non-zero with exactly the naming line on stderr.
+- **Real run.** `5 scripts under scripts/ checked`; `SCRIPTS_DIR=<empty dir>` → `no script was read under scripts/`, exit 1.
+- **Literal negatives** (scratch copies): a reader returning `[]` fails the self-test three times; a reader that skips directories fails it three times, including the spawned run exiting 0.
+- **Build gate.** Steps 1-13 green with every script that exists so far: 10 bootstrap scenarios, the smoke before and after `--force-recreate identity storage-init api`, `down -v`, and docs-links `0 unresolved link(s)`. Step 9 and `check-identity.mjs` in step 11 are skipped until T11.
 
 ---
 
