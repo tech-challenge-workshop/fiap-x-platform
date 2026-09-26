@@ -422,11 +422,19 @@ Add a new step `archive object`, which requires the keys under `zips/<id>/` to b
 
 **Done when**:
 
-- [ ] Replacing `process.exitCode = 1` with `0` in `main()`'s catch fails the self-test
-- [ ] Quick gate passes
+- [x] Replacing `process.exitCode = 1` with `0` in `main()`'s catch fails the self-test
+- [x] Quick gate passes
 
 **Tests**: self-test
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**:
+- **Change.** The self-test spawns the live run, with `SMOKE_DRY_RUN` removed from its environment, as `API_URL=http://127.0.0.1:9 HEALTH_TIMEOUT_MS=1`. It requires a non-zero exit and stderr exactly `API health check timed out\n`. The run takes about 1 s (one poll interval) and needs no stack.
+- **Passes on arrival.** `main()`'s catch already set exit code 1, so the new case passed at once; the literal negatives below are its red.
+- **Self-test.** Counts unchanged at 24/134/48; the line now ends `…, main() ran every step in order in a dry run, spawned failure exited non-zero`.
+- **Literal negatives** (scratch copies), each failing the self-test with exit 1:
+  - `process.exitCode = 0` in `main()`'s catch: `spawned run against an unreachable API exited 0, expected non-zero`;
+  - the error printed with `console.log`: `… printed "" on stderr, expected "API health check timed out\n"`.
 
 ---
 
