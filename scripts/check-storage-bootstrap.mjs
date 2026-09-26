@@ -46,10 +46,11 @@ const ALREADY_CONFIGURED = [
 
 const bucketOf = (scenario) => `${SCRATCH_PREFIX}${scenario}`;
 
-// The owned rules with the abort rule changed.
-function withAbort(change) {
-  return OWNED_RULES.map((rule) => (rule.ID === 'abort-incomplete-uploads' ? { ...rule, ...change } : rule));
+// The owned rules with one rule changed.
+function withRule(id, change) {
+  return OWNED_RULES.map((rule) => (rule.ID === id ? { ...rule, ...change } : rule));
 }
+const withAbort = (change) => withRule('abort-incomplete-uploads', change);
 
 // Keys sorted at every level and rules sorted by ID, so two configurations
 // compare equal exactly when they hold the same rules.
@@ -139,11 +140,21 @@ export const SCENARIOS = [
     expect: { exit: 0, rules: true },
   },
   { name: 'abort-narrowed', prepare: [create, lifecycle(withAbort({ Filter: { Prefix: 'sources/' } }))], expect: { exit: 0, rules: true } },
+  // An owned rule carrying a second action still deletes what it should not
+  // (V36): the abort rule would also expire every object after 30 days.
+  { name: 'abort-extra-expiration', prepare: [create, lifecycle(withAbort({ Expiration: { Days: 30 } }))], expect: { exit: 0, rules: true } },
+  {
+    name: 'expire-extra-abort',
+    prepare: [create, lifecycle(withRule('expire-zips', { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 3 } }))],
+    expect: { exit: 0, rules: true },
+  },
   { name: 'policy', prepare: [create, openPolicy], expect: { exit: 1, stderr: (bucket) => `bucket ${bucket} has a bucket policy` } },
 ];
 
 // The scenarios --self-test requires, in order.
-const REQUIRED_SCENARIOS = ['fresh', 'rerun', 'upgrade', 'foreign', 'abort-disabled', 'abort-2-days', 'abort-narrowed', 'policy'];
+const REQUIRED_SCENARIOS = [
+  'fresh', 'rerun', 'upgrade', 'foreign', 'abort-disabled', 'abort-2-days', 'abort-narrowed', 'abort-extra-expiration', 'expire-extra-abort', 'policy',
+];
 
 // Judges one scenario's observation against its expectation.
 function checkScenario(scenario, observation) {
@@ -268,6 +279,8 @@ function selfTest() {
     'abort-disabled': { exit: 0, stdout: rewrote, stderr: '', before: pretty(withAbort({ Status: 'Disabled' })), after: owned },
     'abort-2-days': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
     'abort-narrowed': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
+    'abort-extra-expiration': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
+    'expire-extra-abort': { exit: 0, stdout: rewrote, stderr: '', before: null, after: owned },
     policy: { exit: 1, stdout: '', stderr: policyRefusal, before: null, after: null },
   };
   const bad = (name, change) => check(name, { ...good[name], ...change });
@@ -275,6 +288,8 @@ function selfTest() {
   const twoDays = withAbort({ AbortIncompleteMultipartUpload: { DaysAfterInitiation: 2 } });
   const disabled = withAbort({ Status: 'Disabled' });
   const narrowed = withAbort({ Filter: { Prefix: 'sources/' } });
+  const extraExpiration = withAbort({ Expiration: { Days: 30 } });
+  const extraAbort = withRule('expire-zips', { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 3 } });
   const allLines = ALREADY_CONFIGURED.map((line) => JSON.stringify(line)).join(', ');
 
   const rejections = [
@@ -286,6 +301,8 @@ function selfTest() {
     ['abort after 2 days (near-miss)', () => assertOwnedRules(pretty(twoDays)), found(twoDays)],
     ['abort rule disabled', () => assertOwnedRules(pretty(disabled)), found(disabled)],
     ['abort rule narrowed', () => assertOwnedRules(pretty(narrowed)), found(narrowed)],
+    ['abort rule with an extra Expiration (near-miss: every owned field is right)', () => assertOwnedRules(pretty(extraExpiration)), found(extraExpiration)],
+    ['expire rule with an extra abort action', () => assertOwnedRules(pretty(extraAbort)), found(extraAbort)],
     // assertUnchanged: bad, and a near-miss that differs by one space.
     ['configuration rewritten', () => assertUnchanged(withOperator, owned),
       `lifecycle configuration changed: before ${JSON.stringify(withOperator)}, after ${JSON.stringify(owned)}`],
@@ -323,6 +340,8 @@ function selfTest() {
     ['scenario abort-disabled left disabled', bad('abort-disabled', { after: pretty(disabled) }), found(disabled)],
     ['scenario abort-2-days left at 2 days', bad('abort-2-days', { after: pretty(twoDays) }), found(twoDays)],
     ['scenario abort-narrowed left narrowed', bad('abort-narrowed', { after: pretty(narrowed) }), found(narrowed)],
+    ['scenario abort-extra-expiration keeping the Expiration', bad('abort-extra-expiration', { after: pretty(extraExpiration) }), found(extraExpiration)],
+    ['scenario expire-extra-abort keeping the abort action', bad('expire-extra-abort', { after: pretty(extraAbort) }), found(extraAbort)],
     ['scenario policy accepted', bad('policy', { exit: 0, stderr: '' }), 'bootstrap exited 0, expected 1'],
     ['scenario policy refused for another bucket (near-miss)', bad('policy', { stderr: policyRefusal.replace('fiapx-scenario-policy', 'fiapx-scenario-policy-2') }),
       `bootstrap's stderr does not contain "bucket fiapx-scenario-policy has a bucket policy"; stderr: ${policyRefusal.replace('fiapx-scenario-policy', 'fiapx-scenario-policy-2').trim()}`],

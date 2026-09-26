@@ -204,7 +204,7 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
 | GATE-01 | P1: Bucket-scenario runner in the gate (V34, V20) | Execute | Implementing (T1 ✅) |
-| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Tasks | In Tasks |
+| GATE-02 | P1: Abort rule with extra actions rewritten (V36) | Execute | Implementing (T2 ✅) |
 | GATE-03 | P1: Smoke reads the live lifecycle rules (V34) | Tasks | In Tasks |
 | GATE-04 | P2: Database script drift check (V10, V37) | Tasks | In Tasks |
 | GATE-05 | P2: Script includes spec B's index | Tasks | In Tasks |

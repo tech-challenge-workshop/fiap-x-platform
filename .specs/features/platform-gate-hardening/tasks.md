@@ -153,7 +153,7 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 ### T2: Refuse extra actions on owned rules
 
-**What**: `correct()` and `abort_correct()` also require the other lifecycle actions to be absent (design.md). Add the scenario `abort-extra-expiration`.
+**What**: `correct()` and `abort_correct()` also require the other lifecycle actions to be absent (design.md). Add the scenario `abort-extra-expiration`, and `expire-extra-abort` for the check added to `correct()`.
 
 **Where**: `storage/bootstrap.sh`
 **Depends on**: T1
@@ -167,13 +167,21 @@ Every scenario deletes its bucket before and after. `--self-test` gives each ass
 
 **Done when**:
 
-- [ ] `abort-extra-expiration` passes: the rule is rewritten to exactly the owned one
-- [ ] Removing the new `==null` checks fails that scenario
-- [ ] Every T1 scenario still passes
-- [ ] Full gate passes
+- [x] `abort-extra-expiration` passes: the rule is rewritten to exactly the owned one
+- [x] Removing the new `==null` checks fails that scenario
+- [x] Every T1 scenario still passes
+- [x] Full gate passes
 
 **Tests**: integration
 **Gate**: full
+**Status**: ✅ Complete
+**Evidence**:
+- **Red first.** With the two scenarios added and the bootstrap unchanged, the real run failed both: the abort rule kept `"Expiration":{"Days":30}`, and `expire-zips` kept its `AbortIncompleteMultipartUpload`. The other 8 passed.
+- **Fix.** `correct()` adds `` AbortIncompleteMultipartUpload==`null` && Transitions==`null` && NoncurrentVersionExpiration==`null` ``; `abort_correct()` adds `` Expiration==`null` `` and the same two. JMESPath literals, since the `aws-cli` image has no `jq`.
+- **Green.** `10 bootstrap scenarios passed; no fiapx-scenario-* bucket left`. On `up`, the live `fiapx` bucket printed the three `already configured` lines, so the fix does not rewrite a correct bucket.
+- **Literal negative.** A scratch copy without the new `==null` checks: `abort-extra-expiration` and `expire-extra-abort` failed, the other 8 passed.
+- **Deviation.** `expire-extra-abort` is not in the design's list. It covers the `correct()` half of this change, which no listed scenario reaches; design.md's table now lists it.
+- **Self-test.** `10 required scenarios present, 33 bad inputs rejected with the expected message, 17 good inputs accepted, 2 cleanup orders held, spawned failure exited non-zero`.
 
 ---
 
