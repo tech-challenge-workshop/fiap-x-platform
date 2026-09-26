@@ -221,12 +221,14 @@ dry run: nothing was changed
 
 **Done when**:
 
-- [ ] Both scenarios pass on the stack. No scratch bucket is left
-- [ ] Removing `Status=='Enabled'` from `correct()` in a scratch bootstrap fails `expire-disabled`, and removing `Filter.Prefix` fails `expire-narrowed` (K6 and K7)
-- [ ] Full gate passes
+- [x] Both scenarios pass on the stack. No scratch bucket is left
+- [x] Removing `Status=='Enabled'` from `correct()` in a scratch bootstrap fails `expire-disabled`, and removing `Filter.Prefix` fails `expire-narrowed` (K6 and K7)
+- [x] Full gate passes
 
 **Tests**: integration + self-test
 **Gate**: full
+
+**Status**: ✅ Complete (2026-09-26). `check-storage-bootstrap` self-test 10 → 12 required scenarios, 33 → 38 bad inputs rejected (an expire rule disabled, one narrowed to `zips/x/` as the near-miss, each scenario left as it was, and `expire-disabled` failing its repair), 17 → 19 good inputs accepted. Red-first: a scratch runner without the two scenarios fails the self-test on the required list and on every new scenario case. The real run: `12 bootstrap scenarios passed; no fiapx-scenario-* bucket left`. Literal negatives through `BOOTSTRAP_UNDER_TEST` on scratch copies of the bootstrap: without `Status=='Enabled'` in `correct()`, exit 1 with only `expire-disabled` failing (`expected exactly the 3 owned lifecycle rules …, found …"Status":"Disabled"…`), K6 killed; without `Filter.Prefix=='$prefix'`, exit 1 with only `expire-narrowed` failing (`…"Prefix":"zips/x/"…`), K7 killed. Every other `--self-test` passes. Beyond the task's file: the README's scenario table gains the two rows and says twelve scenarios.
 
 ---
 
