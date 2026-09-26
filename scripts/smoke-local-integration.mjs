@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -381,6 +382,33 @@ function assertListsDisjoint({ aliceIds, bobId, aliceList, bobList }) {
   }
 }
 
+// Reads one request with the user's token and returns the status and the raw
+// body text, so a check can compare two bodies byte for byte.
+async function readAs(user, id) {
+  const res = await fetch(`${API_URL}/processing-requests/${id}`, {
+    headers: { Authorization: `Bearer ${await getToken(user)}` },
+  });
+  return { status: res.status, body: await res.text() };
+}
+
+// AUTH-17 AC4: bob reading alice's request must look exactly like reading a
+// request that does not exist, so the answer reveals nothing about it.
+function assertCrossOwnerNotFound(id, crossRead, randomRead) {
+  const call = `bob's GET ${API_URL}/processing-requests/${id}`;
+  if (randomRead.status !== 404) {
+    throw new Error(`bob's GET of a random id returned ${randomRead.status}, expected 404 to compare against`);
+  }
+  if (crossRead.status >= 200 && crossRead.status < 300) {
+    throw new Error(`Owner scope leak: ${call} returned ${crossRead.status}; alice's request must be invisible to bob`);
+  }
+  if (crossRead.status !== 404) {
+    throw new Error(`${call} returned ${crossRead.status}, expected 404 as for a random id`);
+  }
+  if (crossRead.body !== randomRead.body) {
+    throw new Error(`${call} returned 404 with ${crossRead.body}, but a random id gets ${randomRead.body}`);
+  }
+}
+
 // Waits until the request is terminal and returns it whichever way it ended;
 // the caller decides which ending was expected. A request still in flight at
 // the deadline fails naming the status it was last seen in.
@@ -555,6 +583,15 @@ export const SMOKE_STEPS = [
     report: (ctx) => `alice lists ${ctx.aliceList.length} requests and bob ${ctx.bobList.length}; neither list holds the other's`,
   },
   {
+    name: 'cross-owner read 404',
+    observe: async (ctx) => {
+      ctx.crossRead = await readAs('bob', ctx.id);
+      ctx.randomRead = await readAs('bob', randomUUID());
+    },
+    check: (ctx) => assertCrossOwnerNotFound(observed(ctx, 'id'), observed(ctx, 'crossRead'), observed(ctx, 'randomRead')),
+    report: (ctx) => `bob reading alice's request ${ctx.id} got 404 with the same body as a random id`,
+  },
+  {
     name: 'no leftovers',
     observe: (ctx) => {
       ctx.scratchDirs = [...scratchDirs];
@@ -602,6 +639,7 @@ const REQUIRED_STEPS = [
   'single delivery',
   'bob request created',
   'lists disjoint',
+  'cross-owner read 404',
   'no leftovers',
 ];
 
@@ -631,6 +669,8 @@ async function selfTest() {
   const bobId = 'self-test-bob-request';
   const olderAliceId = 'self-test-older-alice-request';
   const item = (processingRequestId) => ({ processingRequestId, status: 'RECEIVED' });
+  const readUrl = `${API_URL}/processing-requests/${id}`;
+  const notFound = { status: 404, body: '{"statusCode":404,"message":"Processing request not found"}' };
   const lists = {
     aliceIds: [id, rejectedId],
     bobId,
@@ -699,6 +739,16 @@ async function selfTest() {
       `alice's list is missing her own request ${rejectedId}`],
     ["bob's list missing his request", () => assertListsDisjoint({ ...lists, bobList: [] }),
       `bob's list is missing his own request ${bobId}`],
+    ["cross-owner read answered 200", () => assertCrossOwnerNotFound(id, { status: 200, body: JSON.stringify(item(id)) }, notFound),
+      `Owner scope leak: bob's GET ${readUrl} returned 200; alice's request must be invisible to bob`],
+    ["cross-owner read answered 403", () => assertCrossOwnerNotFound(id, { status: 403, body: '{"statusCode":403,"message":"Forbidden resource"}' }, notFound),
+      `bob's GET ${readUrl} returned 403, expected 404 as for a random id`],
+    ["cross-owner 404 with another body", () => assertCrossOwnerNotFound(id, { status: 404, body: '{"statusCode":404,"message":"Processing request belongs to another owner"}' }, notFound),
+      `bob's GET ${readUrl} returned 404 with {"statusCode":404,"message":"Processing request belongs to another owner"}, but a random id gets ${notFound.body}`],
+    ["cross-owner 404 whose body differs by one character", () => assertCrossOwnerNotFound(id, { status: 404, body: `${notFound.body} ` }, notFound),
+      `bob's GET ${readUrl} returned 404 with ${notFound.body} , but a random id gets ${notFound.body}`],
+    ["random id answered 500", () => assertCrossOwnerNotFound(id, notFound, { status: 500, body: '{"statusCode":500,"message":"Internal server error"}' }),
+      `bob's GET of a random id returned 500, expected 404 to compare against`],
   ];
 
   let scratch;
@@ -728,6 +778,7 @@ async function selfTest() {
       if (created !== bobId) throw new Error(`returned ${created}, expected ${bobId}`);
     }],
     ['disjoint lists, each holding its own requests', () => assertListsDisjoint(lists)],
+    ['cross-owner read answered exactly like a random id', () => assertCrossOwnerNotFound(id, { ...notFound }, { ...notFound })],
   ];
 
   // The steps main() runs: each required step must be in SMOKE_STEPS with a
@@ -752,6 +803,8 @@ async function selfTest() {
     bobId,
     aliceList: lists.aliceList,
     bobList: lists.bobList,
+    crossRead: { ...notFound },
+    randomRead: { ...notFound },
     scratchDirs: [goneDir],
   };
   const stepRejections = [
@@ -777,6 +830,8 @@ async function selfTest() {
       `bob's ${createCall} returned 401, expected 201`],
     ['lists disjoint', { aliceList: [...lists.aliceList, item(bobId)] },
       `Owner scope leak: alice's list contains bob's request ${bobId}`],
+    ['cross-owner read 404', { crossRead: { status: 403, body: '{"statusCode":403,"message":"Forbidden resource"}' } },
+      `bob's GET ${readUrl} returned 403, expected 404 as for a random id`],
     ['no leftovers', { scratchDirs: [goneDir, survivingDir] },
       `Downloaded artefact left behind: ${survivingDir} still exists after cleanup`],
   ];

@@ -266,11 +266,13 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] The self-test rejects a 200 and a 404 whose body differs from the random-id body
-- [ ] Quick gate passes
+- [x] The self-test rejects a 200 and a 404 whose body differs from the random-id body
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+**Status**: ✅ Complete
+**Evidence**: `cross-owner read 404` reads `alice`'s video request and a fresh `randomUUID()` as `bob`, keeping each status and raw body text. `assertCrossOwnerNotFound` compares the bodies byte for byte. Its self-test rejects a 200 (`Owner scope leak: bob's GET <api>/processing-requests/<id> returned 200; alice's request must be invisible to bob`), a 403 (`... returned 403, expected 404 as for a random id`), a 404 with another message, a 404 whose body differs by one trailing space (L-012), and a random-id baseline that is not 404. Self-test: 13 required steps, 48 bad inputs, 28 good inputs. Scratch copies with the body comparison or the 404 status check disabled fail the self-test. On the real stack the smoke is green and prints `bob reading alice's request <id> got 404 with the same body as a random id`. Quick gate passes.
 
 ---
 
