@@ -9,7 +9,7 @@ Implement these tasks with the `tlc-spec-driven` skill: **activate it by name an
 ---
 
 **Design**: `.specs/features/auth-owner-scope/design.md`
-**Status**: Draft
+**Status**: Complete (Verifier pending)
 
 ---
 
@@ -338,13 +338,15 @@ T8 -> T9
 - Skill: NONE
 
 **Done when**:
-- [ ] Build gate green, including the second `up` (and `alice`'s `sub` unchanged across it)
-- [ ] Negatives on a scratch copy of the API: returning `bob`'s requests to `alice` fails `lists disjoint`; answering 403 for a cross-owner read fails `cross-owner read 404`; accepting a missing token fails `anonymous refused`
-- [ ] README describes `get-token.mjs`, `alice`/`bob`, the development-only password grant, and what the smoke now proves; links resolve
-- [ ] Build gate passes
+- [x] Build gate green, including the second `up` (and `alice`'s `sub` unchanged across it)
+- [x] Negatives on a scratch copy of the API: returning `bob`'s requests to `alice` fails `lists disjoint`; answering 403 for a cross-owner read fails `cross-owner read 404`; accepting a missing token fails `anonymous refused`
+- [x] README describes `get-token.mjs`, `alice`/`bob`, the development-only password grant, and what the smoke now proves; links resolve
+- [x] Build gate passes
 
 **Tests**: none
 **Gate**: build
+**Status**: ✅ Complete
+**Evidence**: Build gate from a clean `down -v`, with only `POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002` exported and no override file. Config, sizing (`cpus 2 matches FFMPEG_THREADS 2`) and its self-test (12 / 7), `up --build --wait` and seed pass. The real smoke is green on every S4 step and every new one: `API refused an anonymous POST /processing-requests (401)`, `alice lists 2 requests and bob 1; neither list holds the other's`, `bob reading alice's request <id> got 404 with the same body as a random id`, `alice's list carries no internal field, and <id> carries the safe failureReason`. The smoke self-test passes with 14 required steps, 58 bad inputs and 31 good inputs. `alice`'s `sub` read `0f1c3a52-7a2e-4d8b-9c61-a11ce0000001` before and after the second `up -d --wait`, and `down -v` passed. Literal negatives: three scratch copies of `fiap-x-api` `636f33a`, each built as its own image and swapped in for `api` through a scratchpad override (`image:` plus `build: !reset null`). Each smoke exited 1. (1) `alice`'s list also returns `bob`'s requests: `Owner scope leak: alice's list contains bob's request 6bc6d1e2-6cf5-4268-ac55-e3c7c1658f25`. (2) A cross-owner read answers 403 when the id exists in the Catalog: `bob's GET http://localhost:3000/processing-requests/f516f780-aae8-4f87-89c8-7c8fe238a4a3 returned 403, expected 404 as for a random id`. (3) The guard lets a request without a token in: `Anonymous creation accepted: POST http://localhost:3000/processing-requests without a token returned 201; the API must refuse it with 401`. The real `api` image was restored after the negatives and the three images removed. The API tree was never modified. The README gains "Logging in as a demo user" (`get-token.mjs`, `alice`/`bob`, `--password`, `IDENTITY_URL`, the development-only password grant), the four owner-scope bullets, the token refresh, the fourteen required steps, the three negatives and the `identity/` layout row. Every relative link resolves.
 
 ---
 
