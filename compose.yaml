@@ -59,14 +59,14 @@ services:
       - FFMPEG_THREADS=${WORKER_CPUS:-2}
       # Local development credentials only. Nothing here reaches a deployed
       # environment: AD-005 keeps secrets in Kubernetes secrets.
-      - STORAGE_ENDPOINT=http://minio:9000
+      - STORAGE_ENDPOINT=http://storage:9000
       - STORAGE_BUCKET=fiapx
-      - STORAGE_ACCESS_KEY=minioadmin
-      - STORAGE_SECRET_KEY=minioadmin
+      - STORAGE_ACCESS_KEY=fiapx-dev
+      - STORAGE_SECRET_KEY=fiapx-dev-secret
     depends_on:
       rabbitmq:
         condition: service_healthy
-      minio-init:
+      storage-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
@@ -147,43 +147,48 @@ services:
       timeout: 3s
       retries: 10
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
+  storage:
+    # S3-compatible object storage (AD-005 keeps the port at the protocol, and
+    # AD-014 records why this is RustFS: MinIO's public images were withdrawn).
+    image: rustfs/rustfs:1.0.0
     environment:
       # Local development credentials only. Nothing here reaches a deployed
       # environment: AD-005 keeps secrets in Kubernetes secrets.
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - RUSTFS_ACCESS_KEY=fiapx-dev
+      - RUSTFS_SECRET_KEY=fiapx-dev-secret
     ports:
       - "9000:9000"
-      - "9001:9001"
     volumes:
-      - minio-data:/data
+      - storage-data:/data
     healthcheck:
-      # Readiness, not liveness: a TCP probe would pass while the server is
-      # listening but not yet serving.
-      test: ["CMD", "mc", "ready", "local"]
+      # An HTTP probe of the server itself, not a TCP one: a listening socket
+      # is not a serving S3 API.
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  minio-init:
-    # One-shot: exits 0 once the bucket exists and is private. The Worker
-    # waits for it to complete, so it never starts against a missing bucket.
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+  storage-init:
+    # One-shot: exits 0 once the bucket exists, has no bucket policy and
+    # carries its retention rules. The Worker waits for it to complete, so it
+    # never starts against a missing bucket. Plain aws-cli: the scripts speak
+    # the S3 API, not a vendor's CLI.
+    image: amazon/aws-cli:2.37.4
     entrypoint: ["/bin/bash", "/bootstrap.sh"]
     environment:
       # Local development credentials only. Nothing here reaches a deployed
       # environment: AD-005 keeps secrets in Kubernetes secrets.
-      - MC_HOST_local=http://minioadmin:minioadmin@minio:9000
+      - AWS_ACCESS_KEY_ID=fiapx-dev
+      - AWS_SECRET_ACCESS_KEY=fiapx-dev-secret
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://storage:9000
       - STORAGE_BUCKET=fiapx
     volumes:
-      - ./minio/bootstrap.sh:/bootstrap.sh:ro
+      - ./storage/bootstrap.sh:/bootstrap.sh:ro
     depends_on:
-      minio:
+      storage:
         condition: service_healthy
 
 volumes:
   postgres-data:
-  minio-data:
+  storage-data:
