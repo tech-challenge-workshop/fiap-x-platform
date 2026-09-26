@@ -127,6 +127,7 @@ The spike ran on 2026-09-26 with the Worker's own toolchain: `node:22-alpine` pl
 | `upgrade` | S5's two rules | exit 0; 3 rules |
 | `foreign` | the 3 rules plus `operator-rule` | exit 1; stderr names `operator-rule`; configuration byte-identical |
 | `abort-disabled`, `abort-2-days`, `abort-narrowed`, `abort-extra-expiration` | the abort rule altered accordingly | exit 0; 3 rules exactly as desired |
+| `expire-extra-abort` | `expire-zips` also carrying an `AbortIncompleteMultipartUpload` action (added in T2: it covers the `correct()` half of V36's fix) | exit 0; 3 rules exactly as desired |
 | `policy` | a bucket policy set | exit 1; stderr names the bucket |
 
 ### `scripts/generate-db-script.mjs --check` (GATE-04, GATE-05)

@@ -41,15 +41,17 @@ desired='{"Rules":[
   {"ID":"expire-zips","Status":"Enabled","Filter":{"Prefix":"zips/"},"Expiration":{"Days":7}},
   {"ID":"abort-incomplete-uploads","Status":"Enabled","Filter":{"Prefix":""},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
 ours="ID=='expire-sources' || ID=='expire-zips' || ID=='abort-incomplete-uploads'"
-# A rule counts only when it would actually expire objects as required.
+# A rule counts only when it would actually expire objects as required, and
+# does nothing else: a second action on an owned rule deletes what the rule
+# was never meant to touch, so it is rewritten like a wrong one (V36).
 correct() {
   local id="$1" prefix="$2"
-  lifecycle --query "length(Rules[?ID=='$id' && Status=='Enabled' && Filter.Prefix=='$prefix' && Expiration.Days==\`7\`])"
+  lifecycle --query "length(Rules[?ID=='$id' && Status=='Enabled' && Filter.Prefix=='$prefix' && Expiration.Days==\`7\` && AbortIncompleteMultipartUpload==\`null\` && Transitions==\`null\` && NoncurrentVersionExpiration==\`null\`])"
 }
-# The abort rule counts only when it is enabled, covers the whole bucket and
-# aborts after exactly 1 day.
+# The abort rule counts only when it is enabled, covers the whole bucket,
+# aborts after exactly 1 day and does nothing else.
 abort_correct() {
-  lifecycle --query "length(Rules[?ID=='abort-incomplete-uploads' && Status=='Enabled' && Filter.Prefix=='' && AbortIncompleteMultipartUpload.DaysAfterInitiation==\`1\`])"
+  lifecycle --query "length(Rules[?ID=='abort-incomplete-uploads' && Status=='Enabled' && Filter.Prefix=='' && AbortIncompleteMultipartUpload.DaysAfterInitiation==\`1\` && Expiration==\`null\` && Transitions==\`null\` && NoncurrentVersionExpiration==\`null\`])"
 }
 
 lifecycle() {
@@ -86,7 +88,8 @@ else
 fi
 
 # Read the configuration back: exactly our three rules, all enabled, 7 days
-# on each prefix and an abort after 1 day on the whole bucket.
+# on each prefix and an abort after 1 day on the whole bucket, each with no
+# other action.
 total="$(lifecycle --query 'length(Rules)')"
 if [[ "$total" != 3 || "$(correct expire-sources sources/)" != 1 || "$(correct expire-zips zips/)" != 1 || "$(abort_correct)" != 1 ]]; then
   echo "expected exactly 3 enabled lifecycle rules (7-day expiry on sources/ and zips/, abort of incomplete uploads after 1 day), found: $(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" --output json)" >&2
