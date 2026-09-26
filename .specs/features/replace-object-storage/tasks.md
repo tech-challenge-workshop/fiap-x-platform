@@ -84,12 +84,15 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-02 (P2 AC4)
 
 **Done when**:
-- [ ] stdout is exactly the two keys; two runs leave one object per key
-- [ ] With `storage` stopped it exits 1 naming the service
-- [ ] Quick gate passes
+- [x] stdout is exactly the two keys; two runs leave one object per key
+- [x] With `storage` stopped it exits 1 naming the service
+- [x] Quick gate passes
 
 **Tests**: integration
 **Gate**: quick
+
+**Evidence (2026-09-26)**: two runs each print exactly `sources/sample-8s.mp4` and `sources/not-a-video.mp4`; the bucket then lists one object per key (`sample-8s.mp4` 39863 bytes, `not-a-video.mp4` 66 bytes). With `storage` stopped: exit 1, `object storage (compose service "storage", http://storage:9000) is unreachable`.
+**Status**: ✅ Complete
 
 ---
 
