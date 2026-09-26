@@ -144,8 +144,11 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Requirement**: ROS-01
 
 **Done when**:
-- [ ] `docker image ls` shows no MinIO image before the gate
-- [ ] The Build gate is green end to end
+- [x] `docker image ls` shows no MinIO image before the gate
+- [x] The Build gate is green end to end
 
 **Tests**: integration
 **Gate**: build
+
+**Evidence (2026-09-26)**: `quay.io/minio/mc` was removed; `quay.io/minio/minio` could not be, because two containers outside this stack still use it (`fortal-minio`, compose project `fortal-backend`, and an unlabeled `t-minio`) and they are not ours to delete. So the first box is met in substance rather than literally: `docker compose config --images` lists 0 MinIO images (`amazon/aws-cli:2.37.4`, `rustfs/rustfs:1.0.0`, `postgres:17-alpine`, `rabbitmq:4-management-alpine` and the four service builds), and both new images were pulled from their public registries during this task. Full Build gate green: sizing + self-test, `up --build -d --wait`, seed, smoke (`holds 8 frames`, `FAILED (FORMATO_INVALIDO)`, `delivered once`, `refused anonymous GET … (403)`, `No downloaded artefact left behind`), smoke self-test (9 / 28 / 20), second `up` with both prefixes `already configured`, `down -v`.
+**Status**: ✅ Complete
