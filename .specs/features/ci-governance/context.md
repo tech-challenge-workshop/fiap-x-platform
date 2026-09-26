@@ -6,7 +6,7 @@ Decisions captured on 2026-09-26, before Specify. This feature is **spec D**, th
 
 | Item | Decision |
 | --- | --- |
-| V11: the platform's `integration` job skips the stack when `SERVICES_READ_TOKEN` is absent, and it has never run | All five repositories are **public**, so the job checks the services out without a token. It **always runs** the stack and fails on any failed step, so the "cannot run" case no longer exists. Spec C deferred "running stack-dependent checks in CI" to this feature, so the job runs the build gate's stack steps |
+| V11: the platform's `integration` job skips the stack when `SERVICES_READ_TOKEN` is absent, and it has never run | All five repositories are **public**, so the job checks the services out with no personal access token or secret; `actions/checkout` uses the job's default `GITHUB_TOKEN`. It **always runs** the stack and fails on any failed step, so the "cannot run" case no longer exists. Spec C deferred "running stack-dependent checks in CI" to this feature, so the job runs the build gate's stack steps |
 | V12: `image` is not a required check | The `protect main` rulesets require `quality` and `image` in the four service repositories, and `topology`, `docs-links` and `integration` in the platform |
 | The gap analysis's "Divergências neste documento" | Fixed in the artifact as part of this feature. It is not code and has no requirement ID |
 
@@ -14,7 +14,8 @@ Decisions captured on 2026-09-26, before Specify. This feature is **spec D**, th
 
 | Question | Answer |
 | --- | --- |
-| V11, now that the repositories are public | **Always run, with no token.** This replaces the earlier decision to fail when the job cannot run, which assumed a token was required |
+| V11, now that the repositories are public | **Always run, with no personal access token or secret** (`actions/checkout` uses the job's default `GITHUB_TOKEN`).
+ This replaces the earlier decision to fail when the job cannot run, which assumed a token was required |
 | V12 scope | **`image` in the services, plus every platform job** |
 
 ## Agent's discretion

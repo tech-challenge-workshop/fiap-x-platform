@@ -66,8 +66,11 @@ The script uses the OAuth password grant through the public client `fiapx-cli`. 
 - `in-network iss`: a token requested inside the network, from the `api` container, carries the issuer the API validates.
 - `registration disabled`: the realm refuses self-registration.
 - `h2 on tmpfs`: Keycloak's embedded database is on tmpfs, so a restart re-imports the realm.
-- `api after identity`: compose starts the API only once `identity` is healthy.
+- `api after identity`: compose starts the API only once `identity` is healthy. This is proven by reading `depends_on` … `service_healthy` from the rendered compose, not by observing start times: the rule is declarative, and compose enforces it.
 - `get-token cli`: `node scripts/get-token.mjs alice` prints exactly one JWT line, and names the compose service `identity` when it cannot reach it.
+
+A failure message never quotes a token: any JWT in the output it quotes is shown as `<jwt: N chars>`.
+
 
 Its `--self-test` needs no stack. It gives each check a bad, a near-miss and a good observation and requires the exact message, and spawns the script against an identity nothing listens on, which must exit non-zero naming `identity`. CI's `topology` job and the build gate run it.
 
@@ -233,7 +236,8 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 
 ### CI and the required checks
 
-The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main`, without a token, since they are public. It then runs the build gate's steps 6 to 11 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, and the smoke and identity check again. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
+The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main` with no personal access token or secret, since they are public; `actions/checkout` uses the job's default `GITHUB_TOKEN`.
+ It then runs the build gate's steps 6 to 11 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, and the smoke and identity check again. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
 
 `node scripts/check-ci-governance.mjs` guards that. It fails, naming the job or step, when:
 

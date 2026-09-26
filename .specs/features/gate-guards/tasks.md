@@ -193,13 +193,16 @@ dry run: nothing was changed
 
 **Done when**:
 
-- [ ] Self-test: `token: <jwt>` fails with a message containing `<jwt:` and not the token (near-miss: a JWT inside stderr)
-- [ ] Removing `redact()` makes that case fail
-- [ ] README, spec and context are updated, and docs-links reports 0 unresolved links
-- [ ] Quick gate passes
+- [x] Self-test: `token: <jwt>` fails with a message containing `<jwt:` and not the token (near-miss: a JWT inside stderr)
+- [x] Removing `redact()` makes that case fail
+- [x] README, spec and context are updated, and docs-links reports 0 unresolved links
+- [x] Quick gate passes
 
 **Tests**: self-test
 **Gate**: quick
+
+**Status**: ✅ Complete (2026-09-26). `check-identity` self-test 20 → 23 bad inputs rejected: `token: <real-shaped jwt>` (646 chars), a JWT inside a failed run's stderr, and a JWT printed while identity is unreachable; the two existing cases that quoted a token now expect `<jwt: 49 chars>`. Every rejection must also not contain either token. All seen red first; a scratch copy with `redact()` as the identity fails the same 5 cases. Literal negative: `GET_TOKEN_UNDER_TEST` on a scratch `get-token` printing `token: <jwt>` fails `get-token cli` with `printed "token: <jwt: 472 chars>\n"`, and the token appears 0 times in stdout or stderr. `redact()` also wraps the `docker compose` and `docker inspect` failure messages and every failure line `main()` prints. The README carries the V44 start-order note (and the script's header), a line on redaction, and the V52 wording; `ci-governance/spec.md` (three places, including "anonymously") and `context.md` (two) carry it too. docs-links: `0 unresolved link(s)`.
+
 
 ---
 

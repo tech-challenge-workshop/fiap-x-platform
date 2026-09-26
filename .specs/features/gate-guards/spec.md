@@ -166,9 +166,10 @@ Decisions of 2026-09-26 are in `context.md` beside this spec.
 | GRD-03 | P3: `integration_id` pinned; ruleset tools fully tested (V51) | Execute | Implementing |
 
 | GRD-04 | P4: Expiry-rule scenarios (V42) | Tasks | In Tasks |
-| GRD-05 | P5: No token in failures (V43) | Tasks | In Tasks |
+| GRD-05 | P5: No token in failures (V43) | Execute | Implementing |
 | GRD-06 | P5: Observations prove their record; `failureReason` via the API (V44) | Tasks | In Tasks |
-| GRD-07 | P6: Wording (V52) | Tasks | In Tasks |
+| GRD-07 | P6: Wording (V52) | Execute | Implementing |
+
 
 **ID format:** `[CATEGORY]-[NUMBER]`
 
