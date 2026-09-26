@@ -30,47 +30,57 @@ fi
 echo "bucket $bucket is private"
 
 # 7-day retention for both prefixes (docs/foudation.md). put-bucket-lifecycle
-# replaces the whole configuration, so it is written only when a rule of ours
-# is missing and no foreign rule would be lost; a foreign rule fails instead.
+# replaces the whole configuration, so it is written only when every rule in
+# the bucket is one of ours. Rules are identified by ID, not by prefix: a rule
+# with a whole-bucket or compound filter has no top-level prefix, and matching
+# on prefixes let the put silently delete it.
 desired='{"Rules":[
   {"ID":"expire-sources","Status":"Enabled","Filter":{"Prefix":"sources/"},"Expiration":{"Days":7}},
   {"ID":"expire-zips","Status":"Enabled","Filter":{"Prefix":"zips/"},"Expiration":{"Days":7}}]}'
-
-# One prefix per word: aws-cli's text output separates values with tabs.
-prefixes() {
-  aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" \
-    --query 'Rules[].Filter.Prefix' --output text 2>/dev/null | tr '\t' ' ' || true
+ours="ID=='expire-sources' || ID=='expire-zips'"
+# A rule counts only when it would actually expire objects as required.
+correct() {
+  local id="$1" prefix="$2"
+  lifecycle --query "length(Rules[?ID=='$id' && Status=='Enabled' && Filter.Prefix=='$prefix' && Expiration.Days==\`7\`])"
 }
 
-present="$(prefixes)"
-foreign=""
-for prefix in $present; do
-  [[ "$prefix" == "sources/" || "$prefix" == "zips/" ]] || foreign="$foreign $prefix"
-done
-if [[ -n "$foreign" ]]; then
-  echo "bucket $bucket has lifecycle rules this bootstrap does not own (prefixes:$foreign); refusing to overwrite them" >&2
+lifecycle() {
+  aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" --output text "$@"
+}
+
+# "No configuration" is the only read failure that means "none yet"; any
+# other error must stop the bootstrap rather than be taken as an empty
+# configuration and overwritten.
+if read_error="$(lifecycle --query 'length(Rules)' 2>&1)"; then
+  total="$read_error"
+elif [[ "$read_error" == *NoSuchLifecycleConfiguration* ]]; then
+  total=0
+else
+  echo "could not read the lifecycle configuration of bucket $bucket: $read_error" >&2
   exit 1
 fi
 
-missing=0
-for prefix in sources/ zips/; do
-  if [[ " $present " == *" $prefix "* ]]; then
-    echo "retention on $prefix already configured"
-  else
-    missing=1
+if [[ "$total" != 0 ]]; then
+  owned="$(lifecycle --query "length(Rules[?$ours])")"
+  if [[ "$owned" != "$total" ]]; then
+    echo "bucket $bucket has $((total - owned)) lifecycle rule(s) this bootstrap does not own (IDs: $(lifecycle --query "Rules[?!($ours)].ID" | tr '\t' ' ')); refusing to overwrite them" >&2
+    exit 1
   fi
-done
-if [[ "$missing" == 1 ]]; then
+fi
+
+if [[ "$total" == 2 && "$(correct expire-sources sources/)" == 1 && "$(correct expire-zips zips/)" == 1 ]]; then
+  echo "retention on sources/ already configured"
+  echo "retention on zips/ already configured"
+else
   aws s3api put-bucket-lifecycle-configuration --bucket "$bucket" --lifecycle-configuration "$desired"
   echo "retention on sources/ and zips/ configured"
 fi
 
-# Read the configuration back: exactly two rules, both at 7 days, one per prefix.
-rules="$(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" --query 'length(Rules)' --output text)"
-seven="$(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" --query 'length(Rules[?Expiration.Days==`7`])' --output text)"
-covered="$(prefixes | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
-if [[ "$rules" != 2 || "$seven" != 2 || "$covered" != "sources/ zips/ " ]]; then
-  echo "expected 2 lifecycle rules at 7 days on sources/ and zips/, found $rules rules ($seven at 7 days) on: $covered" >&2
+# Read the configuration back: exactly our two rules, both enabled, 7 days,
+# one per prefix.
+total="$(lifecycle --query 'length(Rules)')"
+if [[ "$total" != 2 || "$(correct expire-sources sources/)" != 1 || "$(correct expire-zips zips/)" != 1 ]]; then
+  echo "expected exactly 2 enabled 7-day lifecycle rules on sources/ and zips/, found: $(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" --output json)" >&2
   exit 1
 fi
 echo "bucket $bucket expires sources/ and zips/ after 7 days"

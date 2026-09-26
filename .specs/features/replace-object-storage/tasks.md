@@ -31,6 +31,7 @@ T2 -> T3
 T3 -> T4
 T4 -> T6
 T5 -> T6
+T6 -> T7
 ```
 
 T1 to T4 must land together before a Build gate can pass (the stack needs the new service, bootstrap, seed and smoke), so T1–T3 run the Quick gate and T4 runs the Build gate for all four.
@@ -151,4 +152,25 @@ T1 to T4 must land together before a Build gate can pass (the stack needs the ne
 **Gate**: build
 
 **Evidence (2026-09-26)**: `quay.io/minio/mc` was removed; `quay.io/minio/minio` could not be, because two containers outside this stack still use it (`fortal-minio`, compose project `fortal-backend`, and an unlabeled `t-minio`) and they are not ours to delete. So the first box is met in substance rather than literally: `docker compose config --images` lists 0 MinIO images (`amazon/aws-cli:2.37.4`, `rustfs/rustfs:1.0.0`, `postgres:17-alpine`, `rabbitmq:4-management-alpine` and the four service builds), and both new images were pulled from their public registries during this task. Full Build gate green: sizing + self-test, `up --build -d --wait`, seed, smoke (`holds 8 frames`, `FAILED (FORMATO_INVALIDO)`, `delivered once`, `refused anonymous GET … (403)`, `No downloaded artefact left behind`), smoke self-test (9 / 28 / 20), second `up` with both prefixes `already configured`, `down -v`.
+**Status**: ✅ Complete
+
+---
+
+### T7: Identify lifecycle rules by ID and require them enabled (Verifier fix)
+
+**What**: Close the two AC3 gaps the first Verifier run found: foreign rules with no top-level prefix were invisible and deleted by the `put`, and a `Disabled` rule of ours passed the read-back while reporting "expires after 7 days".
+**Where**: `storage/bootstrap.sh`
+**Depends on**: T6
+**Requirement**: ROS-02 (P2 AC3), S4 RM-03
+
+**Done when**:
+- [x] A rule is ours only by ID (`expire-sources`, `expire-zips`); any other rule — prefix, whole-bucket `Filter:{}`, `Filter.And`, or no ID — makes the bootstrap exit 1 naming it, and the configuration is left intact
+- [x] Ours count only when `Enabled`, on the right prefix and at 7 days; otherwise they are rewritten, and the read-back requires exactly those two
+- [x] Reading the configuration distinguishes `NoSuchLifecycleConfiguration` (none yet) from any other error, which stops the bootstrap instead of being taken as empty
+- [x] Build gate passes
+
+**Evidence (2026-09-26)**, nine cases on RustFS 1.0.0: fresh → configured; re-run → `already configured` ×2; whole-bucket foreign `keep-me` + ours → exit 1 naming `keep-me`, still present afterwards; `Filter.And` foreign `tagged` → exit 1, still present; prefix foreign `x` → exit 1; ours `Disabled` → rewritten to `Enabled`; ours at 30 days → rewritten to 7; only `zips/` → both restored; none → both written. Read back as `expire-sources Enabled sources/ 7`, `expire-zips Enabled zips/ 7`.
+
+**Tests**: integration
+**Gate**: build
 **Status**: ✅ Complete
