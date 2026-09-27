@@ -135,6 +135,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS uq_processing_request_owner_source
         ON processing_request (owner_user_id, source_storage_key);
 
+-- from 1789958000000-AddOwnerEmail.ts
+ALTER TABLE processing_request
+        ADD COLUMN IF NOT EXISTS owner_email text NOT NULL DEFAULT '';
+
+ALTER TABLE processing_request ALTER COLUMN owner_email DROP DEFAULT;
+
 -- ============================================================
 -- notification-service (schema: notification)
 -- ============================================================
@@ -154,5 +160,10 @@ CREATE TABLE IF NOT EXISTS delivery_record (
 
 CREATE INDEX IF NOT EXISTS idx_delivery_record_request
         ON delivery_record (processing_request_id);
+
+-- from 1789959000000-AddEmailOutcome.ts
+ALTER TABLE delivery_record
+        ADD COLUMN IF NOT EXISTS email_sent_at timestamptz NULL,
+        ADD COLUMN IF NOT EXISTS email_error   text        NULL;
 
 RESET search_path;
