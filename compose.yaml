@@ -176,7 +176,9 @@ services:
     ports:
       - "8025:8025"
     healthcheck:
-      test: ["CMD", "mailpit", "readyz"]
+      # Absolute path: the image puts the binary at /mailpit, not on PATH
+      # (confirmed by `docker exec ... which mailpit` failing).
+      test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
       timeout: 3s
       retries: 10
