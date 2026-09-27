@@ -28,6 +28,15 @@ const FAILURE_REASONS = {
   PROCESSAMENTO_FALHOU: PROCESSAMENTO_FALHOU_REASON,
 };
 
+// identity/fiapx-realm.json: each demo user's email, exactly as it sits on
+// the OIDC `email` claim AD-015 resolves the recipient from. A failure email
+// addressed to anything else means the wrong claim, or the wrong owner, was
+// resolved - even when exactly one message matched the request's id.
+const OWNER_EMAILS = {
+  alice: 'alice@fiapx.local',
+  bob: 'bob@fiapx.local',
+};
+
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
 const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
@@ -317,11 +326,16 @@ function deliveriesOf(queried, out) {
 // actually filters: a non-matching query answers `count: 0`, and its `count`
 // is the number of matches, the same value as `messages.length`. The id
 // travels as a query parameter, never mail content compared by hand.
+// AD-015 is proved client-side, on the message already fetched: each
+// message's `To` is an array of `{ Address, Name }` (confirmed live), so the
+// first match's `To[0].Address` is kept for the check to compare against the
+// request's owner - no server-side `to:` query filter, whose operator syntax
+// this feature already got wrong once (query vs /api/v1/search).
 async function searchMailpit(processingRequestId) {
   const res = await fetch(`${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(processingRequestId)}`);
   if (!res.ok) throw new Error(`Mailpit search for ${processingRequestId} failed: ${res.status}`);
   const body = await res.json();
-  return { id: processingRequestId, count: body.count };
+  return { id: processingRequestId, count: body.count, to: body.messages?.[0]?.To?.[0]?.Address };
 }
 
 // Exactly one: none means the email never landed, two means it landed twice,
@@ -329,6 +343,17 @@ async function searchMailpit(processingRequestId) {
 function assertExactlyOneMessage(processingRequestId, count) {
   if (count !== 1) {
     throw new Error(`Mailpit holds ${count} message(s) for ${processingRequestId}, expected exactly 1`);
+  }
+}
+
+// AD-015: the SMTP recipient must be the request owner's email, resolved
+// from the JWT's `email` claim. Matching the id alone (assertExactlyOneMessage)
+// proves nothing about who it was addressed to - an implementation that
+// resolved the wrong claim (e.g. `preferred_username`) would still pass that
+// check, so the recipient is asserted separately, naming what was expected.
+function assertRecipient(processingRequestId, expectedEmail, actualEmail) {
+  if (actualEmail !== expectedEmail) {
+    throw new Error(`Mailpit message for ${processingRequestId}: expected recipient ${JSON.stringify(expectedEmail)}, found ${JSON.stringify(actualEmail)}`);
   }
 }
 
@@ -893,14 +918,21 @@ function describe(request) {
 }
 
 // The delivery record, with `id` taken from the record's own
-// processingRequestId.
+// processingRequestId. notification-service's recordDelivery persists this
+// row BEFORE attemptEmail sends, so the row existing is not enough: this also
+// polls for emailSentAt or emailError, whichever the attempt ends with, so a
+// caller that goes on to search Mailpit never reads it ahead of the send.
 async function waitForNotificationDelivery(id) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const res = await fetch(`${NOTIFICATION_URL}/local/deliveries/${id}`);
     if (res.status === 200) {
       const record = await res.json();
-      return { id: record.processingRequestId, ...record };
+      if (record.emailSentAt || record.emailError) {
+        return { id: record.processingRequestId, ...record };
+      }
+      await sleep(POLL_INTERVAL_MS);
+      continue;
     }
     if (res.status === 404) {
       await sleep(POLL_INTERVAL_MS);
@@ -908,7 +940,7 @@ async function waitForNotificationDelivery(id) {
     }
     throw new Error(`Notification observation failed: ${res.status}`);
   }
-  throw new Error('Notification delivery record was not created');
+  throw new Error(`Notification delivery record for ${id} was not created, or its email attempt (emailSentAt/emailError) never completed, after ${POLL_TIMEOUT_MS} ms`);
 }
 
 // A check reads what an earlier observe stored. A value that was never
@@ -1161,12 +1193,18 @@ export const SMOKE_STEPS = [
   {
     name: 'failure email',
     // RF-5's Definition of Done, proved as a black box: the failure email is
-    // visible in Mailpit, and it is visible exactly once.
+    // visible in Mailpit, visible exactly once, and addressed to the
+    // request's owner (AD-015) - alice, for the non-video fixture.
     observe: async (ctx) => {
       ctx.failureEmails = await searchMailpit(ctx.rejectedId);
     },
-    check: (ctx) => assertExactlyOneMessage(observed(ctx, 'rejectedId'), observedFor(ctx, 'failureEmails', 'rejectedId').count),
-    report: (ctx) => `Mailpit holds exactly one failure email for ${ctx.rejectedId}`,
+    check: (ctx) => {
+      const rejectedId = observed(ctx, 'rejectedId');
+      const email = observedFor(ctx, 'failureEmails', 'rejectedId');
+      assertExactlyOneMessage(rejectedId, email.count);
+      assertRecipient(rejectedId, OWNER_EMAILS.alice, email.to);
+    },
+    report: (ctx) => `Mailpit holds exactly one failure email for ${ctx.rejectedId}, addressed to ${ctx.failureEmails.to}`,
   },
   {
     name: 'processing failure',
@@ -1211,11 +1249,18 @@ export const SMOKE_STEPS = [
   },
   {
     name: 'processing failure email',
+    // The corrupted-video fixture is alice's too (see "processing failure"),
+    // so its recipient is asserted against the same owner.
     observe: async (ctx) => {
       ctx.processingFailureEmails = await searchMailpit(ctx.failedId);
     },
-    check: (ctx) => assertExactlyOneMessage(observed(ctx, 'failedId'), observedFor(ctx, 'processingFailureEmails', 'failedId').count),
-    report: (ctx) => `Mailpit holds exactly one failure email for ${ctx.failedId}`,
+    check: (ctx) => {
+      const failedId = observed(ctx, 'failedId');
+      const email = observedFor(ctx, 'processingFailureEmails', 'failedId');
+      assertExactlyOneMessage(failedId, email.count);
+      assertRecipient(failedId, OWNER_EMAILS.alice, email.to);
+    },
+    report: (ctx) => `Mailpit holds exactly one failure email for ${ctx.failedId}, addressed to ${ctx.processingFailureEmails.to}`,
   },
   {
     name: 'processing failure reason',
@@ -1543,6 +1588,14 @@ async function selfTest() {
       'Mailpit holds 0 message(s) for req-1, expected exactly 1'],
     ['2 Mailpit messages for a request', () => assertExactlyOneMessage('req-1', 2),
       'Mailpit holds 2 message(s) for req-1, expected exactly 1'],
+    // AD-015: an email addressed to another user, or to the wrong claim
+    // resolved as an address, must fail naming both.
+    ['Mailpit message addressed to another user', () => assertRecipient('req-1', OWNER_EMAILS.alice, OWNER_EMAILS.bob),
+      `Mailpit message for req-1: expected recipient ${JSON.stringify(OWNER_EMAILS.alice)}, found ${JSON.stringify(OWNER_EMAILS.bob)}`],
+    ['Mailpit message addressed to the wrong claim', () => assertRecipient('req-1', OWNER_EMAILS.alice, 'alice'),
+      `Mailpit message for req-1: expected recipient ${JSON.stringify(OWNER_EMAILS.alice)}, found ${JSON.stringify('alice')}`],
+    ['Mailpit message with no recipient captured', () => assertRecipient('req-1', OWNER_EMAILS.alice, undefined),
+      `Mailpit message for req-1: expected recipient ${JSON.stringify(OWNER_EMAILS.alice)}, found undefined`],
     ['archive present for the rejected request', () => assertNoArchiveListing(id, archiveKeys(id)),
       `Rejected request ${id} left an archive under zips/${id}/:\n${archiveKeys(id).join('\n')}`],
     ['anonymous GET of the object answered 200', () => assertAnonymousRefused(objectUrl, 200),
@@ -1694,6 +1747,7 @@ async function selfTest() {
     ['rejected request FAILED (FORMATO_INVALIDO)', () => assertRejected(id, { status: 'FAILED', failureCode: 'FORMATO_INVALIDO' })],
     ['1 delivery', () => assertSingleDelivery(id, 1)],
     ['1 Mailpit message for a request', () => assertExactlyOneMessage('req-1', 1)],
+    ['Mailpit message addressed to the right recipient', () => assertRecipient('req-1', OWNER_EMAILS.alice, OWNER_EMAILS.alice)],
     ['no archive for the rejected request', () => assertNoArchiveListing(id, [])],
     ['anonymous GET refused with 403', () => assertAnonymousRefused(objectUrl, 403)],
     ['temp directory gone', () => assertScratchRemoved(leftover, false)],
@@ -1778,7 +1832,7 @@ async function selfTest() {
     videoDelivery: { id, status: 'COMPLETED', zipStorageKey: zipKey },
     delivery: { id: rejectedId, status: 'FAILED', failureReason: sentence },
     deliveries: deliveriesOf(rejectedId, `${rejectedId}|1\n`),
-    failureEmails: { id: rejectedId, count: 1 },
+    failureEmails: { id: rejectedId, count: 1, to: OWNER_EMAILS.alice },
     bobUpload,
     bobId,
     aliceList: lists.aliceList,
@@ -1795,7 +1849,7 @@ async function selfTest() {
     failedListing: listingOf(failedId, 'None\n'),
     failedDelivery: { id: failedId, status: 'FAILED', failureReason: processingSentence },
     failedDeliveries: deliveriesOf(failedId, `${failedId}|1\n`),
-    processingFailureEmails: { id: failedId, count: 1 },
+    processingFailureEmails: { id: failedId, count: 1, to: OWNER_EMAILS.alice },
     failedRead: failedRead(processingSentence),
   };
   const stepRejections = [
@@ -1885,6 +1939,11 @@ async function selfTest() {
       `Mailpit holds 2 message(s) for ${rejectedId}, expected exactly 1`],
     ['failure email', { failureEmails: { ...good.failureEmails, id } },
       `failureEmails observed for ${id}, expected ${rejectedId}`],
+    // AD-015: exactly one message matching the id is not enough - it must be
+    // addressed to the request's owner, alice, or an implementation resolving
+    // the wrong claim would still pass.
+    ['failure email', { failureEmails: { ...good.failureEmails, to: OWNER_EMAILS.bob } },
+      `Mailpit message for ${rejectedId}: expected recipient ${JSON.stringify(OWNER_EMAILS.alice)}, found ${JSON.stringify(OWNER_EMAILS.bob)}`],
     ['confirmation replay', { replay: { status: 201, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } }, totalAfterReplay: 4 },
       `Replay created a request: ${replayCall} returned 201, expected 200`],
     ['confirmation replay', { replay: { status: 200, body: { processingRequestId: `${id}-2`, status: 'RECEIVED' } } },
@@ -1960,6 +2019,8 @@ async function selfTest() {
       `Mailpit holds 2 message(s) for ${failedId}, expected exactly 1`],
     ['processing failure email', { processingFailureEmails: { ...good.processingFailureEmails, id: rejectedId } },
       `processingFailureEmails observed for ${rejectedId}, expected ${failedId}`],
+    ['processing failure email', { processingFailureEmails: { ...good.processingFailureEmails, to: OWNER_EMAILS.bob } },
+      `Mailpit message for ${failedId}: expected recipient ${JSON.stringify(OWNER_EMAILS.alice)}, found ${JSON.stringify(OWNER_EMAILS.bob)}`],
     ['processing failure archive', { failedListing: listingOf(failedId, archiveKeys(rejectedId).join('\t')) },
       `failedListing observed for ${rejectedId}, expected ${failedId}`],
     ['no archive', { rejectedListing: listingOf(rejectedId, archiveKeys(id).join('\t')) },
