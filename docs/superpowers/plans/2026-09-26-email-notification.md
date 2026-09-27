@@ -950,7 +950,7 @@ if (!ownerEmail) {
 }
 ```
 
-(Leave the rest of the method's current body untouched for this task — Task 12 is where the send logic is added. For now `record.ownerUserId = event.ownerUserId;` stays as the only owner-identifying field written to `DeliveryRecord`; Task 12 does not need a stored `ownerEmail` column since it is read straight off the validated `event` at send time, not persisted redundantly.)
+(Leave the rest of the method's current body untouched for this task — Task 13 is where the send logic is added. For now `record.ownerUserId = event.ownerUserId;` stays as the only owner-identifying field written to `DeliveryRecord`; Task 13 does not need a stored `ownerEmail` column since it is read straight off the validated `event` at send time, not persisted redundantly.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1521,14 +1521,144 @@ git commit -m "feat(notification): add SmtpEmailSender adapter using nodemailer"
 
 ---
 
-## Task 12: `notification-service` — wire the send into `NotificationDeliveryService`, crash-safe
+## Task 12: `notification-service` — wire `EMAIL_SENDER` into `NotificationsModule`
+
+**Ordering note (pre-flight ruling):** this task is dispatched *before* the task that changes `NotificationDeliveryService`'s constructor to require `EMAIL_SENDER` (below, now Task 13), even though it reads as the natural follow-on to the ports/adapters built in Tasks 9-11. Reason: `test/app.e2e-spec.ts` boots the real `AppModule` (which imports `NotificationsModule`) through Nest's DI container. If the constructor started requiring `@Inject(EMAIL_SENDER)` before any provider supplied that token, `AppModule` would fail to bootstrap and every e2e test would break until the module-wiring task landed. Wiring the (for now unused) provider first means it is already available the moment something asks for it.
+
+**Files:**
+- Create: `notification-service/src/notifications/infrastructure/email/smtp-config.ts`
+- Modify: `notification-service/src/notifications/notifications.module.ts`
+- Test: `notification-service/src/notifications/infrastructure/email/smtp-config.spec.ts`
+
+**Interfaces:**
+- Consumes: `EMAIL_SENDER` token and `InMemoryEmailSender` from Task 9; `SmtpEmailSender`/`SmtpOptions` from Task 11.
+- Produces: `isSmtpConfigured(): boolean`; `buildSmtpOptions(): SmtpOptions`; `NotificationsModule` provides `EMAIL_SENDER` (unused until Task 13, harmless in the meantime).
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// smtp-config.spec.ts
+import { buildSmtpOptions, isSmtpConfigured } from './smtp-config';
+
+describe('smtp-config', () => {
+  const ORIGINAL_ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('is not configured when SMTP_HOST is unset', () => {
+    delete process.env.SMTP_HOST;
+    expect(isSmtpConfigured()).toBe(false);
+  });
+
+  it('is configured when SMTP_HOST is set', () => {
+    process.env.SMTP_HOST = 'mailpit';
+    expect(isSmtpConfigured()).toBe(true);
+  });
+
+  it('builds options from env, with defaults for port and from', () => {
+    process.env.SMTP_HOST = 'mailpit';
+    delete process.env.SMTP_PORT;
+    delete process.env.SMTP_FROM;
+
+    expect(buildSmtpOptions()).toEqual({
+      host: 'mailpit',
+      port: 1025,
+      from: 'fiapx@local',
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- smtp-config.spec.ts`
+Expected: FAIL — module doesn't exist.
+
+- [ ] **Step 3: Implement**
+
+`smtp-config.ts`:
+
+```ts
+import { SmtpOptions } from './smtp-email-sender';
+
+export function isSmtpConfigured(): boolean {
+  return Boolean(process.env.SMTP_HOST);
+}
+
+export function buildSmtpOptions(): SmtpOptions {
+  return {
+    host: process.env.SMTP_HOST ?? 'localhost',
+    port: Number(process.env.SMTP_PORT ?? 1025),
+    from: process.env.SMTP_FROM ?? 'fiapx@local',
+  };
+}
+```
+
+`notifications.module.ts` — add the provider alongside the existing `dataSourceProvider`:
+
+```ts
+import { EMAIL_SENDER } from './domain/email-sender.token';
+import { InMemoryEmailSender } from './infrastructure/email/in-memory-email-sender';
+import { SmtpEmailSender } from './infrastructure/email/smtp-email-sender';
+import { buildSmtpOptions, isSmtpConfigured } from './infrastructure/email/smtp-config';
+```
+
+```ts
+const emailSenderProvider = {
+  provide: EMAIL_SENDER,
+  useFactory: () =>
+    isSmtpConfigured()
+      ? new SmtpEmailSender(buildSmtpOptions())
+      : new InMemoryEmailSender(),
+};
+```
+
+```ts
+@Module({
+  controllers: [TerminalEventConsumer],
+  providers: [
+    NotificationDeliveryService,
+    dataSourceProvider,
+    emailSenderProvider,
+    {
+      provide: DELIVERY_REPOSITORY,
+      useFactory: (dataSource?: DataSource) =>
+        dataSource
+          ? new TypeOrmDeliveryRepository(dataSource)
+          : new InMemoryDeliveryRepository(),
+      inject: [DATA_SOURCE],
+    },
+  ],
+  exports: [DELIVERY_REPOSITORY, DATA_SOURCE],
+})
+export class NotificationsModule {}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: same command as Step 2. Then run the full unit and e2e suites (`npm test && npm run test:e2e`) to confirm `AppModule` still boots with no `SMTP_HOST` set (falls back to `InMemoryEmailSender`, same as the database's existing fallback). Nothing consumes `EMAIL_SENDER` yet, so this is confirming the provider itself is well-formed, not yet the send path.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/notifications/infrastructure/email/smtp-config.ts \
+        src/notifications/infrastructure/email/smtp-config.spec.ts \
+        src/notifications/notifications.module.ts
+git commit -m "feat(notification): wire EMAIL_SENDER into NotificationsModule"
+```
+
+---
+
+## Task 13: `notification-service` — wire the send into `NotificationDeliveryService`, crash-safe
 
 **Files:**
 - Modify: `notification-service/src/notifications/application/notification-delivery.service.ts`
+- Modify: `notification-service/test/durable-persistence.e2e-spec.ts` (its `beforeAll` constructs `NotificationDeliveryService` directly, bypassing Nest DI — the second constructor argument added below must be passed there too, or this file stops compiling)
 - Test: `notification-service/src/notifications/application/notification-delivery.service.spec.ts`
 
 **Interfaces:**
-- Consumes: `EmailSender`/`InMemoryEmailSender` from Task 9, templates from Task 10, `DeliveryRepository.updateEmailOutcome` from Task 8.
+- Consumes: `EmailSender`/`InMemoryEmailSender` from Task 9, templates from Task 10, `DeliveryRepository.updateEmailOutcome` from Task 8, the now-available `EMAIL_SENDER` provider from Task 12.
 - Produces: `NotificationDeliveryService` constructor gains `emailSender: EmailSender` as its second argument. **This is the core requirement of the whole feature (EN-11 through EN-20).**
 
 - [ ] **Step 1: Write the failing tests**
@@ -1546,6 +1676,19 @@ beforeEach(() => {
 ```
 
 (Add `import { InMemoryEmailSender } from '../infrastructure/email/in-memory-email-sender';` at the top. Also add `updateEmailOutcome` to `StubDeliveryRepository`, mirroring the in-memory adapter's implementation from Task 8, since `StubDeliveryRepository` is this spec file's own local double, not the real `InMemoryDeliveryRepository`.)
+
+Also update `test/durable-persistence.e2e-spec.ts`'s `beforeAll`, which constructs the real class directly against real Postgres:
+
+```ts
+import { InMemoryEmailSender } from '../src/notifications/infrastructure/email/in-memory-email-sender';
+```
+
+```ts
+repository = new TypeOrmDeliveryRepository(dataSource);
+service = new NotificationDeliveryService(repository, new InMemoryEmailSender());
+```
+
+(Without this, the file fails to type-check the moment the constructor below gains a required second parameter — it currently calls `new NotificationDeliveryService(repository)` with one argument.)
 
 Add a new `describe('email sending', ...)` block:
 
@@ -1731,138 +1874,15 @@ export class NotificationDeliveryService {
 Run: same command as Step 2.
 Expected: PASS. If the parenthetical above's concern is real (the short error message isn't actually truncated), lengthen the test's rejected error message until the truncation is genuinely exercised, and re-run.
 
+Also run `npm run build` (or `npm run typecheck`) to confirm `test/durable-persistence.e2e-spec.ts` still compiles now that the constructor takes two arguments — that file's own gated integration run (`DATABASE_HOST=...`) is optional here since Task 8 already exercises `updateEmailOutcome` against real Postgres, but the type error would otherwise slip past a plain `npm test`, which does not compile the `test/` directory.
+
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/notifications/application/notification-delivery.service.ts \
-        src/notifications/application/notification-delivery.service.spec.ts
+        src/notifications/application/notification-delivery.service.spec.ts \
+        test/durable-persistence.e2e-spec.ts
 git commit -m "feat(notification): send exactly one email per terminal event, crash-safely"
-```
-
----
-
-## Task 13: `notification-service` — wire `EMAIL_SENDER` into `NotificationsModule`
-
-**Files:**
-- Create: `notification-service/src/notifications/infrastructure/email/smtp-config.ts`
-- Modify: `notification-service/src/notifications/notifications.module.ts`
-- Test: `notification-service/src/notifications/infrastructure/email/smtp-config.spec.ts`
-
-**Interfaces:**
-- Produces: `isSmtpConfigured(): boolean`; `buildSmtpOptions(): SmtpOptions`; `NotificationsModule` provides `EMAIL_SENDER`.
-
-- [ ] **Step 1: Write the failing tests**
-
-```ts
-// smtp-config.spec.ts
-import { buildSmtpOptions, isSmtpConfigured } from './smtp-config';
-
-describe('smtp-config', () => {
-  const ORIGINAL_ENV = { ...process.env };
-  afterEach(() => {
-    process.env = { ...ORIGINAL_ENV };
-  });
-
-  it('is not configured when SMTP_HOST is unset', () => {
-    delete process.env.SMTP_HOST;
-    expect(isSmtpConfigured()).toBe(false);
-  });
-
-  it('is configured when SMTP_HOST is set', () => {
-    process.env.SMTP_HOST = 'mailpit';
-    expect(isSmtpConfigured()).toBe(true);
-  });
-
-  it('builds options from env, with defaults for port and from', () => {
-    process.env.SMTP_HOST = 'mailpit';
-    delete process.env.SMTP_PORT;
-    delete process.env.SMTP_FROM;
-
-    expect(buildSmtpOptions()).toEqual({
-      host: 'mailpit',
-      port: 1025,
-      from: 'fiapx@local',
-    });
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- smtp-config.spec.ts`
-Expected: FAIL — module doesn't exist.
-
-- [ ] **Step 3: Implement**
-
-`smtp-config.ts`:
-
-```ts
-import { SmtpOptions } from './smtp-email-sender';
-
-export function isSmtpConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST);
-}
-
-export function buildSmtpOptions(): SmtpOptions {
-  return {
-    host: process.env.SMTP_HOST ?? 'localhost',
-    port: Number(process.env.SMTP_PORT ?? 1025),
-    from: process.env.SMTP_FROM ?? 'fiapx@local',
-  };
-}
-```
-
-`notifications.module.ts` — add the provider alongside the existing `dataSourceProvider`:
-
-```ts
-import { EMAIL_SENDER } from './domain/email-sender.token';
-import { InMemoryEmailSender } from './infrastructure/email/in-memory-email-sender';
-import { SmtpEmailSender } from './infrastructure/email/smtp-email-sender';
-import { buildSmtpOptions, isSmtpConfigured } from './infrastructure/email/smtp-config';
-```
-
-```ts
-const emailSenderProvider = {
-  provide: EMAIL_SENDER,
-  useFactory: () =>
-    isSmtpConfigured()
-      ? new SmtpEmailSender(buildSmtpOptions())
-      : new InMemoryEmailSender(),
-};
-```
-
-```ts
-@Module({
-  controllers: [TerminalEventConsumer],
-  providers: [
-    NotificationDeliveryService,
-    dataSourceProvider,
-    emailSenderProvider,
-    {
-      provide: DELIVERY_REPOSITORY,
-      useFactory: (dataSource?: DataSource) =>
-        dataSource
-          ? new TypeOrmDeliveryRepository(dataSource)
-          : new InMemoryDeliveryRepository(),
-      inject: [DATA_SOURCE],
-    },
-  ],
-  exports: [DELIVERY_REPOSITORY, DATA_SOURCE],
-})
-export class NotificationsModule {}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: same command as Step 2. Then run the full unit and e2e suites (`npm test && npm run test:e2e`) to confirm `AppModule` still boots with no `SMTP_HOST` set (falls back to `InMemoryEmailSender`, same as the database's existing fallback).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/notifications/infrastructure/email/smtp-config.ts \
-        src/notifications/infrastructure/email/smtp-config.spec.ts \
-        src/notifications/notifications.module.ts
-git commit -m "feat(notification): wire EMAIL_SENDER into NotificationsModule"
 ```
 
 ---
