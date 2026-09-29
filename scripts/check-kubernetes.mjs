@@ -941,8 +941,12 @@ function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
-  selfTest();
-} else {
-  main();
+// Only when run as a script: the up command and the smoke may import the
+// parser and the rules.
+if (process.argv[1] === SELF) {
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+  } else {
+    main();
+  }
 }
