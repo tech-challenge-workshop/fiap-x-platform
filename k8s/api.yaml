@@ -1,0 +1,152 @@
+# The FIAP X API on the cluster: the Compose `api` service with the image CI
+# publishes on main (kustomize maps `fiap-x-api` to
+# ghcr.io/tech-challenge-workshop/fiap-x-api:main).
+#
+# The issuer is the public hostname identity is pinned to
+# (http://localhost:8080, published by the kind port map), so a token
+# requested from the host validates here; the key set comes from the internal
+# address identity:8080. Two storage addresses, as in Compose: the API's own
+# calls go to storage:9000, and the URLs it signs name the host port, read
+# from ConfigMap `fiapx-host` (STORAGE_PUBLIC_ENDPOINT), which
+# scripts/k8s-up.mjs writes from the same STORAGE_HOST_PORT that renders the
+# kind port map. The storage keys come from Secret `fiapx-storage`.
+#
+# Kubernetes has no `service_completed_successfully`: the init container
+# `wait-for-bucket` polls the bucket with aws-cli until storage-init has made
+# it, so the API never starts against a missing bucket.
+#
+# Two Services: `api` for the pods and `api-host` on nodePort 30000, which
+# the kind port map publishes on host port 3000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-host
+  labels:
+    app: api
+spec:
+  type: NodePort
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      nodePort: 30000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      initContainers:
+        - name: wait-for-bucket
+          image: amazon/aws-cli:2.37.4
+          command:
+            - /bin/bash
+            - -c
+            - until aws s3api head-bucket --bucket fiapx >/dev/null 2>&1; do echo "waiting for bucket fiapx"; sleep 2; done
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: SECRET_KEY
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://storage:9000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: api
+          image: fiap-x-api
+          imagePullPolicy: Always
+          env:
+            - name: PORT
+              value: "3000"
+            - name: CATALOG_BASE_URL
+              value: http://catalog:3001
+            - name: OIDC_ISSUER
+              value: http://localhost:8080/realms/fiapx
+            - name: OIDC_AUDIENCE
+              value: fiapx-api
+            - name: OIDC_JWKS_URL
+              value: http://identity:8080/realms/fiapx/protocol/openid-connect/certs
+            - name: STORAGE_ENDPOINT
+              value: http://storage:9000
+            - name: STORAGE_PUBLIC_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: fiapx-host
+                  key: STORAGE_PUBLIC_ENDPOINT
+            - name: STORAGE_BUCKET
+              value: fiapx
+            - name: STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: ACCESS_KEY
+            - name: STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: SECRET_KEY
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

@@ -1,0 +1,5 @@
+# Every FIAP X workload runs in this namespace; KEDA keeps its own (`keda`).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fiapx

@@ -1,0 +1,61 @@
+# The Compose `storage-init` one-shot on the cluster: storage/bootstrap.sh
+# (from the generated ConfigMap `fiapx-storage-bootstrap`) makes the bucket,
+# asserts it has no policy and writes its retention rules, through plain
+# aws-cli against storage:9000 with the keys of Secret `fiapx-storage`.
+#
+# Kubernetes has no `service_completed_successfully`: nothing here waits for
+# storage. The Job simply fails while storage is not serving yet and is
+# retried with back-off (backoffLimit 6, about ten minutes in all). The API
+# and the Worker wait for the bucket in their own initContainers, and the up
+# command waits for this Job to complete.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: storage-init
+  labels:
+    app: storage-init
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: storage-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: storage-init
+          image: amazon/aws-cli:2.37.4
+          command:
+            - /bin/bash
+            - /bootstrap/bootstrap.sh
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: SECRET_KEY
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://storage:9000
+            - name: STORAGE_BUCKET
+              value: fiapx
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: fiapx-storage-bootstrap

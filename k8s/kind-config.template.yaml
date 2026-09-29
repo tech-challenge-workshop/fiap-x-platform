@@ -1,0 +1,60 @@
+# The local kind cluster `fiapx` (S9a). Not part of the kustomization:
+# scripts/k8s-up.mjs substitutes the two placeholders below with
+# CATALOG_HOST_PORT and STORAGE_HOST_PORT (defaults 3001 and 9000, the same
+# variables and defaults Compose uses), writes the result to a temporary file
+# and runs `kind create cluster --name fiapx --config <file>`.
+#
+# Each host port Compose publishes maps to a fixed nodePort of the single
+# node; the NodePort Service of each workload claims that nodePort. The host
+# ports keep the OIDC issuer (localhost:8080) and presigned URLs
+# (localhost:<storage host port>) identical to Compose, so the cluster and
+# Compose cannot run at the same time.
+#
+# The node image matches the kubectl 1.36 client and is pinned by digest.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: fiapx
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+    extraPortMappings:
+      # api
+      - containerPort: 30000
+        hostPort: 3000
+        protocol: TCP
+      # catalog
+      - containerPort: 30001
+        hostPort: ${CATALOG_HOST_PORT}
+        protocol: TCP
+      # notification
+      - containerPort: 30003
+        hostPort: 3003
+        protocol: TCP
+      # identity (Keycloak): the token issuer is pinned to localhost:8080
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # storage (RustFS S3 API): presigned URLs are signed for this port
+      - containerPort: 30900
+        hostPort: ${STORAGE_HOST_PORT}
+        protocol: TCP
+      # mailpit web UI and API
+      - containerPort: 30825
+        hostPort: 8025
+        protocol: TCP
+      # rabbitmq management
+      - containerPort: 31672
+        hostPort: 15672
+        protocol: TCP
+      # rabbitmq prometheus metrics
+      - containerPort: 31692
+        hostPort: 15692
+        protocol: TCP
+      # prometheus
+      - containerPort: 30090
+        hostPort: 9090
+        protocol: TCP
+      # grafana
+      - containerPort: 30005
+        hostPort: 3005
+        protocol: TCP

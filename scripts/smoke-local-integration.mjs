@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getToken } from './get-token.mjs';
+import { NAMESPACE, kubectl, kubectlArgs } from './kube.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const SCRIPTS_DIR = dirname(SELF);
@@ -164,6 +165,109 @@ function dockerCompose(args, input) {
   return result.stdout;
 }
 
+// K8S-10: the smoke observes Postgres and the bucket from outside the
+// services, on the stack SMOKE_TARGET names: `compose` (default) or `kind`,
+// the local cluster (scripts/k8s-up.mjs). Every observation goes through one
+// of two calls - psql with its arguments and SQL on stdin, aws s3api with its
+// arguments - and each target turns it into its own command line.
+//
+// compose: `docker compose exec -T postgres psql …` and a one-shot
+//          `docker compose run … storage-init s3api …` (unchanged).
+// kind:    `exec -i statefulset/postgres -- psql …` and a one-shot aws-cli pod
+//          `run smoke-s3-<random> --restart=Never` whose storage keys come
+//          from Secret fiapx-storage, both through scripts/kube.mjs (always
+//          --context kind-fiapx). The pod is not attached to: it is created,
+//          awaited until Succeeded, read with `logs` and deleted, because an
+//          attached `run --rm -i` interleaves kubectl's own output with the
+//          container's and varies across kubectl versions (the first CI run
+//          on kubectl 1.37 got text after the JSON; 1.36 locally did not).
+export const SMOKE_TARGETS = ['compose', 'kind'];
+const AWS_CLI_IMAGE = 'amazon/aws-cli:2.37.4';
+
+// The command line of one observation: `kind` is 'psql' or 's3api', `args`
+// what follows the tool's name; for kind, `podName` names the one-shot pod.
+export function observationCommand(target, kind, args, podName) {
+  if (target === 'compose') {
+    if (kind === 'psql') return ['exec', '-T', 'postgres', 'psql', ...args];
+    return ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init', 's3api', ...args];
+  }
+  if (kind === 'psql') return ['exec', '-i', '-n', NAMESPACE, 'statefulset/postgres', '--', 'psql', ...args];
+  const secret = (name, key) => ({ name, valueFrom: { secretKeyRef: { name: 'fiapx-storage', key } } });
+  const overrides = {
+    apiVersion: 'v1',
+    spec: {
+      containers: [{
+        name: podName,
+        env: [
+          secret('AWS_ACCESS_KEY_ID', 'ACCESS_KEY'),
+          secret('AWS_SECRET_ACCESS_KEY', 'SECRET_KEY'),
+          { name: 'AWS_DEFAULT_REGION', value: 'us-east-1' },
+          { name: 'AWS_ENDPOINT_URL', value: 'http://storage:9000' },
+        ],
+      }],
+    },
+  };
+  return [
+    'run', podName, '-n', NAMESPACE, '--restart=Never', `--image=${AWS_CLI_IMAGE}`,
+    '--override-type=strategic', `--overrides=${JSON.stringify(overrides)}`, '--', 's3api', ...args,
+  ];
+}
+
+const ONE_SHOT_TIMEOUT_MS = 120_000;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// One bucket observation on kind: create the aws-cli pod, wait for it to
+// finish, return its logs (the command's stdout alone), delete it. `run`
+// runs one kubectl command line; `clock` replaces time in the self-test.
+export function kindOneShot(run, podName, args, clock = {}) {
+  const { timeoutMs = ONE_SHOT_TIMEOUT_MS, sleep = sleepSync, now = Date.now } = clock;
+  const logs = () => run(['logs', podName, '-n', NAMESPACE]);
+  run(observationCommand('kind', 's3api', args, podName));
+  try {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      const phase = run(['get', 'pod', podName, '-n', NAMESPACE, '-o', 'jsonpath={.status.phase}']).trim();
+      if (phase === 'Succeeded') return logs();
+      if (phase === 'Failed') throw new Error(`One-shot pod ${podName} failed: ${logs().trim()}`);
+      if (now() >= deadline) throw new Error(`One-shot pod ${podName} did not finish within ${timeoutMs} ms (phase ${phase || 'unknown'})`);
+      sleep(500);
+    }
+  } finally {
+    try {
+      run(['delete', 'pod', podName, '-n', NAMESPACE, '--ignore-not-found', '--wait=false']);
+    } catch {
+      // A leftover pod is harmless (its name is random) and must not mask the observation's own error.
+    }
+  }
+}
+
+function kubectlObservation(args, input) {
+  const result = kubectl(args, { input });
+  if (result.error) throw new Error(`Could not run the cluster command: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(`kind ${args[0]} failed: ${(result.stderr || result.stdout).trim()}`);
+  }
+  return result.stdout;
+}
+
+// The two observation calls for a target; `runners` replace the spawns in
+// the self-test. An unknown target throws.
+export function observerFor(target, runners = {}) {
+  if (!SMOKE_TARGETS.includes(target)) {
+    throw new Error(`Unknown SMOKE_TARGET ${JSON.stringify(target)}; expected one of ${SMOKE_TARGETS.join(', ')}`);
+  }
+  const run = target === 'compose' ? (runners.compose ?? dockerCompose) : (runners.kind ?? kubectlObservation);
+  const podName = runners.podName ?? (() => `smoke-s3-${randomUUID().slice(0, 8)}`);
+  return {
+    psql: (args, input) => run(observationCommand(target, 'psql', args), input),
+    s3api: (args) => (target === 'kind'
+      ? kindOneShot(run, podName(), args)
+      : run(observationCommand(target, 's3api', args))),
+  };
+}
+
+const observe = () => observerFor(process.env.SMOKE_TARGET ?? 'compose');
+
 // A rejected or failed request must leave nothing under its archive prefix.
 function assertNoArchiveListing(id, keys, label = 'Rejected') {
   if (keys.length > 0) throw new Error(`${label} request ${id} left an archive under zips/${id}/:\n${keys.join('\n')}`);
@@ -187,9 +291,8 @@ function archiveIdOf(key) {
 // itself (GRD-06), and the id the prefix was queried with; none when the prefix
 // is empty (aws-cli prints "None" for an empty listing in text output).
 function listArchives(id) {
-  return listingOf(id, dockerCompose([
-    'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
-    's3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`,
+  return listingOf(id, observe().s3api([
+    'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`,
     '--query', 'Contents[].Key', '--output', 'text',
   ]));
 }
@@ -237,9 +340,8 @@ function assertOwnedLifecycle(config) {
 // Read only, never through the bootstrap: a bucket without a configuration
 // fails here, naming the error.
 function readBucketLifecycle() {
-  return dockerCompose([
-    'run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init',
-    's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json',
+  return observe().s3api([
+    'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json',
   ]);
 }
 
@@ -302,8 +404,8 @@ function assertSingleDelivery(id, deliveries) {
 // for (GRD-06), so a query that filters on the wrong thing shows another id or
 // none; no row means 0. The id travels as a psql variable, never as SQL text.
 function countDeliveries(id) {
-  return deliveriesOf(id, dockerCompose(
-    ['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`],
+  return deliveriesOf(id, observe().psql(
+    ['-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`],
     "SELECT processing_request_id, count(*) FROM notification.delivery_record WHERE processing_request_id = :'id' GROUP BY 1;\n",
   ));
 }
@@ -1354,6 +1456,8 @@ async function runSteps(steps, ctx, execute = runStep) {
 // One line, shared by the live run and the dry run: any change to the list
 // it runs shows in the dry run too.
 async function main() {
+  // An unknown target fails before any step runs.
+  observerFor(process.env.SMOKE_TARGET ?? 'compose');
   await runSteps(SMOKE_STEPS, {}, executorFor(process.env));
 }
 
@@ -2092,6 +2196,112 @@ async function selfTest() {
   if (unreachable.stderr !== healthFailure) {
     failures.push(`spawned run against an unreachable API printed ${JSON.stringify(unreachable.stderr)} on stderr, expected ${JSON.stringify(healthFailure)}`);
   }
+  // K8S-10: the observation adapter. Each case records the command line the
+  // target's runner receives; the compose lines are the literal lists this
+  // script ran before the adapter existed, so they must not change by a byte.
+  let adapterCases = 0;
+  const adapterExpect = (name, actual, expected) => {
+    adapterCases += 1;
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`adapter: ${name}: got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+  };
+  const recorded = (target) => {
+    const seen = [];
+    const runner = (args, input) => {
+      seen.push({ args, input });
+      return args[0] === 'get' ? 'Succeeded' : 'observed';
+    };
+    return { seen, observer: observerFor(target, { compose: runner, kind: runner, podName: () => 'smoke-s3-test0001' }) };
+  };
+  const psqlArgs = ['-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`];
+  const sql = "SELECT processing_request_id, count(*) FROM notification.delivery_record WHERE processing_request_id = :'id' GROUP BY 1;\n";
+  const listArgs = ['list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`, '--query', 'Contents[].Key', '--output', 'text'];
+  const lifecycleArgs = ['get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json'];
+  {
+    const { seen, observer } = recorded('compose');
+    adapterExpect('compose psql returns the runner output', observer.psql(psqlArgs, sql), 'observed');
+    observer.s3api(listArgs);
+    observer.s3api(lifecycleArgs);
+    adapterExpect('compose command lines are the pre-adapter ones', seen, [
+      { args: ['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`], input: sql },
+      { args: ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init', 's3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', `zips/${id}/`, '--query', 'Contents[].Key', '--output', 'text'] },
+      { args: ['run', '--rm', '--no-deps', '-T', '--entrypoint', 'aws', 'storage-init', 's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json'] },
+    ]);
+  }
+  {
+    const { seen, observer } = recorded('kind');
+    observer.psql(psqlArgs, sql);
+    adapterExpect('kind s3api returns the pod logs', observer.s3api(lifecycleArgs), 'observed');
+    adapterExpect('kind psql: exec into the postgres StatefulSet with the SQL on stdin', seen[0],
+      { args: ['exec', '-i', '-n', 'fiapx', 'statefulset/postgres', '--', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`], input: sql });
+    const run = seen[1].args;
+    const overridesAt = run.findIndex((a) => a.startsWith('--overrides='));
+    adapterExpect('kind s3api: a one-shot aws-cli pod', [...run.slice(0, overridesAt), ...run.slice(overridesAt + 1)],
+      ['run', 'smoke-s3-test0001', '-n', 'fiapx', '--restart=Never', '--image=amazon/aws-cli:2.37.4', '--override-type=strategic', '--', 's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json']);
+    adapterExpect('kind s3api: never attaches, waits for the phase, reads logs, deletes the pod', seen.slice(2).map(({ args }) => args), [
+      ['get', 'pod', 'smoke-s3-test0001', '-n', 'fiapx', '-o', 'jsonpath={.status.phase}'],
+      ['logs', 'smoke-s3-test0001', '-n', 'fiapx'],
+      ['delete', 'pod', 'smoke-s3-test0001', '-n', 'fiapx', '--ignore-not-found', '--wait=false'],
+    ]);
+    adapterExpect('kind s3api: storage keys from Secret fiapx-storage, endpoint and region literal', JSON.parse(run[overridesAt].slice('--overrides='.length)), {
+      apiVersion: 'v1',
+      spec: { containers: [{ name: 'smoke-s3-test0001', env: [
+        { name: 'AWS_ACCESS_KEY_ID', valueFrom: { secretKeyRef: { name: 'fiapx-storage', key: 'ACCESS_KEY' } } },
+        { name: 'AWS_SECRET_ACCESS_KEY', valueFrom: { secretKeyRef: { name: 'fiapx-storage', key: 'SECRET_KEY' } } },
+        { name: 'AWS_DEFAULT_REGION', value: 'us-east-1' },
+        { name: 'AWS_ENDPOINT_URL', value: 'http://storage:9000' },
+      ] }] },
+    });
+    // Both kind command lines are accepted by the pinned helper and gain the
+    // context there; neither names a context itself.
+    adapterExpect('kind command lines go through kube.mjs with --context kind-fiapx', seen.map(({ args }) => kubectlArgs(args).slice(0, 3)),
+      [['--context', 'kind-fiapx', 'exec'], ['--context', 'kind-fiapx', 'run'], ['--context', 'kind-fiapx', 'get'], ['--context', 'kind-fiapx', 'logs'], ['--context', 'kind-fiapx', 'delete']]);
+  }
+  {
+    // A Failed pod throws with its logs; a pod that never finishes times out;
+    // both still delete the pod.
+    const phases = (phase) => {
+      const seen = [];
+      const run = (args) => {
+        seen.push(args[0]);
+        if (args[0] === 'get') return phase;
+        return args[0] === 'logs' ? 'An error occurred (AccessDenied)\n' : '';
+      };
+      return { seen, run };
+    };
+    const failed = phases('Failed');
+    let message = '';
+    try { kindOneShot(failed.run, 'smoke-s3-f', lifecycleArgs); } catch (err) { message = err.message; }
+    adapterExpect('kind s3api: a Failed pod throws with its logs and is deleted', [message, failed.seen.at(-1)],
+      ['One-shot pod smoke-s3-f failed: An error occurred (AccessDenied)', 'delete']);
+    const stuck = phases('Pending');
+    let t = 0;
+    message = '';
+    try { kindOneShot(stuck.run, 'smoke-s3-p', lifecycleArgs, { timeoutMs: 1000, sleep: (ms) => { t += ms; }, now: () => t }); } catch (err) { message = err.message; }
+    adapterExpect('kind s3api: a pod that never finishes times out and is deleted', [message, stuck.seen.at(-1)],
+      ['One-shot pod smoke-s3-p did not finish within 1000 ms (phase Pending)', 'delete']);
+  }
+  adapterExpect('each one-shot pod gets its own name', (() => {
+    const names = new Set();
+    const observer = observerFor('kind', { kind: (args) => {
+      if (args[0] === 'run') names.add(args[1]);
+      return args[0] === 'get' ? 'Succeeded' : '';
+    } });
+    observer.s3api(lifecycleArgs);
+    observer.s3api(lifecycleArgs);
+    return [names.size, [...names].every((n) => /^smoke-s3-[0-9a-f]{8}$/.test(n))];
+  })(), [2, true]);
+  try {
+    observerFor('k8s');
+    failures.push('adapter: an unknown target was accepted');
+  } catch (err) {
+    adapterExpect('an unknown target is refused', err.message, 'Unknown SMOKE_TARGET "k8s"; expected one of compose, kind');
+  }
+  // The live run with an unknown target exits non-zero before any step.
+  const bogusEnv = { ...process.env, SMOKE_TARGET: 'k8s', API_URL: 'http://127.0.0.1:9', HEALTH_TIMEOUT_MS: '1' };
+  delete bogusEnv.SMOKE_DRY_RUN;
+  const bogus = spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: bogusEnv });
+  adapterExpect('spawned run with an unknown target', [bogus.status, bogus.stderr], [1, 'Unknown SMOKE_TARGET "k8s"; expected one of compose, kind\n']);
+
   for (const step of REQUIRED_STEPS) {
     if (!SMOKE_STEPS.some((candidate) => candidate.name === step && typeof candidate.check === 'function')) {
       failures.push(`required step "${step}" is missing from SMOKE_STEPS, or has no check`);
@@ -2127,7 +2337,7 @@ async function selfTest() {
     return;
   }
   console.log(
-    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run, every step named in README.md, spawned failure exited non-zero`,
+    `Self-test passed: ${REQUIRED_STEPS.length} required steps present, ${rejections.length} bad inputs rejected with the expected message, ${acceptances.length} good inputs accepted, main() ran every step in order in a dry run, every step named in README.md, spawned failure exited non-zero, ${adapterCases} observation-adapter cases (compose lines unchanged, kind lines through kube.mjs, unknown target refused)`,
   );
 }
 

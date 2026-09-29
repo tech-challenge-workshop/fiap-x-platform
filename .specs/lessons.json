@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 36,
+  "next_id": 41,
   "lessons": [
     {
       "id": "L-001",
@@ -634,6 +634,96 @@
       ],
       "created": "2026-09-29T03:34:42Z",
       "last_seen": "2026-09-29T03:34:42Z"
+    },
+    {
+      "id": "L-036",
+      "key": "surviving_mutant::a static no raw spawn scan must also match spawns through exported name constants e g kubectl bin not only quoted literals never export a bare binary name from the chokepoint helper",
+      "text": "A static no-raw-spawn scan must also match spawns through exported name constants (e.g. KUBECTL_BIN), not only quoted literals; never export a bare binary name from the chokepoint helper.",
+      "signal": "surviving_mutant",
+      "scope": "scripts",
+      "status": "candidate",
+      "features": [
+        "local-kubernetes"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "M17 scripts/check-kubernetes.mjs:578 (scripts)"
+      ],
+      "created": "2026-09-29T17:34:24Z",
+      "last_seen": "2026-09-29T17:34:24Z"
+    },
+    {
+      "id": "L-037",
+      "key": "spec_precision_gap::a credential rule keyed on env var names misses secrets embedded in url values also reject literal values carrying url userinfo scheme user pass",
+      "text": "A credential rule keyed on env-var names misses secrets embedded in URL values; also reject literal values carrying URL userinfo (scheme://user:pass@).",
+      "signal": "spec_precision_gap",
+      "scope": "k8s",
+      "status": "candidate",
+      "features": [
+        "local-kubernetes"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "K8S-13/K8S-16, M26 (k8s)"
+      ],
+      "created": "2026-09-29T17:34:24Z",
+      "last_seen": "2026-09-29T17:34:24Z"
+    },
+    {
+      "id": "L-038",
+      "key": "surviving_mutant::a source scan guarding a chokepoint must walk every script path recursively not only the top level directory",
+      "text": "A source scan guarding a chokepoint must walk every script path recursively, not only the top-level directory.",
+      "signal": "surviving_mutant",
+      "scope": "scripts",
+      "status": "candidate",
+      "features": [
+        "local-kubernetes"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "M17j scripts/check-kubernetes.mjs:740 (validation.md round 2, O2) (scripts)"
+      ],
+      "created": "2026-09-29T17:48:07Z",
+      "last_seen": "2026-09-29T17:48:07Z"
+    },
+    {
+      "id": "L-039",
+      "key": "spec_precision_gap::a manifest credential rule must cover every value route into a container env envfrom configmaps args or the spec must scope it explicitly",
+      "text": "A manifest credential rule must cover every value route into a container (env, envFrom ConfigMaps, args), or the spec must scope it explicitly.",
+      "signal": "spec_precision_gap",
+      "scope": "k8s",
+      "status": "candidate",
+      "features": [
+        "local-kubernetes"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "M26b/M26c K8S-13 vs K8S-16 (validation.md round 2, O3) (k8s)"
+      ],
+      "created": "2026-09-29T17:48:07Z",
+      "last_seen": "2026-09-29T17:48:07Z"
+    },
+    {
+      "id": "L-040",
+      "key": "surviving_mutant::treat a textual no raw spawn scan as a tripwire against accidents keep the real guarantee in behavioral self tests of the chokepoint and word docs accordingly",
+      "text": "Treat a textual no-raw-spawn scan as a tripwire against accidents, keep the real guarantee in behavioral self-tests of the chokepoint, and word docs accordingly.",
+      "signal": "surviving_mutant",
+      "scope": "scripts",
+      "status": "candidate",
+      "features": [
+        "local-kubernetes"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "M17c/M17d/M17e/M17i (validation.md round 2, O1) (scripts)"
+      ],
+      "created": "2026-09-29T17:48:07Z",
+      "last_seen": "2026-09-29T17:48:07Z"
     }
   ]
 }

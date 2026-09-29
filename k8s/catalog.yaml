@@ -1,0 +1,115 @@
+# The Processing Catalog on the cluster: the Compose `catalog` service with
+# the image CI publishes on main (kustomize maps `processing-catalog` to
+# ghcr.io/tech-challenge-workshop/processing-catalog:main). Its database role
+# password is the `db/init` fixture, read from Secret `fiapx-postgres`; the
+# broker URL carries the generated RabbitMQ user and comes from Secret
+# `fiapx-rabbitmq`. Both Secrets are created per cluster by
+# scripts/k8s-up.mjs.
+#
+# There is no depends_on: the service retries its database and broker
+# connections, and /health answers 503 until both are up (S8), so readiness
+# gates traffic. Liveness reads /health/live, which never depends on them.
+#
+# Two Services: `catalog` for the pods (the API calls catalog:3001) and
+# `catalog-host` on nodePort 30001, which the kind port map publishes on
+# CATALOG_HOST_PORT (default 3001).
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  labels:
+    app: catalog
+spec:
+  type: ClusterIP
+  selector:
+    app: catalog
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-host
+  labels:
+    app: catalog
+spec:
+  type: NodePort
+  selector:
+    app: catalog
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+      nodePort: 30001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  labels:
+    app: catalog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+    spec:
+      containers:
+        - name: catalog
+          image: processing-catalog
+          imagePullPolicy: Always
+          env:
+            - name: PORT
+              value: "3001"
+            - name: LOCAL_INTEGRATION
+              value: "true"
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-rabbitmq
+                  key: URL
+            - name: DATABASE_HOST
+              value: postgres
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_NAME
+              value: fiapx
+            - name: DATABASE_SCHEMA
+              value: catalog
+            - name: DATABASE_USER
+              value: catalog
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-postgres
+                  key: CATALOG_DB_PASSWORD
+          ports:
+            - name: http
+              containerPort: 3001
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

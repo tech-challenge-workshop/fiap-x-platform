@@ -1,0 +1,119 @@
+# The Processing Worker on the cluster: the Compose `worker` service with the
+# image CI publishes on main (kustomize maps `processing-worker` to
+# ghcr.io/tech-challenge-workshop/processing-worker:main).
+#
+# No spec.replicas: the HPA that KEDA creates from ScaledObject `worker`
+# (worker-scaling.yaml) owns the count, so re-applying the kustomization never
+# snaps a scaled-out Worker back to one pod (K8S-07). Without it the
+# Deployment starts at one replica, KEDA's minimum.
+#
+# AD-006 sizing: FFmpeg reads the host's core count, not the cgroup's, so its
+# thread count is set explicitly and equals the CPU request and limit - one
+# core per replica, five replicas at most on the local cluster.
+# scripts/check-kubernetes.mjs fails if the three disagree.
+#
+# The broker URL comes from Secret `fiapx-rabbitmq` and the storage keys from
+# `fiapx-storage`. The init container `wait-for-bucket` stands in for
+# Compose's `storage-init: service_completed_successfully`.
+#
+# No Service: nothing calls the Worker. Prometheus discovers every pod by the
+# `app: worker` label and scrapes port 3002 (prometheus/prometheus.k8s.yml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+spec:
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      # A pod removed on scale-in gets 30 s after SIGTERM; a job it still
+      # holds unacknowledged is redelivered by RabbitMQ to another replica.
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-bucket
+          image: amazon/aws-cli:2.37.4
+          command:
+            - /bin/bash
+            - -c
+            - until aws s3api head-bucket --bucket fiapx >/dev/null 2>&1; do echo "waiting for bucket fiapx"; sleep 2; done
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: SECRET_KEY
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://storage:9000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: worker
+          image: processing-worker
+          imagePullPolicy: Always
+          env:
+            - name: PORT
+              value: "3002"
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-rabbitmq
+                  key: URL
+            - name: FFMPEG_THREADS
+              value: "1"
+            - name: STORAGE_ENDPOINT
+              value: http://storage:9000
+            - name: STORAGE_BUCKET
+              value: fiapx
+            - name: STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: ACCESS_KEY
+            - name: STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-storage
+                  key: SECRET_KEY
+          ports:
+            - name: http
+              containerPort: 3002
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "1"
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

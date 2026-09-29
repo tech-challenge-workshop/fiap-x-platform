@@ -24,8 +24,18 @@
 //   topology           the `topology` job sets no `if:`, `shell:` or
 //                      `continue-on-error`, conditions no step, and runs each
 //                      observability check (OBS-74's default mode and
-//                      --self-test, and the load test's --self-test) as the
-//                      whole one-line `run:` of its own step.
+//                      --self-test, and the load test's --self-test) and each
+//                      Kubernetes offline check (K8S-32, K8S-33: the kube,
+//                      check-kubernetes, k8s-up and k8s-down proofs, the
+//                      kustomize render and the kubeconform validation) as the
+//                      whole one-line `run:` of its own step;
+//   kubernetes         the `kubernetes` job (K8S-34, K8S-35) sets no `if:`,
+//                      `shell:` or `continue-on-error`, sets `needs:
+//                      [topology]` exactly, conditions only its two log steps
+//                      on `failure()` and its teardown on `always()`, and runs
+//                      the up command, the smoke with SMOKE_TARGET=kind and
+//                      the live cluster check each as the whole one-line
+//                      `run:` of its own step.
 
 //
 // The block is parsed as text: the repository has no package.json, and the
@@ -53,6 +63,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { KUSTOMIZE_RENDER_STEP } from './kube.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(SELF), '..');
@@ -96,8 +107,29 @@ const DOCS_RUN_MESSAGE = `the docs-links job must run "${DOCS_LINKS}" as a one-l
 const OBSERVABILITY = 'node scripts/check-observability.mjs';
 const OBSERVABILITY_SELF_TEST = 'node scripts/check-observability.mjs --self-test';
 const LOAD_SELF_TEST = 'node scripts/load-test.mjs --self-test';
-const TOPOLOGY_COMMANDS = [OBSERVABILITY, OBSERVABILITY_SELF_TEST, LOAD_SELF_TEST];
+// The Kubernetes manifests' offline proofs (K8S-32, K8S-33).
+const KUBE_SELF_TEST = 'node scripts/kube.mjs --self-test';
+const CHECK_KUBERNETES = 'node scripts/check-kubernetes.mjs';
+const CHECK_KUBERNETES_SELF_TEST = 'node scripts/check-kubernetes.mjs --self-test';
+const K8S_UP_SELF_TEST = 'node scripts/k8s-up.mjs --self-test';
+const K8S_DOWN_SELF_TEST = 'node scripts/k8s-down.mjs --self-test';
+// From scripts/kube.mjs: check-kubernetes refuses a kubectl command-line
+// string outside that file, and this one is only compared, never run.
+const KUSTOMIZE_RENDER = KUSTOMIZE_RENDER_STEP;
+const KUBECONFORM = "kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' rendered-k8s.yaml";
+const TOPOLOGY_COMMANDS = [
+  OBSERVABILITY, OBSERVABILITY_SELF_TEST, LOAD_SELF_TEST,
+  KUBE_SELF_TEST, CHECK_KUBERNETES, CHECK_KUBERNETES_SELF_TEST, K8S_UP_SELF_TEST, K8S_DOWN_SELF_TEST, KUSTOMIZE_RENDER, KUBECONFORM,
+];
 const topologyRunMessage = (command) => `the topology job must run "${command}" as a one-line step of its own`;
+// The kubernetes job's commands (K8S-34): each must run unmasked, or a
+// cluster that never came up, a failed smoke or a missing HPA passes CI.
+const K8S_UP = 'node scripts/k8s-up.mjs';
+const K8S_SMOKE = 'SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs';
+const K8S_LIVE = 'node scripts/check-kubernetes.mjs --live';
+const KUBERNETES_COMMANDS = [K8S_UP, K8S_SMOKE, K8S_LIVE];
+const kubernetesRunMessage = (command) => `the kubernetes job must run "${command}" as a one-line step of its own`;
+const KUBERNETES_NEEDS = ['topology'];
 
 
 function fail(message) {
@@ -279,7 +311,7 @@ function workflowProblems(text) {
     problems.push(`integration stack step ${i + 1} must be ${expected}, but ${actual}`);
     break;
   }
-  return [...problems, ...docsLinksProblems(text), ...topologyProblems(text)];
+  return [...problems, ...docsLinksProblems(text), ...topologyProblems(text), ...kubernetesProblems(text)];
 }
 
 // Rule 4: the docs-links job is blocking. It is never conditioned, never lets
@@ -328,6 +360,51 @@ function topologyProblems(text) {
   return problems;
 }
 
+// The steps of the kubernetes job a condition may gate, as in integration:
+// the cluster's logs only when the job failed, the cluster always deleted.
+const KUBERNETES_CONDITIONED_STEPS = {
+  'Collect cluster state and pod logs': 'failure()',
+  'Upload cluster logs': 'failure()',
+  'Delete the kind cluster': 'always()',
+};
+
+// `needs:` as a list: `[a, b]` or a single `a`. A block sequence reads as
+// [''] and so fails the comparison rather than being guessed at.
+const needsOf = (value) => (/^\[.*\]$/.test(value) ? value.slice(1, -1).split(',').map(unquote).filter((v) => v !== '') : [unquote(value)]);
+
+// Rule 6: the kubernetes job is blocking. It is never conditioned, runs
+// only after topology, never lets a red step pass, keeps the default shell,
+// conditions only its log and teardown steps, and runs each cluster command
+// as the whole one-line `run:` of its own step.
+function kubernetesProblems(text) {
+  const block = jobBlock(text, 'kubernetes');
+  if (!block) return ['the workflow has no `kubernetes` job under `jobs:`'];
+  const problems = [];
+  const { keys, steps } = parseSteps(block.lines);
+  if (Object.hasOwn(keys, 'if')) problems.push('the kubernetes job must not set if');
+  const needs = Object.hasOwn(keys, 'needs') ? needsOf(keys.needs) : [];
+  if (JSON.stringify(needs) !== JSON.stringify(KUBERNETES_NEEDS)) {
+    problems.push(`the kubernetes job must set needs: [${KUBERNETES_NEEDS.join(', ')}]${Object.hasOwn(keys, 'needs') ? `, not "${keys.needs}"` : ''}`);
+  }
+  if (block.lines.some((line) => /^\s*(?:-\s+)?shell:/.test(line))) problems.push('the kubernetes job must not set shell');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?continue-on-error:/.test(line))) {
+    problems.push('the kubernetes job must not set continue-on-error');
+  }
+  for (const step of steps) {
+    if (step.if === undefined) continue;
+    const expression = expressionOf(step.if);
+    const label = step.name ?? step.run ?? step.uses ?? `#${step.index}`;
+    const runsCluster = KUBERNETES_COMMANDS.some((command) => (step.run ?? '').includes(command));
+    if (KUBERNETES_CONDITIONED_STEPS[step.name] !== expression || runsCluster) {
+      problems.push(`kubernetes step "${label}" must not be conditioned on "${expression}"`);
+    }
+  }
+  for (const command of KUBERNETES_COMMANDS) {
+    if (!steps.some((step) => !step.multiline && step.run === command)) problems.push(kubernetesRunMessage(command));
+  }
+  return problems;
+}
+
 
 function main() {
   let text;
@@ -338,7 +415,7 @@ function main() {
   }
   const problems = workflowProblems(text);
   if (problems.length > 0) fail(problems.join('\ncheck-ci-governance: '));
-  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token; docs-links runs ${DOCS_LINKS} unconditionally; topology runs the ${TOPOLOGY_COMMANDS.length} observability checks unconditionally`);
+  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token; docs-links runs ${DOCS_LINKS} unconditionally; topology runs the ${TOPOLOGY_COMMANDS.length} observability and Kubernetes offline checks unconditionally; kubernetes runs after topology alone and runs its ${KUBERNETES_COMMANDS.length} cluster commands unconditionally`);
 
 }
 
@@ -469,6 +546,24 @@ jobs:
         run: node scripts/check-observability.mjs --self-test
       - name: Prove the load test names a video that does not complete
         run: node scripts/load-test.mjs --self-test
+      - name: Install kubeconform v0.8.0 (checksum pinned)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kubeconform.tar.gz" https://example.invalid/kubeconform.tar.gz
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Prove every kubectl call is pinned to kind-fiapx
+        run: node scripts/kube.mjs --self-test
+      - name: Check the Kubernetes manifests against the offline rules
+        run: node scripts/check-kubernetes.mjs
+      - name: Prove each Kubernetes rule rejects a corruption
+        run: node scripts/check-kubernetes.mjs --self-test
+      - name: Prove the up command's preflight, secrets and wait
+        run: node scripts/k8s-up.mjs --self-test
+      - name: Prove the down command deletes only the fiapx cluster
+        run: node scripts/k8s-down.mjs --self-test
+      - name: Render the Kubernetes manifests
+        run: ${KUSTOMIZE_RENDER}
+      - name: Validate the rendered manifests against the Kubernetes and KEDA schemas
+        run: kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' rendered-k8s.yaml
 
   integration:
     needs: topology
@@ -527,6 +622,43 @@ jobs:
         working-directory: fiap-x-platform
         run: |
           docker compose down -v
+
+  kubernetes:
+    needs: [topology]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind v0.33.0 (checksum pinned)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/bin/kind-linux-amd64" https://example.invalid/kind-linux-amd64
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Create the cluster and wait for every workload
+        env:
+          GHCR_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/k8s-up.mjs
+      - name: Run the smoke test against the cluster
+        run: SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs
+      - name: Check the cluster's workloads, HPA, targets and dashboard
+        run: node scripts/check-kubernetes.mjs --live
+      - name: Collect cluster state and pod logs
+        if: failure()
+        run: |
+          set +e
+          KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get pods > cluster-logs.txt 2>&1
+          exit 0
+      - name: Upload cluster logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-logs
+          path: cluster-logs.txt
+      - name: Delete the kind cluster
+        if: \${{ always() }}
+        run: node scripts/k8s-down.mjs
 
   docs-links:
     runs-on: ubuntu-latest
@@ -766,6 +898,10 @@ function selfTest() {
   const OBS_SELF_STEP = '      - name: Prove each observability check rejects a corruption\n';
   const LOAD_SELF_STEP = '      - name: Prove the load test names a video that does not complete\n';
   const withoutStep = (step, command) => replaceOnce(GOOD, `${step}        run: ${command}\n`, '');
+  const K8S_JOB = '  kubernetes:\n    needs: [topology]\n';
+  const UP_STEP = '      - name: Create the cluster and wait for every workload\n';
+  const K8S_SMOKE_STEP = '      - name: Run the smoke test against the cluster\n';
+  const K8S_LIVE_STEP = "      - name: Check the cluster's workloads, HPA, targets and dashboard\n";
 
 
   const rejections = [
@@ -837,6 +973,34 @@ function selfTest() {
       ['the topology job must not set if']],
     ['a shell: override on a topology step (near-miss)', replaceOnce(GOOD, LOAD_SELF_STEP, `${LOAD_SELF_STEP}        shell: bash {0}\n`),
       ['the topology job must not set shell']],
+    ['the offline Kubernetes check dropped from topology', replaceOnce(GOOD, `        run: ${CHECK_KUBERNETES}\n`, '        run: echo skipped\n'),
+      [topologyRunMessage(CHECK_KUBERNETES)]],
+    ['the kustomize render dropped from topology', replaceOnce(GOOD, `        run: ${KUSTOMIZE_RENDER}\n`, '        run: echo skipped\n'),
+      [topologyRunMessage(KUSTOMIZE_RENDER)]],
+    ['the kubeconform validation masked by || true (near-miss)', replaceOnce(GOOD, `run: ${KUBECONFORM}\n`, `run: ${KUBECONFORM} || true\n`),
+      [topologyRunMessage(KUBECONFORM)]],
+    ['the up command dropped from kubernetes', replaceOnce(GOOD, `        run: ${K8S_UP}\n`, '        run: echo skipped\n'), [kubernetesRunMessage(K8S_UP)]],
+    ['the cluster smoke masked by || true (near-miss)', replaceOnce(GOOD, `run: ${K8S_SMOKE}\n`, `run: ${K8S_SMOKE} || true\n`), [kubernetesRunMessage(K8S_SMOKE)]],
+    ['the cluster smoke without SMOKE_TARGET=kind (near-miss)', replaceOnce(GOOD, `run: ${K8S_SMOKE}\n`, `run: ${SMOKE}\n`), [kubernetesRunMessage(K8S_SMOKE)]],
+    ['the live cluster check masked by set +e in a run: | block (near-miss)',
+      replaceOnce(GOOD, `run: ${K8S_LIVE}\n`, `run: |\n          set +e\n          ${K8S_LIVE}\n`), [kubernetesRunMessage(K8S_LIVE)]],
+    ['an if: on the kubernetes job', replaceOnce(GOOD, K8S_JOB, `${K8S_JOB}    if: github.event_name == 'push'\n`), ['the kubernetes job must not set if']],
+    ['needs changed to integration', replaceOnce(GOOD, K8S_JOB, '  kubernetes:\n    needs: [integration]\n'),
+      ['the kubernetes job must set needs: [topology], not "[integration]"']],
+    ['needs with a second job (near-miss)', replaceOnce(GOOD, K8S_JOB, '  kubernetes:\n    needs: [topology, integration]\n'),
+      ['the kubernetes job must set needs: [topology], not "[topology, integration]"']],
+    ['no needs on the kubernetes job', replaceOnce(GOOD, K8S_JOB, '  kubernetes:\n'), ['the kubernetes job must set needs: [topology]']],
+    ['the up step gated on the event', replaceOnce(GOOD, UP_STEP, `${UP_STEP}        if: github.event_name == 'pull_request'\n`),
+      [`kubernetes step "Create the cluster and wait for every workload" must not be conditioned on "github.event_name == 'pull_request'"`]],
+    ['the cluster smoke renamed to an allow-listed log step (near-miss)',
+      replaceOnce(GOOD, K8S_SMOKE_STEP, '      - name: Collect cluster state and pod logs\n        if: failure()\n'),
+      ['kubernetes step "Collect cluster state and pod logs" must not be conditioned on "failure()"']],
+    ['failure() on the cluster teardown (near-miss)', replaceOnce(GOOD, '        if: \${{ always() }}\n        run: node scripts/k8s-down.mjs\n', '        if: failure()\n        run: node scripts/k8s-down.mjs\n'),
+      ['kubernetes step "Delete the kind cluster" must not be conditioned on "failure()"']],
+    ['continue-on-error on the live check step', replaceOnce(GOOD, K8S_LIVE_STEP, `${K8S_LIVE_STEP}        continue-on-error: true\n`),
+      ['the kubernetes job must not set continue-on-error']],
+    ['a shell: override on the up step (near-miss)', replaceOnce(GOOD, UP_STEP, `${UP_STEP}        shell: bash {0}\n`), ['the kubernetes job must not set shell']],
+    ['no kubernetes job', replaceOnce(GOOD, '  kubernetes:\n', '  kubernetes-disabled:\n'), ['the workflow has no `kubernetes` job under `jobs:`']],
     ['no integration job', noIntegration, ['the workflow has no `integration` job under `jobs:`']],
     ['a recreate that skips storage-init (near-miss)', recreateNearMiss, [
       `integration stack step 6 must be "${RECREATE}", but it is "${SMOKE}"`,
@@ -858,6 +1022,7 @@ function selfTest() {
   const acceptances = [
     ['a correct workflow', GOOD],
     ['a correct workflow with a quoted if value', replaceOnce(GOOD, 'if: failure()', "if: 'failure()'")],
+    ['kubernetes needs written as a scalar', replaceOnce(GOOD, '    needs: [topology]\n', '    needs: topology\n')],
   ];
 
   const failures = [];

@@ -1,0 +1,123 @@
+# Keycloak, the Compose `identity` service on the cluster (AD-005): the same
+# image, `start-dev --import-realm`, and the realm file from the generated
+# ConfigMap `fiapx-identity-realm`. The bootstrap admin comes from Secret
+# `fiapx-identity-admin`, generated per cluster by scripts/k8s-up.mjs.
+#
+# The issuer is pinned to http://localhost:8080 and the kind port map
+# publishes 8080 on the host, so a token requested from the host carries the
+# issuer the API validates. The embedded H2 database lives in memory, as the
+# Compose tmpfs: every start imports the realm from the versioned file.
+#
+# Two Services: `identity` for the pods (the API fetches the key set from
+# identity:8080) and `identity-host` on nodePort 30080. The management port
+# 9000 stays internal: only the kubelet reads it, for readiness.
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity
+  labels:
+    app: identity
+spec:
+  type: ClusterIP
+  selector:
+    app: identity
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-host
+  labels:
+    app: identity
+spec:
+  type: NodePort
+  selector:
+    app: identity
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity
+  labels:
+    app: identity
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identity
+  template:
+    metadata:
+      labels:
+        app: identity
+    spec:
+      containers:
+        - name: identity
+          image: quay.io/keycloak/keycloak:26.7.4
+          args:
+            - start-dev
+            - --import-realm
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-identity-admin
+                  key: KC_BOOTSTRAP_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fiapx-identity-admin
+                  key: KC_BOOTSTRAP_ADMIN_PASSWORD
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            # One issuer for every token, whether requested from the host or
+            # from inside the cluster. The API validates exactly this value.
+            - name: KC_HOSTNAME
+              value: http://localhost:8080
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          # The image has no curl or wget; an HTTP probe needs neither.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            # SPEC_DEVIATION: the realm file is mounted by subPath at
+            # /opt/keycloak/data/import/fiapx-realm.json, not the ConfigMap
+            # as the whole import directory.
+            # Reason: a ConfigMap directory mount also holds the kubelet's
+            # `..data` links, and the import reads the directory; the file
+            # alone is what Compose mounts.
+            - name: realm
+              mountPath: /opt/keycloak/data/import/fiapx-realm.json
+              subPath: fiapx-realm.json
+              readOnly: true
+            - name: h2
+              mountPath: /opt/keycloak/data/h2
+      volumes:
+        - name: realm
+          configMap:
+            name: fiapx-identity-realm
+        - name: h2
+          emptyDir:
+            medium: Memory

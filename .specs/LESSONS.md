@@ -224,6 +224,36 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: validation.md round 2 P2-2 (OBS-68); scripts/load-test.mjs:339 (load-test)
 - last seen: 2026-09-29T03:34:42Z
 
+### L-036 - A static no-raw-spawn scan must also match spawns through exported name constants (e.g. KUBECTL_BIN), not only quoted literals; never export a bare binary name from the chokepoint helper.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `scripts` · harmful: 0
+- features: local-kubernetes
+- evidence: M17 scripts/check-kubernetes.mjs:578 (scripts)
+- last seen: 2026-09-29T17:34:24Z
+
+### L-037 - A credential rule keyed on env-var names misses secrets embedded in URL values; also reject literal values carrying URL userinfo (scheme://user:pass@).
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `k8s` · harmful: 0
+- features: local-kubernetes
+- evidence: K8S-13/K8S-16, M26 (k8s)
+- last seen: 2026-09-29T17:34:24Z
+
+### L-038 - A source scan guarding a chokepoint must walk every script path recursively, not only the top-level directory.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `scripts` · harmful: 0
+- features: local-kubernetes
+- evidence: M17j scripts/check-kubernetes.mjs:740 (validation.md round 2, O2) (scripts)
+- last seen: 2026-09-29T17:48:07Z
+
+### L-039 - A manifest credential rule must cover every value route into a container (env, envFrom ConfigMaps, args), or the spec must scope it explicitly.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `k8s` · harmful: 0
+- features: local-kubernetes
+- evidence: M26b/M26c K8S-13 vs K8S-16 (validation.md round 2, O3) (k8s)
+- last seen: 2026-09-29T17:48:07Z
+
+### L-040 - Treat a textual no-raw-spawn scan as a tripwire against accidents, keep the real guarantee in behavioral self-tests of the chokepoint, and word docs accordingly.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `scripts` · harmful: 0
+- features: local-kubernetes
+- evidence: M17c/M17d/M17e/M17i (validation.md round 2, O1) (scripts)
+- last seen: 2026-09-29T17:48:07Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

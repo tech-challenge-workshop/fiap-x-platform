@@ -320,6 +320,49 @@ Each run prints its own summary, which must end `COMPLETED 50/50`. During the bu
 
 Its `--self-test` needs no stack. It drives the same functions with an injected HTTP driver and requires that every upload is in flight before the first status read, that each video gets its own `Idempotency-Key`, the status counts, and that a stuck or failed video is named. It also spawns a run against an API nothing listens on, which must exit 1, and a run with `--videos 51`, which must be refused. CI's `topology` job runs the self-test; the `integration` job runs `--videos 3` against the stack with one Worker.
 
+### Local Kubernetes (kind)
+
+The same topology also runs on a local [kind](https://kind.sigs.k8s.io/) cluster named `fiapx`, from the versioned manifests in [`k8s/`](k8s/), with the Worker scaled by queue depth through [KEDA](https://keda.sh/) ([AD-018](.specs/STATE.md)). Compose stays the everyday loop; the cluster is for the scaling scene and for CI's `kubernetes` job.
+
+**Prerequisites**: Docker (running), kind 0.33 or later, and kubectl 1.36 or later on `PATH`. The up command checks all three and the Docker daemon, and names every one that is missing before it creates anything.
+
+```sh
+node scripts/k8s-up.mjs                                    # create (or reuse) the cluster, install KEDA, apply k8s/, wait
+SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs  # the smoke, observing the cluster instead of Compose
+node scripts/check-kubernetes.mjs --live                   # workloads Ready, HPA present, targets up, dashboard served
+node scripts/k8s-down.mjs                                  # delete the fiapx cluster and its data
+```
+
+`k8s-up` creates the cluster (or reuses a healthy one with the same host ports), installs KEDA v2.21.0 from its release manifest after checking the pinned sha256, generates this cluster's Secrets, applies the kustomization and waits up to 600 s for every Deployment and StatefulSet to be Ready and the `storage-init` Job to complete. On a timeout it exits 1 naming each workload that is not Ready and why its pods are waiting, such as `ImagePullBackOff` with the image. Running it again against a healthy cluster changes nothing: Secrets are created only when absent, and the Worker keeps the replicas KEDA gave it. A cluster that exists but is unhealthy, or was created with other host ports, is refused with a hint to run `k8s-down` first. `k8s-down` deletes the `fiapx` cluster only, and exits 0 when there is none.
+
+**Your kubeconfig is never touched.** This machine's `~/.kube/config` may point at a real cluster. `kind create cluster` always makes the cluster it creates the current context of the kubeconfig it writes, so the scripts keep `fiapx` in a file of its own, `~/.kube/kind-fiapx.config`, and every kubectl call in `scripts/` goes through [`scripts/kube.mjs`](scripts/kube.mjs), which adds `--context kind-fiapx` and sets `KUBECONFIG` to that file alone. `node scripts/check-kubernetes.mjs` fails when any other script spawns kubectl or kind directly. Do the same by hand: prefix every kubectl command with the file and name the context, as all commands below do.
+
+```sh
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get pods
+```
+
+**Host ports.** The cluster publishes the host ports Compose uses, through kind port mappings, so the OIDC issuer (`http://localhost:8080/realms/fiapx`), presigned URLs on `localhost:9000`, `get-token`, the smoke and the load test work unchanged: 3000 API, 3001 Catalog, 3003 Notification, 8080 Keycloak, 9000 storage, 8025 Mailpit, 15672 and 15692 RabbitMQ, 9090 Prometheus, 3005 Grafana. `CATALOG_HOST_PORT` and `STORAGE_HOST_PORT` move the Catalog and storage ports as in [Host ports already in use](#host-ports-already-in-use); set them before creating the cluster, since its port map is fixed at creation. The Worker publishes no host port in the cluster. Because the ports are the same, **the cluster and the Compose stack cannot run at the same time**: `k8s-up` probes every port before creating the cluster and exits 1 naming each busy one. Run `docker compose down` first, and `node scripts/k8s-down.mjs` before going back to Compose.
+
+**Generated credentials.** No credential is versioned. `k8s-up` generates random values per cluster into Secrets and prints how to read them; the demo users `alice` and `bob` and the Postgres roles of `db/init/01-schemas.sql` keep their fixture passwords. Grafana (`http://localhost:3005`, user `admin`), Keycloak's admin and RabbitMQ's management user:
+
+```sh
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get secret fiapx-grafana-admin -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get secret fiapx-identity-admin -o jsonpath='{.data.KC_BOOTSTRAP_ADMIN_PASSWORD}' | base64 -d
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get secret fiapx-rabbitmq -o jsonpath='{.data.USERNAME}' | base64 -d
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get secret fiapx-rabbitmq -o jsonpath='{.data.PASSWORD}' | base64 -d
+```
+
+**Images.** The cluster builds nothing. It pulls `ghcr.io/tech-challenge-workshop/<repo>:main` for the four services (`imagePullPolicy: Always`), published for `linux/amd64` and `linux/arm64` by each service's `image` job on every merge to its `main`, next to a `:<commit sha>` tag. A change to a service reaches the cluster only after it is merged and published, so a feature that touches a service and this repository merges the **service pull requests first** and this repository's last, once the new `:main` images exist. If GitHub created a package private, export `GHCR_TOKEN` (a token with `read:packages`; `GHCR_USERNAME` optionally names its owner) before `k8s-up`: it creates a `ghcr-pull` Secret the namespace's pods pull with.
+
+**The scaling scene.** The Worker runs one replica with 1 CPU (request and limit, `FFMPEG_THREADS=1`). A KEDA `ScaledObject` watches RabbitMQ's management API every 5 s and asks for one replica per 2 messages ready or unacknowledged on `processing`, or per 20 on `video-validation`, from 1 up to 5. KEDA turns it into the HPA `keda-hpa-worker`. Each replica requests a full CPU, so five need five CPUs free in Docker; with fewer, the extra replicas stay `Pending`. In one terminal, watch the HPA; in another, send a burst of 200 videos, four runs of 50 at once:
+
+```sh
+KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get hpa -w
+for run in 1 2 3 4; do node scripts/load-test.mjs --videos 50 & done; wait
+```
+
+The replicas column goes 1 → N (up to 5) while the queues fill, each run ends `COMPLETED 50/50`, and the Worker returns to 1 replica within 300 s of the queues emptying (the HPA's scale-down window is 60 s). The overview dashboard on Grafana shows the queue depth and one `worker` target per replica, since Prometheus in the cluster discovers the Worker's pods. A Worker pod removed during scale-in hands its unacknowledged message back to the queue, so the job completes on another replica.
+
 ### CI and the required checks
 
 The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main` with no personal access token or secret, since they are public; `actions/checkout` uses the job's default `GITHUB_TOKEN`.
@@ -333,9 +376,12 @@ The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 
 - the workflow references `SERVICES_READ_TOKEN`;
 - the ten stack commands stop running in order;
 - the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step;
-- the `topology` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run each of `node scripts/check-observability.mjs`, `node scripts/check-observability.mjs --self-test` and `node scripts/load-test.mjs --self-test` as a one-line step of its own, so none can be removed or masked with `|| true`.
+- the `topology` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run each of `node scripts/check-observability.mjs`, `node scripts/check-observability.mjs --self-test`, `node scripts/load-test.mjs --self-test` and the Kubernetes offline checks (the `--self-test` of `kube.mjs`, `check-kubernetes.mjs`, `k8s-up.mjs` and `k8s-down.mjs`, `node scripts/check-kubernetes.mjs`, the `kubectl kustomize` render and the `kubeconform` validation) as a one-line step of its own, so none can be removed or masked with `|| true`;
+- the `kubernetes` job sets `if:`, `shell:` or `continue-on-error`, does not set `needs: [topology]` exactly, conditions a step other than `Collect cluster state and pod logs` and `Upload cluster logs` (`failure()`) or `Delete the kind cluster` (`always()`), or does not run `node scripts/k8s-up.mjs`, `SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs` and `node scripts/check-kubernetes.mjs --live` as one-line steps of their own.
 
-Renaming one of the three conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
+The `kubernetes` job installs kind v0.33.0 (checksum pinned), brings the cluster up with `GHCR_TOKEN` set to the job's `GITHUB_TOKEN`, runs the smoke against it and the live check, uploads the pods' state and logs on failure, and always deletes the cluster. It pulls the services' `:main` images, so it becomes a required check only after its first green run on `main`.
+
+Renaming one of the conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
 
 The checks each repository's `protect main` ruleset must require are versioned in [`ci/required-checks.json`](ci/required-checks.json): `quality` and `image` for the four services, and `topology`, `docs-links` and `integration` for this repository. Each is a `{ "context", "integration_id" }` pair pinned to the GitHub Actions app (`15368`), which posts every one of them, so a check of the same name posted by another app does not satisfy the ruleset. A job renamed in a workflow must be renamed there in the same change.
 
@@ -378,11 +424,12 @@ Step 10 recreates rather than restarts. A recreated `identity` starts from an em
 | `.specs/STATE.md` | Cross-repository decision log (AD-001 onward) |
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
+| `k8s/` | The Kubernetes manifests (one kustomization, namespace `fiapx`) and the kind cluster template |
 | `prometheus/` | The Prometheus scrape configuration |
 | `grafana/` | Grafana's provisioned datasource and dashboard provider, and the overview dashboard |
 | `rabbitmq/` | The broker's definitions (queues, dead-letter policy), configuration and enabled plugins |
 | `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
-| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check, load test, observability check |
+| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check, load test, observability check, Kubernetes up/down commands, their kubectl and kind helper, and the Kubernetes manifest check |
 | `ci/` | The required checks of each repository's `protect main` ruleset |
 | `fixtures/` | The committed source video the smoke uploads, the corrupted copy that must fail in processing, and their provenance ([`fixtures/README.md`](fixtures/README.md)) |
 | `db/` | The database bootstrap and the generated database creation script |
