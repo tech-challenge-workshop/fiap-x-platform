@@ -334,14 +334,16 @@ T12
 
 **Done when**:
 
-- [ ] `node scripts/generate-db-script.mjs --check` exits 0 **after** the Catalog S8 PR is on `main` (re-run post-merge; the integration job proves it)
-- [ ] Gate check passes: full gate + `--check`
-- [ ] Test count: gate layer (matrix)
+- [ ] `node scripts/generate-db-script.mjs --check` exits 0 **after** the Catalog S8 PR is on `main` (re-run post-merge; the integration job proves it) — open until the merge: passes locally against the sibling `processing-catalog` on `feat/observability`
+- [x] Gate check passes: full gate + `--check`
+- [x] Test count: gate layer (matrix)
 
 **Tests**: none
 **Gate**: build
 
 **Commit**: `feat(platform): regenerate the database creation script for the correlation column`
+
+**Status**: ✅ Complete locally (2026-09-28); the CI proof waits on the merge order. The generator reads each service's migrations from the sibling working tree (`../processing-catalog`, `../notification-service`), not from a branch, so it was run with both siblings on `feat/observability` and clean. Against `main` only the Catalog's migrations differ (`1789959000000-AddCorrelationId.ts`); Notification's are unchanged. Before regenerating, `--check` exited 1 at line 144 expecting `-- from 1789959000000-AddCorrelationId.ts`; the regenerated script adds exactly that block (`ALTER TABLE processing_request ADD COLUMN IF NOT EXISTS correlation_id varchar(128) NULL`) before the Notification section, and `--check` then exits 0. CI's `integration` job checks the Catalog out at `main`, so its `--check` fails until the Catalog PR merges; this PR merges last (AD-016, same constraint as AD-015). Phase 3 build gate: `generate-db-script` `--check` and `--self-test` 0, `check-observability` default and `--self-test` 0, `load-test --self-test` 0, docs-links and its self-test 0, governance and its self-test 0, worker sizing 0, no-storage-writes 0, `docker compose -f compose.yaml config -q` 0.
 
 ---
 

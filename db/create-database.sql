@@ -141,6 +141,10 @@ ALTER TABLE processing_request
 
 ALTER TABLE processing_request ALTER COLUMN owner_email DROP DEFAULT;
 
+-- from 1789959000000-AddCorrelationId.ts
+ALTER TABLE processing_request
+        ADD COLUMN IF NOT EXISTS correlation_id varchar(128) NULL;
+
 -- ============================================================
 -- notification-service (schema: notification)
 -- ============================================================
