@@ -13,8 +13,11 @@
 
 //   no token           SERVICES_READ_TOKEN appears nowhere in the workflow:
 //                      the four service repositories are public;
-//   the stack steps    the eight stack commands of the build gate run in
-//                      this order, and no other stack command is mixed in;
+//   the stack steps    the ten stack commands of the build gate run in
+//                      this order, and no other stack command is mixed in
+//                      (the last two, the small concurrent load and the live
+//                      observability check, are OBS-72's: guarded like the
+//                      smoke so neither can be masked or skipped);
 //   docs-links         the `docs-links` job sets no `if:`, `shell:` or
 //                      `continue-on-error`, conditions no step, and runs
 //                      `node scripts/check-docs-links.mjs` as a one-line step.
@@ -63,7 +66,10 @@ export const ACTIONS_APP_ID = 15368;
 const SMOKE = 'node scripts/smoke-local-integration.mjs';
 const IDENTITY = 'node scripts/check-identity.mjs';
 const RECREATE = 'docker compose up -d --wait --force-recreate identity storage-init api';
-// The build gate's stack steps (platform-gate-hardening, steps 6-11).
+const LOAD = 'node scripts/load-test.mjs --videos 3';
+const OBSERVABILITY_LIVE = 'node scripts/check-observability.mjs --live';
+// The build gate's stack steps (platform-gate-hardening, steps 6-11), then
+// observability's live load and live wiring check (OBS-72, OBS-74).
 const STACK_COMMANDS = [
   'docker compose up --build -d --wait',
   'node scripts/check-storage-bootstrap.mjs',
@@ -73,6 +79,8 @@ const STACK_COMMANDS = [
   RECREATE,
   SMOKE,
   IDENTITY,
+  LOAD,
+  OBSERVABILITY_LIVE,
 ];
 const STACK_SET = new Set(STACK_COMMANDS);
 const TOKEN = 'SERVICES_READ_TOKEN';
@@ -457,6 +465,12 @@ jobs:
       - name: Check the identity service again after the recreate
         working-directory: fiap-x-platform
         run: node scripts/check-identity.mjs
+      - name: Run a small concurrent load
+        working-directory: fiap-x-platform
+        run: node scripts/load-test.mjs --videos 3
+      - name: Check every service is scraped and the dashboard provisioned
+        working-directory: fiap-x-platform
+        run: node scripts/check-observability.mjs --live
       - name: Collect container logs
         if: failure()
         working-directory: fiap-x-platform
@@ -762,7 +776,14 @@ function selfTest() {
       `integration stack step 6 must be "${RECREATE}", but it is "${SMOKE}"`,
     ]],
     ['an extra smoke after the stack steps', extraSmoke, [
-      `integration stack step 9 must be nothing more, but it is "${SMOKE}"`,
+      `integration stack step 11 must be nothing more, but it is "${SMOKE}"`,
+    ]],
+    ['the load test masked with || true', replaceOnce(GOOD, `run: ${LOAD}\n`, `run: ${LOAD} || true\n`), [
+      `stack command "${LOAD}" must be a one-line run step of its own`,
+      `integration stack step 9 must be "${LOAD}", but it is "${OBSERVABILITY_LIVE}"`,
+    ]],
+    ['the live observability check dropped', replaceOnce(GOOD, `        run: ${OBSERVABILITY_LIVE}\n`, '        run: echo skipped\n'), [
+      `integration stack step 10 must be "${OBSERVABILITY_LIVE}", but the job runs no further stack command`,
     ]],
     ['every stack command missing', noStack, [
       'integration stack step 1 must be "docker compose up --build -d --wait", but the job runs no further stack command',

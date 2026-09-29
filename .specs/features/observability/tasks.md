@@ -259,14 +259,16 @@ T12
 
 **Done when**:
 
-- [ ] `check-ci-governance.mjs --self-test` still passes (its guard on `integration` shape is intact)
-- [ ] Gate check passes: full self-test gate
-- [ ] Test count: asserted via the governance self-test
+- [x] `check-ci-governance.mjs --self-test` still passes (its guard on `integration` shape is intact)
+- [x] Gate check passes: full self-test gate
+- [x] Test count: asserted via the governance self-test
 
 **Tests**: self-test
 **Gate**: full
 
 **Commit**: `ci(platform): gate the observability wiring and the small live load`
+
+**Status**: ✅ Complete (2026-09-28). `topology` gains three steps: `check-observability.mjs` (the real tree and rendered compose), its `--self-test`, and `load-test.mjs --self-test` (OBS-72 asks for the load test's self-test in CI; it runs in `topology` with the other self-tests, as design.md notes). `integration` gains, after the second smoke and identity check, `load-test.mjs --videos 3` and `check-observability.mjs --live`. Beyond the task: both live commands join `check-ci-governance.mjs`'s guarded stack commands (now 10, in order), so a `|| true`, a condition or a removal fails the governance check as it would for the smoke; its self-test gains two cases (load test masked with `|| true`; live check dropped) and the extra-smoke case now names position 11. Governance self-test: 30 bad workflows rejected (was 28), 2 good accepted; the real `ci.yml` passes. Phase 2 build gate: `check-observability` self-test and default 0, `load-test` self-test 0, docs-links 0, governance and its self-test 0, `compose config -q` 0, and every other topology check still 0.
 
 ---
 
