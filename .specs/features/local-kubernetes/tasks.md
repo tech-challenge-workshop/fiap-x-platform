@@ -469,12 +469,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the notification deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/notification.yaml`, added to `resources`: Deployment `notification` (1 replica, label `app=notification`), image `notification-service` (rendered `ghcr.io/tech-challenge-workshop/notification-service:main`), `imagePullPolicy: Always`; env as Compose (`PORT=3003`, `LOCAL_INTEGRATION=true`, `DATABASE_*` with schema and user `notification`, `SMTP_HOST=mailpit`, `SMTP_PORT=1025`, `SMTP_FROM=fiapx@local`), with `DATABASE_PASSWORD` from `secretKeyRef` `fiapx-postgres/NOTIFICATION_DB_PASSWORD` and `RABBITMQ_URL` from `fiapx-rabbitmq/URL`; named port `http` 3003; probes as T15 (readiness `GET /health`, liveness `GET /health/live`); requests 100m / 128Mi, memory limit 512Mi. Services: `notification` ClusterIP 3003 and `notification-host` NodePort 3003→30003. Full gate 0: default mode 29 objects, kubeconform `Valid: 29, Invalid: 0`.
 
 ---
 
