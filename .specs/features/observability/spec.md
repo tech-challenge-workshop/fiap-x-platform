@@ -132,10 +132,10 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 | OBS-65 | P1: Stack (recreate from repo) | Execute | Implementing (T5) |
 | OBS-66 | P1: Stack (config from repo, no creds on targets) | Execute | Implementing (T5) |
 | OBS-67 | P2: Replicas (N workers) | Execute | Implementing (T5; live in T12) |
-| OBS-68 | P2: Load test (N pipelines) | Design | Pending |
+| OBS-68 | P2: Load test (N pipelines) | Execute | Implementing (T6; live in T12) |
 | OBS-69 | P2: Load test (dashboard evidence) | Design | Pending |
-| OBS-70 | P2: Load test (failure exit) | Design | Pending |
-| OBS-71 | P2: Load test (self-test) | Design | Pending |
+| OBS-70 | P2: Load test (failure exit) | Execute | Implementing (T6) |
+| OBS-71 | P2: Load test (self-test) | Execute | Implementing (T6) |
 | OBS-72 | P2: CI (self-test + small live load) | Design | Pending |
 | OBS-73 | P3: Documented operator walkthrough | Design | Pending |
 | OBS-74 | P1: Stack (observability check script) | Design | Pending |

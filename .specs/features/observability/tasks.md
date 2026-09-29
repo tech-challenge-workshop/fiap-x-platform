@@ -209,14 +209,16 @@ T12
 
 **Done when**:
 
-- [ ] `--self-test` exits 0 and covers: N=1..50 validation, concurrent starts (all N in flight before any completes), one stuck video → non-zero exit naming it
-- [ ] Gate check passes: `node scripts/load-test.mjs --self-test`
-- [ ] Test count: 12 self-test assertions pass (no silent deletions)
+- [x] `--self-test` exits 0 and covers: N=1..50 validation, concurrent starts (all N in flight before any completes), one stuck video → non-zero exit naming it
+- [x] Gate check passes: `node scripts/load-test.mjs --self-test`
+- [x] Test count: 12 self-test assertions pass (no silent deletions)
 
 **Tests**: self-test
 **Gate**: quick
 
 **Commit**: `feat(platform): add the concurrent load test script`
+
+**Status**: ✅ Complete (2026-09-28). Self-test: 20 assertions (planned 12): defaults; N=1 and N=50 accepted; N=0, 51, 2.5, `six`, -1 rejected with the exact message; timeout 0 rejected; 5 uploads all in flight before the first status read (a barrier holds each start until all have started); one Idempotency-Key per video; each part PUT with its slice; one token on every API call; mixed-run counts `COMPLETED 2/3, FAILED 1/3` with the FAILED video named; a stuck video named `still PROCESSING after 120 s`; a clean run passes; a spawned run against a dead API exits 1 naming each video; a spawned `--videos 51` exits 2. Six mutants on scratch copies (sequential driver, no timeout, FAILED accepted, exit 0 on failure, max 49, one shared key) were each killed. Interpretation: the verdict requires COMPLETED, not just a terminal status, because OBS-69 asks for "all N videos completing" and a FAILED run of the valid fixture is a defect; the report still counts every status. Polling reads the request through the API with the run's one token.
 
 ---
 
