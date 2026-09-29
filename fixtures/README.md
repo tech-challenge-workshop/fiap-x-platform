@@ -2,7 +2,7 @@
 
 ## `sample-8s.mp4`
 
-A synthetic test video. It is the source object the seed script puts in the bucket, so the Worker has a real MP4 to process before the upload path (S6) exists.
+A synthetic test video, and the one real video the end-to-end tests send. The smoke uploads it as `alice` through the API's public upload flow and requires it to reach `COMPLETED` with an archive of 8 frames; `scripts/load-test.mjs` uploads it once for every video it drives. It was first put in the bucket by a seed script, which S6 removed when uploads started going through the API.
 
 | Property | Value |
 | --- | --- |
@@ -29,7 +29,7 @@ The spec first proposed generating the file at seed time. The design revised tha
 
 ### The smoke depends on these numbers
 
-The frame count the smoke expects in the produced archive is derived from this file: 8 seconds at 1 frame per second gives **8 entries**. Replacing the fixture without changing that expectation makes the smoke fail with both numbers named, rather than passing unnoticed.
+The frame count the smoke's `archive count` step expects in the archive the download URL serves is derived from this file: 8 seconds at 1 frame per second gives **8 entries**. Replacing the fixture without changing that expectation makes the smoke fail with both numbers named, rather than passing unnoticed.
 
 ## `corrupted-8s.mp4`
 
