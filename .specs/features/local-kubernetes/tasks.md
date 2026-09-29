@@ -377,12 +377,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the storage bootstrap job`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/storage-init-job.yaml`, added to `resources`: Job `storage-init` (`backoffLimit: 6`, `restartPolicy: Never`, label `app=storage-init`), image `amazon/aws-cli:2.37.4`, command `/bin/bash /bootstrap/bootstrap.sh` (the Compose entrypoint, with ConfigMap `fiapx-storage-bootstrap` mounted read-only at `/bootstrap`); `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from `secretKeyRef` `fiapx-storage` `ACCESS_KEY`/`SECRET_KEY`; `AWS_DEFAULT_REGION=us-east-1`, `AWS_ENDPOINT_URL=http://storage:9000`, `STORAGE_BUCKET=fiapx`; requests 50m / 128Mi, memory limit 256Mi. It does not wait for storage: an attempt against a storage that is not serving fails and the Job retries with back-off. Note for T25: a Job's pod template is immutable, and the ConfigMap's hash suffix is part of it, so a changed `bootstrap.sh` makes a re-apply against an existing cluster fail on this Job; the up command must delete a finished `storage-init` whose template differs (or always delete it before applying). Full gate 0: default mode 17 objects, kubeconform `Valid: 17, Invalid: 0`.
 
 ---
 
