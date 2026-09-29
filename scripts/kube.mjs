@@ -11,7 +11,11 @@
 // (`exec … -- psql …`) and are not checked.
 //
 // `scripts/check-kubernetes.mjs` fails when any other script spawns kubectl
-// directly.
+// directly. The binary names stay private to this file: no export is a bare
+// `kubectl` or `kind` another script could spawn (the self-test checks every
+// export), and the scan also refuses the identifiers KUBECTL, KUBECTL_BIN,
+// KIND and KIND_BIN outside this file. Other scripts print commands through
+// kubectlHint(), which always names the cluster's kubeconfig and context.
 //
 // The cluster lives in its own kubeconfig, KUBECONFIG_PATH
 // (~/.kube/kind-fiapx.config), never in ~/.kube/config: `kind create
@@ -33,14 +37,23 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// This module's own exports, which the self-test inspects.
+import * as self from './kube.mjs';
 
 export const KIND_CLUSTER = 'fiapx';
 export const KUBE_CONTEXT = `kind-${KIND_CLUSTER}`;
 export const NAMESPACE = 'fiapx';
-// The binary's name, for messages in other scripts (the static scan refuses a
-// bare tool-name string outside this file).
-export const KUBECTL_BIN = 'kubectl';
+// The binaries' names. Not exported: a script holding one could spawn it
+// against the machine's current context (K8S-04).
+const KUBECTL = 'kubectl';
+const KIND = 'kind';
 export const KUBECONFIG_PATH = join(homedir(), '.kube', `${KUBE_CONTEXT}.config`);
+// The message when the kube client is not installed.
+export const KUBECTL_NOT_FOUND = `${KUBECTL} not found on PATH (install ${KUBECTL} v1.36 or later)`;
+// The topology job's render step in .github/workflows/ci.yml, which
+// check-ci-governance compares, never runs. `kubectl kustomize` renders the
+// manifests locally and reads no cluster.
+export const KUSTOMIZE_RENDER_STEP = `${KUBECTL} kustomize --load-restrictor LoadRestrictionsNone k8s > rendered-k8s.yaml`;
 
 // Flags that would send the call to another cluster or credential set.
 const REDIRECTING_FLAGS = ['--context', '--kubeconfig', '--cluster', '--server', '-s', '--user'];
@@ -73,7 +86,19 @@ export function kubectlArgs(args) {
 // kept except for KUBECONFIG.
 export function kubectl(args, opts = {}, spawner = spawnSync) {
   const env = { ...(opts.env ?? process.env), KUBECONFIG: KUBECONFIG_PATH };
-  return spawner(KUBECTL_BIN, kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts, env });
+  return spawner(KUBECTL, kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts, env });
+}
+
+// A kubectl command line for a person to run, for hints and messages:
+// `KUBECONFIG=<KUBECONFIG_PATH> kubectl --context kind-fiapx -n fiapx <rest>`.
+// It names the cluster's own kubeconfig and context, so it reaches kind-fiapx
+// or nothing. `rest` may not name another context, kubeconfig, cluster,
+// server or user.
+export function kubectlHint(rest) {
+  if (typeof rest !== 'string' || rest.trim() === '') throw new Error('kubectlHint: the command must be a non-empty string');
+  const flag = REDIRECTING_FLAGS.find((f) => rest.split(/\s+/).some((arg) => arg === f || arg.startsWith(`${f}=`)));
+  if (flag) throw new Error(`kubectlHint: ${flag} is refused; every command is pinned to --context ${KUBE_CONTEXT}`);
+  return `KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL} --context ${KUBE_CONTEXT} -n ${NAMESPACE} ${rest}`;
 }
 
 // The kind commands the scripts run. `create cluster` and `delete cluster`
@@ -93,7 +118,7 @@ export function kindArgs(args) {
 
 // Runs `kind <args>` (see kindArgs) and returns spawnSync's result.
 export function kind(args, opts = {}, spawner = spawnSync) {
-  return spawner('kind', kindArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+  return spawner(KIND, kindArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 
 function selfTest() {
@@ -207,12 +232,37 @@ function selfTest() {
     expect(`kind ${JSON.stringify(args)} spawns nothing`, calls.length, 0);
   }
 
+  // Hints name the cluster's kubeconfig and context and refuse a redirect.
+  expect('kubectlHint', kubectlHint('get hpa -w'), `KUBECONFIG=${KUBECONFIG_PATH} kubectl --context kind-fiapx -n fiapx get hpa -w`);
+  for (const [rest, message] of [
+    ['get pods --context=eks', 'kubectlHint: --context is refused; every command is pinned to --context kind-fiapx'],
+    ['get pods --kubeconfig /home/me/.kube/config', 'kubectlHint: --kubeconfig is refused; every command is pinned to --context kind-fiapx'],
+    ['', 'kubectlHint: the command must be a non-empty string'],
+  ]) {
+    try {
+      kubectlHint(rest);
+      failures.push(`kubectlHint ${JSON.stringify(rest)}: returned, expected it to throw ${JSON.stringify(message)}`);
+    } catch (error) {
+      expect(`kubectlHint ${JSON.stringify(rest)} message`, error.message, message);
+    }
+  }
+
+  // No export hands another script a spawnable binary name (K8S-04): no
+  // exported string is, or ends in a path to, kubectl or kind.
+  const exported = self;
+  const spawnable = Object.entries(exported)
+    .filter(([, value]) => typeof value === 'string' && /^(?:\S*\/)?(?:kubectl|kind)$/.test(value.trim()))
+    .map(([name]) => name);
+  expect('exports holding a binary name', spawnable, []);
+  expect('exports', Object.keys(exported).sort(),
+    ['KIND_CLUSTER', 'KUBECONFIG_PATH', 'KUBECTL_NOT_FOUND', 'KUBE_CONTEXT', 'KUSTOMIZE_RENDER_STEP', 'NAMESPACE', 'kind', 'kindArgs', 'kubectl', 'kubectlArgs', 'kubectlHint']);
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`kube self-test failed: ${failure}`);
     process.exit(1);
   }
   console.log(
-    `kube self-test passed: ${accepted.length + 2} calls spawned with --context kind-fiapx first and KUBECONFIG ${KUBECONFIG_PATH}, ${refused.length} refused calls threw the expected message and spawned nothing; ${kindAccepted.length} kind calls built exactly, ${kindRefused.length} refused`,
+    `kube self-test passed: ${accepted.length + 2} calls spawned with --context kind-fiapx first and KUBECONFIG ${KUBECONFIG_PATH}, ${refused.length} refused calls threw the expected message and spawned nothing; ${kindAccepted.length} kind calls built exactly, ${kindRefused.length} refused; hints pinned, 3 refused; no export holds a binary name`,
   );
 }
 

@@ -58,7 +58,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KIND_CLUSTER, KUBECONFIG_PATH, KUBECTL_BIN, KUBE_CONTEXT, NAMESPACE, kind, kubectl } from './kube.mjs';
+import { KIND_CLUSTER, KUBECONFIG_PATH, KUBECTL_NOT_FOUND, NAMESPACE, kind, kubectl, kubectlHint } from './kube.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(SELF), '..');
@@ -216,7 +216,7 @@ export function pendingWorkloads(workloads, hpas) {
     }
   }
   if (!items.some((o) => o.kind === 'Job' && o.metadata.name === BOOTSTRAP_JOB)) pending.push({ id: `Job/${BOOTSTRAP_JOB}`, app: BOOTSTRAP_JOB, state: 'not created' });
-  if (!hpas.includes(WORKER_HPA)) pending.push({ id: `HorizontalPodAutoscaler/${WORKER_HPA}`, app: null, state: `not created by KEDA yet (see ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} describe scaledobject worker)` });
+  if (!hpas.includes(WORKER_HPA)) pending.push({ id: `HorizontalPodAutoscaler/${WORKER_HPA}`, app: null, state: `not created by KEDA yet (see ${kubectlHint('describe scaledobject worker')})` });
   return { pending, failed };
 }
 
@@ -291,7 +291,7 @@ const output = (run) => (run.error ? run.error.message : (run.stderr || run.stdo
 export function preflightTools(deps) {
   const problems = [];
   if (missing(deps.kind(['version']))) problems.push('kind not found on PATH (install kind v0.33 or later)');
-  if (missing(deps.kubectl(['version', '--client']))) problems.push(`${KUBECTL_BIN} not found on PATH (install ${KUBECTL_BIN} v1.36 or later)`);
+  if (missing(deps.kubectl(['version', '--client']))) problems.push(KUBECTL_NOT_FOUND);
   const docker = deps.docker(['info', '--format', '{{.ServerVersion}}']);
   if (missing(docker)) problems.push('docker not found on PATH (install Docker)');
   else if (docker.status !== 0 || docker.error) problems.push(`the Docker daemon is not reachable (docker info: ${output(docker)})`);
@@ -447,7 +447,7 @@ export async function waitForTopology(deps, budgetMs = WAIT_BUDGET_MS) {
 }
 
 export function endpoints(ports) {
-  const read = (secret, key) => `KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} get secret ${secret} -o jsonpath='{.data.${key}}' | base64 -d`;
+  const read = (secret, key) => `${kubectlHint(`get secret ${secret} -o jsonpath='{.data.${key}}'`)} | base64 -d`;
   return [
     'k8s-up: the topology is ready on the kind cluster fiapx',
     '  API           http://localhost:3000',
@@ -463,7 +463,7 @@ export function endpoints(ports) {
     `  Grafana admin:   ${read('fiapx-grafana-admin', 'GF_SECURITY_ADMIN_PASSWORD')}`,
     `  Keycloak admin:  ${read('fiapx-identity-admin', 'KC_BOOTSTRAP_ADMIN_PASSWORD')}`,
     `  RabbitMQ user:   ${read('fiapx-rabbitmq', 'USERNAME')}, password ${read('fiapx-rabbitmq', 'PASSWORD')}`,
-    `Watch the Worker scale: KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} get hpa -w`,
+    `Watch the Worker scale: ${kubectlHint('get hpa -w')}`,
   ].join('\n');
 }
 
@@ -535,6 +535,9 @@ function readyRound(change = (r) => r) {
 }
 const replaceItem = (round, name, item) => ({ ...round, workloads: { items: round.workloads.items.map((o) => (o.metadata.name === name ? item : o)) } });
 
+// The label the fakes record a kubectl() call under; a call, not a binary.
+const KUBE_CALL = 'kubectl()';
+
 // Fakes of every effect. `world` describes the machine: tools present, the
 // daemon, the clusters kind lists, node readiness, the recorded host map,
 // the Secrets present and the busy ports.
@@ -562,7 +565,7 @@ function fakeDeps(world = {}) {
       return ok();
     },
     kubectl(args, opts) {
-      calls.push({ tool: KUBECTL_BIN, args, opts });
+      calls.push({ tool: KUBE_CALL, args, opts });
       if (!w.tools.kubectl) return enoent();
       const [verb, what, name] = args;
       if (verb === 'version') return ok('Client Version: v1.36.1');
@@ -631,7 +634,7 @@ async function selfTest() {
     }
   };
   const created = (deps) => deps.calls.filter((c) => c.tool === 'kind' && c.args[0] === 'create').length;
-  const mutations = (deps) => deps.calls.filter((c) => (c.tool === 'kind' && c.args[0] === 'create') || (c.tool === KUBECTL_BIN && ['apply', 'create'].includes(c.args[0])));
+  const mutations = (deps) => deps.calls.filter((c) => (c.tool === 'kind' && c.args[0] === 'create') || (c.tool === KUBE_CALL && ['apply', 'create'].includes(c.args[0])));
   const alnum = /^[A-Za-z0-9]+$/;
 
   // Rendering the kind config (T8's template).
@@ -651,7 +654,7 @@ async function selfTest() {
   // K8S-05: preflight names each missing tool and creates nothing.
   const preflight = [
     ['kind missing', { tools: { kind: false, kubectl: true, docker: true } }, 'preflight failed, nothing was created: kind not found on PATH (install kind v0.33 or later)'],
-    ['the kube client missing', { tools: { kind: true, kubectl: false, docker: true } }, `preflight failed, nothing was created: ${KUBECTL_BIN} not found on PATH (install ${KUBECTL_BIN} v1.36 or later)`],
+    ['the kube client missing', { tools: { kind: true, kubectl: false, docker: true } }, `preflight failed, nothing was created: ${KUBECTL_NOT_FOUND}`],
     ['docker missing', { tools: { kind: true, kubectl: true, docker: false } }, 'preflight failed, nothing was created: docker not found on PATH (install Docker)'],
     ['Docker daemon down', { daemon: false }, 'preflight failed, nothing was created: the Docker daemon is not reachable (docker info: Cannot connect to the Docker daemon at unix:///var/run/docker.sock)'],
     ['kind and docker missing', { tools: { kind: false, kubectl: true, docker: false } }, 'preflight failed, nothing was created: kind not found on PATH (install kind v0.33 or later); docker not found on PATH (install Docker)'],
@@ -705,11 +708,11 @@ async function selfTest() {
   const create = fresh.calls.find((c) => c.tool === 'kind' && c.args[0] === 'create');
   expect('fresh: kind create arguments', [create.args.slice(0, 3), create.args.slice(4)], [['create', 'cluster', '--config'], ['--wait', '120s']]);
   expect('fresh: the cluster config is the rendered template', fresh.createdConfig, rendered);
-  const applied = fresh.calls.filter((c) => c.tool === KUBECTL_BIN && c.args[0] === 'apply').map((c) => c.opts.input);
+  const applied = fresh.calls.filter((c) => c.tool === KUBE_CALL && c.args[0] === 'apply').map((c) => c.opts.input);
   expect('fresh: namespace applied from k8s/namespace.yaml', applied[0], readFileSync(join(REPO_ROOT, 'k8s', 'namespace.yaml'), 'utf8'));
   expect('fresh: fiapx-host', JSON.parse(applied[1]), { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'fiapx-host', namespace: 'fiapx' }, data: { CATALOG_HOST_PORT: '3001', STORAGE_HOST_PORT: '9000', STORAGE_PUBLIC_ENDPOINT: 'http://localhost:9000' } });
   expect('fresh: Secrets created', first.created, ['fiapx-postgres', 'fiapx-storage', 'fiapx-rabbitmq', 'fiapx-keda-rabbitmq', 'fiapx-identity-admin', 'fiapx-grafana-admin']);
-  const creates = fresh.calls.filter((c) => c.tool === KUBECTL_BIN && c.args[0] === 'create');
+  const creates = fresh.calls.filter((c) => c.tool === KUBE_CALL && c.args[0] === 'create');
   expect('fresh: Secrets go through create -f -, never apply', creates.map((c) => c.args), creates.map(() => ['create', '-f', '-']));
   expect('fresh: no Secret is ever applied', applied.some((i) => i.includes('"kind":"Secret"')), false);
   const s = fresh.world.secrets;
@@ -766,9 +769,9 @@ async function selfTest() {
     await provision(deps, { GHCR_TOKEN: 'ghp_token', GHCR_USERNAME: 'octo' });
     const auth = JSON.parse(deps.world.secrets['ghcr-pull']['.dockerconfigjson']).auths['ghcr.io'].auth;
     expect('ghcr-pull auth', Buffer.from(auth, 'base64').toString(), 'octo:ghp_token');
-    const sa = deps.calls.filter((c) => c.tool === KUBECTL_BIN && c.args[0] === 'apply').map((c) => c.opts.input).find((i) => i.includes('ServiceAccount'));
+    const sa = deps.calls.filter((c) => c.tool === KUBE_CALL && c.args[0] === 'apply').map((c) => c.opts.input).find((i) => i.includes('ServiceAccount'));
     expect('default ServiceAccount pulls with ghcr-pull', JSON.parse(sa ?? '{}'), { apiVersion: 'v1', kind: 'ServiceAccount', metadata: { name: 'default', namespace: 'fiapx' }, imagePullSecrets: [{ name: 'ghcr-pull' }] });
-    const createInput = deps.calls.find((c) => c.tool === KUBECTL_BIN && c.args[0] === 'create' && c.opts.input.includes('ghcr-pull'))?.opts.input;
+    const createInput = deps.calls.find((c) => c.tool === KUBE_CALL && c.args[0] === 'create' && c.opts.input.includes('ghcr-pull'))?.opts.input;
     expect('ghcr-pull type', JSON.parse(createInput ?? '{}').type, 'kubernetes.io/dockerconfigjson');
   }
 
@@ -778,7 +781,7 @@ async function selfTest() {
   expect('realDeps use the kube.mjs helpers', [realDeps.kubectl.toString().includes('kubectl(args'), realDeps.kind.toString().includes('kind(args')], [true, true]);
 
   // ---- part 2: KEDA, apply, wait.
-  const kubectlCalls = (deps) => deps.calls.filter((c) => c.tool === KUBECTL_BIN);
+  const kubectlCalls = (deps) => deps.calls.filter((c) => c.tool === KUBE_CALL);
 
   // The pinned value is the real release's sha256 (downloaded once, T25).
   expect('KEDA pin', [KEDA.url, KEDA.sha256, KEDA.deployments], ['https://github.com/kedacore/keda/releases/download/v2.21.0/keda-2.21.0.yaml', 'b43c89ffeef81722d7e2dd2c079d74789767a0f89cae1336cff784994814f6d7', ['keda-operator', 'keda-metrics-apiserver', 'keda-admission']]);
@@ -859,7 +862,7 @@ async function selfTest() {
     await expectThrows('wait: a running pod that is not ready and a missing HPA', () => waitForTopology(deps, 10000), [
       'not ready after 10 s:',
       '  Deployment/grafana 0/1 ready: grafana-x: grafana running, not ready',
-      `  HorizontalPodAutoscaler/keda-hpa-worker: not created by KEDA yet (see ${KUBECTL_BIN} --context kind-fiapx -n fiapx describe scaledobject worker)`,
+      `  HorizontalPodAutoscaler/keda-hpa-worker: not created by KEDA yet (see KUBECONFIG=${KUBECONFIG_PATH} kubectl --context kind-fiapx -n fiapx describe scaledobject worker)`,
     ].join('\n'));
   }
   // The bootstrap Job failing stops the wait at once, naming it; the API
@@ -894,7 +897,7 @@ async function selfTest() {
       .filter((step) => ['kind create', 'fetch', 'apply --server-side', 'wait --for=condition=Available', 'kustomize --load-restrictor', 'get deployments,statefulsets,jobs'].includes(step) || step.startsWith('create -f'));
     expect('up: steps in order', [...new Set(order)], ['kind create', 'create -f', 'fetch', 'apply --server-side', 'wait --for=condition=Available', 'kustomize --load-restrictor', 'get deployments,statefulsets,jobs']);
     const printed = deps.logs.at(-1);
-    expect('up: endpoints and the password hints', [printed.startsWith('k8s-up: the topology is ready on the kind cluster fiapx'), printed.includes(`KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context kind-fiapx -n fiapx get secret fiapx-grafana-admin -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d`)], [true, true]);
+    expect('up: endpoints and the password hints', [printed.startsWith('k8s-up: the topology is ready on the kind cluster fiapx'), printed.includes(`KUBECONFIG=${KUBECONFIG_PATH} kubectl --context kind-fiapx -n fiapx get secret fiapx-grafana-admin -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d`)], [true, true]);
     expect('up: moved ports are the ones printed', endpoints({ CATALOG_HOST_PORT: 33001, STORAGE_HOST_PORT: 39000 }).split('\n').filter((l) => /Catalog|Storage/.test(l)), ['  Catalog       http://localhost:33001', '  Storage (S3)  http://localhost:39000']);
   }
 

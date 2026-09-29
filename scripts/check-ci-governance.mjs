@@ -63,7 +63,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KUBECTL_BIN } from './kube.mjs';
+import { KUSTOMIZE_RENDER_STEP } from './kube.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(SELF), '..');
@@ -113,9 +113,9 @@ const CHECK_KUBERNETES = 'node scripts/check-kubernetes.mjs';
 const CHECK_KUBERNETES_SELF_TEST = 'node scripts/check-kubernetes.mjs --self-test';
 const K8S_UP_SELF_TEST = 'node scripts/k8s-up.mjs --self-test';
 const K8S_DOWN_SELF_TEST = 'node scripts/k8s-down.mjs --self-test';
-// Built from KUBECTL_BIN: check-kubernetes refuses a kubectl command-line
-// string outside scripts/kube.mjs, and this one is only compared, never run.
-const KUSTOMIZE_RENDER = `${KUBECTL_BIN} kustomize --load-restrictor LoadRestrictionsNone k8s > rendered-k8s.yaml`;
+// From scripts/kube.mjs: check-kubernetes refuses a kubectl command-line
+// string outside that file, and this one is only compared, never run.
+const KUSTOMIZE_RENDER = KUSTOMIZE_RENDER_STEP;
 const KUBECONFORM = "kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' rendered-k8s.yaml";
 const TOPOLOGY_COMMANDS = [
   OBSERVABILITY, OBSERVABILITY_SELF_TEST, LOAD_SELF_TEST,
@@ -648,7 +648,7 @@ jobs:
         if: failure()
         run: |
           set +e
-          KUBECONFIG=$HOME/.kube/kind-fiapx.config ${KUBECTL_BIN} --context kind-fiapx -n fiapx get pods > cluster-logs.txt 2>&1
+          KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get pods > cluster-logs.txt 2>&1
           exit 0
       - name: Upload cluster logs
         if: failure()

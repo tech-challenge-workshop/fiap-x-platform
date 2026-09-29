@@ -34,14 +34,16 @@
 //                 manifest has not landed yet.
 //
 // It also scans scripts/*.mjs: no script other than scripts/kube.mjs may
-// spawn kubectl directly (a bare "kubectl" string, or a string that starts a
-// kubectl command line without `--context kind-fiapx`), nor spawn kind
+// spawn kubectl directly (a bare "kubectl" string, a string that starts a
+// kubectl command line without `--context kind-fiapx`, or the identifier
+// KUBECTL or KUBECTL_BIN - the binary's name, which kube.mjs keeps private,
+// whether imported, spawned or interpolated), nor spawn kind
 // directly (kind rewrites the current context of the kubeconfig it writes;
 // kube.mjs pins it to --name fiapx and ~/.kube/kind-fiapx.config). "kind" is
 // also a Kubernetes field and a smoke target, so the kind rule looks for the
 // shape of a spawn: a child_process call or an injected spawner given "kind"
 // and an argument array, a `sh -c` string starting with kind, or a path to
-// the binary.
+// the binary, or the identifier KIND or KIND_BIN.
 //
 // The per-object rules pass an empty render; the workloads rule does not, so
 // default mode fails on a render that lost a manifest. K8S_RENDER, when set,
@@ -92,6 +94,10 @@ const SERVICES = {
 const CREDENTIAL_ENV = /PASSWORD|SECRET|ACCESS_KEY|TOKEN/i;
 const SCALING = { min: 1, max: 5, targets: { processing: '2', 'video-validation': '20' } };
 const HELPER = 'kube.mjs';
+// The identifiers that would hold a binary's name, built at run time so this
+// file's own scan does not find them.
+const KUBECTL_NAME = ['KUBE', 'CTL'].join('');
+const KIND_NAME = ['KI', 'ND'].join('');
 // Every object the topology needs, as Kind/name (K8S-02).
 const REQUIRED = [
   'Deployment/api',
@@ -571,17 +577,21 @@ export function missingWorkloads(objects) {
 
 // `files` maps a script's file name to its source. Only kube.mjs may spawn
 // kubectl; elsewhere a bare "kubectl" string (a command to spawn) or a string
-// that starts a kubectl command line without the pinned context is refused.
-// Lines that are `//` comments are not scanned.
+// that starts a kubectl command line without the pinned context is refused,
+// and so is the identifier KUBECTL or KUBECTL_BIN: a variable holding the
+// binary's name spawns it as easily as the string does
+// (`spawnSync(KUBECTL_BIN, args)`, `execSync(`${KUBECTL_BIN} get pods`)`),
+// and kube.mjs exports none. Lines that are `//` comments are not scanned.
 export function rawKubectlProblems(files) {
   const problems = [];
   const bare = /(['"`])(?:[^'"`\s]*\/)?kubectl\1/;
   const commandLine = /(['"`])(?:[^'"`\s]*\/)?kubectl\s+(?!--context kind-fiapx\b)/;
+  const binaryName = new RegExp(`\\b${KUBECTL_NAME}(?:_BIN)?\\b`);
   for (const [name, source] of Object.entries(files)) {
     if (name === HELPER) continue;
     const lines = source.split('\n');
     // A `//` comment line documents a command; it spawns nothing.
-    const at = lines.findIndex((line) => !/^\s*\/\//.test(line) && (bare.test(line) || commandLine.test(line)));
+    const at = lines.findIndex((line) => !/^\s*\/\//.test(line) && (bare.test(line) || commandLine.test(line) || binaryName.test(line)));
     if (at !== -1) {
       problems.push(`scripts/${name}:${at + 1}: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx`);
     }
@@ -604,6 +614,8 @@ export function rawKindProblems(files) {
     new RegExp(`(['"\`])-c\\1\\s*,\\s*(['"\`])${name}\\s`),
     // a path to the binary: '/usr/local/bin/kind'
     /(['"`])[^'"`\s]*\/kind\1/,
+    // a variable holding the binary's name, which kube.mjs keeps private
+    new RegExp(`\\b${KIND_NAME}(?:_BIN)?\\b`),
   ];
   for (const [file, source] of Object.entries(files)) {
     if (file === HELPER) continue;
@@ -1119,6 +1131,18 @@ async function selfTest() {
     ['a comment naming a command line', { 'check.mjs': `// renders with \`${tool} kustomize k8s\`\nconst x = 1;\n` }, []],
     ['a spawn after a comment on the same line is still found', { 'z.mjs': `const a = 1; // note\nspawnSync('${tool}', []); // raw\n` },
       ['scripts/z.mjs:2: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx']],
+    // The binary's name through a variable spawns as the string does.
+    ['spawnSync of the kubectl-name constant', { 'smoke.mjs': `const r = 1;\nconst result = spawnSync(${KUBECTL_NAME}_BIN, args, { input });\n` },
+      ['scripts/smoke.mjs:2: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx']],
+    ['execSync of the interpolated kubectl-name constant', { 'down.mjs': `execSync(\`\${${KUBECTL_NAME}_BIN} get pods -n fiapx\`);\n` },
+      ['scripts/down.mjs:1: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx']],
+    ['importing the kubectl-name constant from kube.mjs', { 'smoke.mjs': `import { NAMESPACE, ${KUBECTL_NAME}_BIN, kubectl } from './kube.mjs';\n` },
+      ['scripts/smoke.mjs:1: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx']],
+    ['a local kubectl-name constant', { 'x.mjs': `const x = 1;\nconst y = 2;\nspawn(${KUBECTL_NAME}, ['get', 'pods']);\n` },
+      ['scripts/x.mjs:3: spawns kubectl directly; call kubectl() from scripts/kube.mjs, which pins --context kind-fiapx']],
+    ['kube.mjs itself may hold the name', { 'kube.mjs': `const ${KUBECTL_NAME} = 'x';\nspawner(${KUBECTL_NAME}, args);\n` }, []],
+    ['a longer identifier (near-miss)', { 'k8s-up.mjs': `import { ${KUBECTL_NAME}_NOT_FOUND, kubectlHint } from './kube.mjs';\nconst ${KUBECTL_NAME}_CALLS = 1;\n` }, []],
+    ['a hint through kubectlHint', { 'k8s-up.mjs': `console.log(kubectlHint('get hpa -w'));\n` }, []],
   ];
   for (const [name, files, expected] of scanCases) {
     const got = rawKubectlProblems(files);
@@ -1144,6 +1168,10 @@ async function selfTest() {
       { 'check.mjs': `const d = o.${bin} === 'Job';\nconst y = { ${bin}: 'Deployment' };\nobserverFor('${bin}', { ${bin}: () => '' });\nconst t = ['compose', '${bin}'];\n` }, []],
     ['a message naming a kind command (near-miss)', { 'k8s-up.mjs': `must(deps.${bin}(['get', 'clusters']), '${bin} get clusters');\n` }, []],
     ['a comment naming a spawn', { 'k8s-up.mjs': `// spawnSync('${bin}', ['create', 'cluster'])\nconst x = 1;\n` }, []],
+    ['spawnSync of the kind-name constant', { 'k8s-down.mjs': `const a = 1;\nspawnSync(${KIND_NAME}_BIN, ['delete', 'cluster']);\n` }, [kindMessage('scripts/k8s-down.mjs:2')]],
+    ['importing the kind-name constant from kube.mjs', { 'up.mjs': `import { ${KIND_NAME}_BIN } from './kube.mjs';\n` }, [kindMessage('scripts/up.mjs:1')]],
+    ['execSync of the interpolated kind-name constant', { 'reset.mjs': `execSync(\`\${${KIND_NAME}} delete cluster\`);\n` }, [kindMessage('scripts/reset.mjs:1')]],
+    ['the cluster-name constant (near-miss)', { 'k8s-up.mjs': `import { ${KIND_NAME}_CLUSTER } from './kube.mjs';\n` }, []],
   ];
   for (const [name, files, expected] of kindCases) {
     const got = rawKindProblems(files);
