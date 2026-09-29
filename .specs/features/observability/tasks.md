@@ -284,14 +284,16 @@ T12
 
 **Done when**:
 
-- [ ] `node scripts/check-docs-links.mjs` passes
-- [ ] Gate check passes: full self-test gate
-- [ ] Test count: docs layer (matrix) — links checked
+- [x] `node scripts/check-docs-links.mjs` passes
+- [x] Gate check passes: full self-test gate
+- [x] Test count: docs layer (matrix) — links checked
 
 **Tests**: none
 **Gate**: full
 
 **Commit**: `docs(platform): document the observability stack and load test`
+
+**Status**: ✅ Complete (2026-09-28). New `Observability` and `Worker replicas and the load test` sections: the ports table (Prometheus 9090, Grafana 3005 `admin`/`admin` with the `fiapx-overview` URL, broker metrics 15692, management 15672, each service's `/metrics`), scrape discovery, the `/metrics`/`/health`/`/health/live`/log conventions, `X-Correlation-Id` with a follow-one-video example, the dashboard's four rows and what each proves, the AppleDouble rule before `docker compose up` (the workspace root's `clean-appledouble.mjs`; this repo has no copy), `check-observability.mjs` in its three modes, `WORKER_REPLICAS` and the exact load-test commands. Also brought up to date: the `WORKER_HOST_PORT` default is the `3010-3019` range with `docker compose port --index N worker 3002`; the unauthenticated API routes; CI now runs build-gate steps 6 to 12 and governance guards ten stack commands; the build gate gains step 12 (load of 3 + `--live`) and step 16 (observability check, both self-tests); the layout lists `prometheus/`, `grafana/`, `rabbitmq/`. `/health` is documented per service as the code has it: readiness with 503 in the Catalog, Worker and Notification, always 200 in the API, which has no dependency it must reach to serve (API design, Tech Decisions). Gate: docs-links 0 (0 unresolved), `check-observability`/`load-test`/governance/smoke self-tests 0.
 
 ---
 
