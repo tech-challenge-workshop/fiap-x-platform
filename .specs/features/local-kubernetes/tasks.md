@@ -400,12 +400,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the identity deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/identity.yaml`, added to `resources`: Deployment `identity` (1 replica, label `app=identity`), image `quay.io/keycloak/keycloak:26.7.4`, args `start-dev --import-realm`; `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD` from `secretKeyRef` `fiapx-identity-admin` (same key names); `KC_HEALTH_ENABLED=true`, `KC_HOSTNAME=http://localhost:8080`; named ports `http` 8080 and `management` 9000; readiness `GET /health/ready` on `management` (the image has no curl; an `httpGet` probe needs none), 10 s initial delay as Compose's `start_period`, 5 s period, 24 failures; H2 on `emptyDir.medium: Memory` at `/opt/keycloak/data/h2`; requests 250m / 512Mi, memory limit 1Gi. Services: `identity` ClusterIP 8080 and `identity-host` NodePort 8080→30080; 9000 is not exposed. SPEC_DEVIATION (marked in the manifest): the realm ConfigMap `fiapx-identity-realm` is mounted by `subPath` as `/opt/keycloak/data/import/fiapx-realm.json` rather than as the whole import directory, because a ConfigMap directory mount also carries the kubelet's `..data` links and the import reads the directory; the single file is what Compose mounts. Full gate 0: default mode 20 objects, kubeconform `Valid: 20, Invalid: 0`.
 
 ---
 
