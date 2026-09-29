@@ -214,13 +214,13 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
-| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24-T25 up command) |
+| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 apply; T34 live) |
 | K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 wait; T34 live) |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static scan; T24-T28 callers) |
-| K8S-05 | P1: Provision - missing tool preflight | Tasks | In Tasks |
-| K8S-06 | P1: Provision - busy host port preflight | Tasks | In Tasks |
-| K8S-07 | P1: Provision - idempotent re-run | Tasks | In Tasks |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers) |
+| K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
+| K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
+| K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
 | K8S-08 | P1: Provision - down deletes only `fiapx` | Tasks | In Tasks |
 | K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
@@ -228,7 +228,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
 | K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
-| K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
+| K8S-15 | P1: Secrets - generated at provisioning | Execute | Implemented (T24 per-cluster generated Secrets, fixtures only for the db/init roles + self-test; observed live in T34) |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Execute | Implemented (T6 rule + self-test; T19 `ScaledObject` `worker`; scaling observed live in T34) |

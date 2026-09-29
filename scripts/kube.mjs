@@ -37,6 +37,9 @@ import { fileURLToPath } from 'node:url';
 export const KIND_CLUSTER = 'fiapx';
 export const KUBE_CONTEXT = `kind-${KIND_CLUSTER}`;
 export const NAMESPACE = 'fiapx';
+// The binary's name, for messages in other scripts (the static scan refuses a
+// bare tool-name string outside this file).
+export const KUBECTL_BIN = 'kubectl';
 export const KUBECONFIG_PATH = join(homedir(), '.kube', `${KUBE_CONTEXT}.config`);
 
 // Flags that would send the call to another cluster or credential set.
@@ -70,7 +73,7 @@ export function kubectlArgs(args) {
 // kept except for KUBECONFIG.
 export function kubectl(args, opts = {}, spawner = spawnSync) {
   const env = { ...(opts.env ?? process.env), KUBECONFIG: KUBECONFIG_PATH };
-  return spawner('kubectl', kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts, env });
+  return spawner(KUBECTL_BIN, kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts, env });
 }
 
 // The kind commands the scripts run. `create cluster` and `delete cluster`
