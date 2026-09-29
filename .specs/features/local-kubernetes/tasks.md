@@ -284,13 +284,15 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Every host port of the design table is mapped once; nodePorts inside 30000-32767
-- [ ] Gate: Full gate exits 0 (rendering is asserted in T24's self-test)
+- [x] Every host port of the design table is mapped once; nodePorts inside 30000-32767
+- [x] Gate: Full gate exits 0 (rendering is asserted in T24's self-test)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the kind cluster config template`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/kind-config.template.yaml`: `kind: Cluster` (`kind.x-k8s.io/v1alpha4`), `name: fiapx`, one control-plane node on `kindest/node:v1.36.4@sha256:099e0493…faed`, 10 `extraPortMappings` (TCP, all interfaces as Compose publishes): 3000→30000, `${CATALOG_HOST_PORT}`→30001, 3003→30003, 8080→30080, `${STORAGE_HOST_PORT}`→30900, 8025→30825, 15672→31672, 15692→31692, 9090→30090, 3005→30005. Each placeholder appears exactly once (comments carry none), so T24 can substitute with a plain `replaceAll`. Verified by parsing the template with the defaults substituted: every design-table host port mapped once, host and node ports unique, every nodePort inside 30000-32767. Not in the kustomization. Full gate 0 (kubeconform `Valid: 8`); Phase 2 Build gate 0 (ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`).
 
 ---
 

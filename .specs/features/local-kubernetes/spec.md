@@ -224,8 +224,8 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-08 | P1: Provision - down deletes only `fiapx` | Tasks | In Tasks |
 | K8S-09 | P1: Provision - readiness/liveness probes | Tasks | In Tasks |
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
-| K8S-11 | P1: Provision - host token accepted (issuer) | Tasks | In Tasks |
-| K8S-12 | P1: Provision - presigned URL usable from host | Tasks | In Tasks |
+| K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
+| K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
 | K8S-13 | P1: Secrets - credentials only via secret refs | Tasks | In Tasks |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
