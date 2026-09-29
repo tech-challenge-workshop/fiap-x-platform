@@ -1,0 +1,41 @@
+# Prometheus for the local stack (OBS-61, OBS-64). Mounted read-only by
+# compose; every target is a compose DNS name on the default network, and no
+# target needs credentials: /metrics is public by convention (AD-017).
+#
+# A target that is not up yet is marked down and retried on the next
+# interval, so Prometheus never waits for the business stack and the business
+# stack never waits for Prometheus.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ['api:3000']
+
+  - job_name: catalog
+    static_configs:
+      - targets: ['catalog:3001']
+
+  # The Worker runs WORKER_REPLICAS containers behind one compose DNS name.
+  # A static `worker:3002` target resolves to a single replica per scrape, so
+  # the metrics of the others would be missing or interleaved. An A-record
+  # lookup returns every replica's address, and each becomes its own target.
+  - job_name: worker
+    dns_sd_configs:
+      - names: ['worker']
+        type: A
+        port: 3002
+        refresh_interval: 15s
+
+  - job_name: notification
+    static_configs:
+      - targets: ['notification:3003']
+
+  # The broker's built-in rabbitmq_prometheus plugin (rabbitmq/rabbitmq.conf):
+  # per-queue depth, including video-validation, processing and
+  # notification.terminal (OBS-63).
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']

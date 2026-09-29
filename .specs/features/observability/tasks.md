@@ -107,15 +107,17 @@ T12
 
 **Done when**:
 
-- [ ] `docker compose config -q` renders with the config mounted read-only
-- [ ] Structural assertions (T7 self-test): every expected target host present; worker uses `dns_sd_configs`; interval bounds sane
-- [ ] Gate check passes: full self-test gate
-- [ ] Test count: asserted in T7 self-test
+- [x] `docker compose config -q` renders with the config mounted read-only
+- [x] Structural assertions (T7 self-test): every expected target host present; worker uses `dns_sd_configs`; interval bounds sane
+- [x] Gate check passes: full self-test gate
+- [x] Test count: asserted in T7 self-test
 
 **Tests**: self-test
 **Gate**: build
 
 **Commit**: `feat(platform): add the prometheus scrape configuration`
+
+**Status**: ✅ Complete (2026-09-28). `promtool check config` (prom/prometheus:v3.15.0) reports the file valid. Five jobs: `api`, `catalog`, `notification`, `rabbitmq` static; `worker` by `dns_sd_configs` type A port 3002 with a 15 s refresh so a scaled-up replica is picked up within one interval. The read-only mount renders with the `prometheus` service in T5; the structural assertions run in the T7 self-test.
 
 ---
 
