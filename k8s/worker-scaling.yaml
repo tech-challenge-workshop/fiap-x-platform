@@ -1,0 +1,62 @@
+# Queue-depth autoscaling of the Worker with KEDA 2.21 (AD-001, AD-006;
+# K8S-18..21, K8S-24). The up command installs KEDA before applying this.
+#
+# KEDA reads each queue through the RabbitMQ management API (protocol http),
+# which counts ready and unacknowledged messages; over AMQP it would see only
+# the ready ones and miss what the Worker's prefetch already holds. In
+# QueueLength mode each trigger's value is the target number of messages per
+# replica, matched to that queue's per-replica prefetch: `processing` 2
+# (prefetch 1 plus one waiting), `video-validation` 20. The HPA takes the
+# larger of the two replica counts.
+#
+# The management URL carries the generated broker user, so it lives in Secret
+# `fiapx-keda-rabbitmq` (key `host`, created by scripts/k8s-up.mjs) and
+# reaches the scaler only through TriggerAuthentication
+# `rabbitmq-management`; no trigger carries a host.
+#
+# Minimum 1: no cold start on the first video. With a minimum above zero
+# KEDA's cooldownPeriod does not apply and scale-in is the HPA's, so its
+# scale-down stabilization window is cut from the default 300 s to 60 s to
+# return to one replica well within 300 s of the queues draining.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq-management
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: fiapx-keda-rabbitmq
+      key: host
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 5
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 60
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: http
+        mode: QueueLength
+        queueName: processing
+        value: "2"
+      authenticationRef:
+        name: rabbitmq-management
+    - type: rabbitmq
+      metadata:
+        protocol: http
+        mode: QueueLength
+        queueName: video-validation
+        value: "20"
+      authenticationRef:
+        name: rabbitmq-management

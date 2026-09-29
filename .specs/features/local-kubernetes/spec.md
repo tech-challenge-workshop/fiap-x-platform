@@ -231,13 +231,13 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
-| K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Tasks | In Tasks |
+| K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Execute | Implemented (T6 rule + self-test; T19 `ScaledObject` `worker`; scaling observed live in T34) |
 | K8S-19 | P1: Autoscale - HPA listed | Tasks | In Tasks |
 | K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
-| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Tasks | In Tasks |
+| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Execute | In progress (T19 HPA scale-down stabilization 60 s; T34 live) |
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
 | K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | Implemented (T6 rule + self-test; T18 manifest: `cpu: "1"` request and limit, `FFMPEG_THREADS=1`) |
-| K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Tasks | In Tasks |
+| K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Execute | Implemented (T6 no-host rule + self-test; T19 `TriggerAuthentication` `rabbitmq-management` from Secret `fiapx-keda-rabbitmq`) |
 | K8S-25 | P2: Observe - every Worker pod scraped | Tasks | In Tasks |
 | K8S-26 | P2: Observe - other targets up | Tasks | In Tasks |
 | K8S-27 | P2: Observe - dashboard from the same JSON | Tasks | In Tasks |

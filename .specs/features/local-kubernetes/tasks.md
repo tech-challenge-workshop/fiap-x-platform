@@ -538,12 +538,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0 (kubeconform validates the KEDA CRDs from the CRDs catalog; ScaledObject rule applies)
+- [x] Full gate exits 0 (kubeconform validates the KEDA CRDs from the CRDs catalog; ScaledObject rule applies)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): autoscale the worker on queue depth with keda`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/worker-scaling.yaml`, added to `resources`: `TriggerAuthentication` `rabbitmq-management` (`keda.sh/v1alpha1`, `secretTargetRef` parameter `host` ← Secret `fiapx-keda-rabbitmq` key `host`) and `ScaledObject` `worker` (`scaleTargetRef.name: worker`, `minReplicaCount: 1`, `maxReplicaCount: 5`, `pollingInterval: 5`, `advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.stabilizationWindowSeconds: 60`), two `rabbitmq` triggers with `protocol: http`, `mode: QueueLength`: `processing` value `"2"` and `video-validation` value `"20"`, each `authenticationRef.name: rabbitmq-management` and no `host` in metadata. Full gate 0: default mode 35 objects, kubeconform `Valid: 35, Invalid: 0` with both KEDA objects validated against the CRDs-catalog schemas (`-verbose`: "ScaledObject worker is valid", "TriggerAuthentication rabbitmq-management is valid"). The rules bind the real objects: the rendered manifest with `processing` value "3" made the default mode exit 1 with its message, and a misspelt `spec.pollingIntervall` was rejected by kubeconform strict (`additional properties 'pollingIntervall' not allowed`).
 
 ---
 
