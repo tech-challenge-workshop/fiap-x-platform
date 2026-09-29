@@ -707,13 +707,15 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Gate: `node scripts/k8s-down.mjs --self-test` exits 0
-- [ ] Test count: ≥ 3
+- [x] Gate: `node scripts/k8s-down.mjs --self-test` exits 0
+- [x] Test count: ≥ 3
 
 **Tests**: self-test
 **Gate**: Quick
 
 **Commit**: `feat(platform): add the kubernetes down command`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/k8s-down.mjs`: `down(spawner)` runs `kind get clusters` and, only when a line is exactly `fiapx`, `kind delete cluster --name fiapx --kubeconfig ~/.kube/kind-fiapx.config` (the argument list comes from `kind()` in `scripts/kube.mjs`, which refuses any other `--name`/`--kubeconfig`); exit 0 with "does not exist; nothing to delete" when absent, exit 1 naming kind when it is not on PATH, exit 1 with kind's message when the delete fails. No kubectl call and no kubeconfig access of its own: kind removes the cluster's entries from its private kubeconfig only. Self-test: 9 assertions (planned ≥ 3) against a fake kind spawner, driven through the real `kind()` helper: the exact two commands for an existing cluster; a cluster named `fiapx-old` and an empty list, each deleting nothing and exiting 0; kind missing; a failed delete. Two mutants on scratch copies (substring match on the cluster name, delete failure ignored) were each killed. Run for real on this machine (kind not installed): exit 1 with the kind-missing message, nothing touched. Quick gate `node scripts/k8s-down.mjs --self-test` 0; Full gate 0 (the static scan covers the new script).
 
 ---
 

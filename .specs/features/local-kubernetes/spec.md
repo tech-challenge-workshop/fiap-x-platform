@@ -221,7 +221,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
 | K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
 | K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
-| K8S-08 | P1: Provision - down deletes only `fiapx` | Tasks | In Tasks |
+| K8S-08 | P1: Provision - down deletes only `fiapx` | Execute | Implemented (T26 down command deleting only fiapx + self-test; observed live in T34) |
 | K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
