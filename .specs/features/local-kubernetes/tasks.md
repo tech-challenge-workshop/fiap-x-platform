@@ -876,12 +876,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Build gate exits 0 (phase end)
+- [x] Build gate exits 0 (phase end)
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `docs(specs): record ad-018 for the local kubernetes cluster`
+
+**Status**: ✅ Complete (2026-09-29). `.specs/STATE.md` AD-018 in the AD-015..017 format (Decision, Reason, Trade-off, Scope, Merge order, Date, Status): the kind cluster `fiapx` from one kustomization, alongside Compose; the separate kubeconfig `~/.kube/kind-fiapx.config` (kind always sets current-context in the file it writes) and `--context kind-fiapx` only through `scripts/kube.mjs` (`kubectl()` and `kind()`), enforced by the kubectl and kind scans of `check-kubernetes`; multi-arch GHCR `:<sha>`/`:main` published with `GITHUB_TOKEN`, the cluster running `:main`; per-cluster generated Secrets, created only when absent, never versioned, fixtures staying fixtures; KEDA 1..5 with targets 2 and 20; Compose as the dev loop and `integration` gate beside `topology`'s offline proof and the `kubernetes` job; merge order services → platform. Handoff replaced (section-scoped) with the Phase 8 next step and its go-ahead. Phase 7 Build gate 0: kube, check-kubernetes (default and self-test), k8s-up and k8s-down self-tests, kustomize render + kubeconform `Valid: 45, Invalid: 0`, ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`, workflow YAML parse.
 
 ---
 

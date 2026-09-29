@@ -217,7 +217,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 KEDA install and topology apply; T34 live) |
 | K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 readiness wait + self-test; T34 live) |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Execute | Implemented (T25 600 s wait naming each not-ready workload and its pods' reasons + self-test; observed live in T34) |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers; the static scan also refuses a raw kind spawn outside `scripts/kube.mjs` + self-test) |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers; the static scan also refuses a raw kind spawn outside `scripts/kube.mjs` + self-test; T33 AD-018; T34 live context check) |
 | K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
 | K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
 | K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
@@ -226,7 +226,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-10 | P1: Provision - smoke passes with cluster target | Execute | In progress (T27 smoke observation adapter SMOKE_TARGET=kind + self-test; T30 CI step in the kubernetes job; T34 live) |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
-| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
+| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T33 AD-018 records the rule; T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Execute | Implemented (T24 per-cluster generated Secrets, fixtures only for the db/init roles + self-test; observed live in T34) |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
@@ -241,7 +241,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 ServiceAccount + Role for pod discovery; T28 live rule: one worker target per running pod + self-test; T34 live) |
 | K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 Prometheus Deployment and Services; T28 live rule: every target up + self-test; T34 live) |
 | K8S-27 | P2: Observe - dashboard from the same JSON | Execute | In progress (T23 Grafana provisioned from grafana/dashboards/overview.json; T28 live rule with the generated admin + self-test; T34 live) |
-| K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
+| K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4; T33 AD-018 records the merge order); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
 | K8S-31 | P2: Publish - manifests reference GHCR images | Execute | Implemented (T6 image rule + self-test; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests render `ghcr.io/tech-challenge-workshop/<repo>:main`) |
