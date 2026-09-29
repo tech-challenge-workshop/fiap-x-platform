@@ -174,9 +174,13 @@ function dockerCompose(args, input) {
 // compose: `docker compose exec -T postgres psql …` and a one-shot
 //          `docker compose run … storage-init s3api …` (unchanged).
 // kind:    `exec -i statefulset/postgres -- psql …` and a one-shot aws-cli pod
-//          `run smoke-s3-<random> --rm -i --quiet --restart=Never` whose
-//          storage keys come from Secret fiapx-storage, both through
-//          scripts/kube.mjs (always --context kind-fiapx).
+//          `run smoke-s3-<random> --restart=Never` whose storage keys come
+//          from Secret fiapx-storage, both through scripts/kube.mjs (always
+//          --context kind-fiapx). The pod is not attached to: it is created,
+//          awaited until Succeeded, read with `logs` and deleted, because an
+//          attached `run --rm -i` interleaves kubectl's own output with the
+//          container's and varies across kubectl versions (the first CI run
+//          on kubectl 1.37 got text after the JSON; 1.36 locally did not).
 export const SMOKE_TARGETS = ['compose', 'kind'];
 const AWS_CLI_IMAGE = 'amazon/aws-cli:2.37.4';
 
@@ -204,9 +208,37 @@ export function observationCommand(target, kind, args, podName) {
     },
   };
   return [
-    'run', podName, '-n', NAMESPACE, '--rm', '-i', '--quiet', '--restart=Never', `--image=${AWS_CLI_IMAGE}`,
+    'run', podName, '-n', NAMESPACE, '--restart=Never', `--image=${AWS_CLI_IMAGE}`,
     '--override-type=strategic', `--overrides=${JSON.stringify(overrides)}`, '--', 's3api', ...args,
   ];
+}
+
+const ONE_SHOT_TIMEOUT_MS = 120_000;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// One bucket observation on kind: create the aws-cli pod, wait for it to
+// finish, return its logs (the command's stdout alone), delete it. `run`
+// runs one kubectl command line; `clock` replaces time in the self-test.
+export function kindOneShot(run, podName, args, clock = {}) {
+  const { timeoutMs = ONE_SHOT_TIMEOUT_MS, sleep = sleepSync, now = Date.now } = clock;
+  const logs = () => run(['logs', podName, '-n', NAMESPACE]);
+  run(observationCommand('kind', 's3api', args, podName));
+  try {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      const phase = run(['get', 'pod', podName, '-n', NAMESPACE, '-o', 'jsonpath={.status.phase}']).trim();
+      if (phase === 'Succeeded') return logs();
+      if (phase === 'Failed') throw new Error(`One-shot pod ${podName} failed: ${logs().trim()}`);
+      if (now() >= deadline) throw new Error(`One-shot pod ${podName} did not finish within ${timeoutMs} ms (phase ${phase || 'unknown'})`);
+      sleep(500);
+    }
+  } finally {
+    try {
+      run(['delete', 'pod', podName, '-n', NAMESPACE, '--ignore-not-found', '--wait=false']);
+    } catch {
+      // A leftover pod is harmless (its name is random) and must not mask the observation's own error.
+    }
+  }
 }
 
 function kubectlObservation(args, input) {
@@ -228,7 +260,9 @@ export function observerFor(target, runners = {}) {
   const podName = runners.podName ?? (() => `smoke-s3-${randomUUID().slice(0, 8)}`);
   return {
     psql: (args, input) => run(observationCommand(target, 'psql', args), input),
-    s3api: (args) => run(observationCommand(target, 's3api', args, podName())),
+    s3api: (args) => (target === 'kind'
+      ? kindOneShot(run, podName(), args)
+      : run(observationCommand(target, 's3api', args))),
   };
 }
 
@@ -2174,7 +2208,7 @@ async function selfTest() {
     const seen = [];
     const runner = (args, input) => {
       seen.push({ args, input });
-      return 'observed';
+      return args[0] === 'get' ? 'Succeeded' : 'observed';
     };
     return { seen, observer: observerFor(target, { compose: runner, kind: runner, podName: () => 'smoke-s3-test0001' }) };
   };
@@ -2196,13 +2230,18 @@ async function selfTest() {
   {
     const { seen, observer } = recorded('kind');
     observer.psql(psqlArgs, sql);
-    observer.s3api(lifecycleArgs);
+    adapterExpect('kind s3api returns the pod logs', observer.s3api(lifecycleArgs), 'observed');
     adapterExpect('kind psql: exec into the postgres StatefulSet with the SQL on stdin', seen[0],
       { args: ['exec', '-i', '-n', 'fiapx', 'statefulset/postgres', '--', 'psql', '-U', 'postgres', '-d', 'fiapx', '-tA', '-v', 'ON_ERROR_STOP=1', '-v', `id=${id}`], input: sql });
     const run = seen[1].args;
     const overridesAt = run.findIndex((a) => a.startsWith('--overrides='));
     adapterExpect('kind s3api: a one-shot aws-cli pod', [...run.slice(0, overridesAt), ...run.slice(overridesAt + 1)],
-      ['run', 'smoke-s3-test0001', '-n', 'fiapx', '--rm', '-i', '--quiet', '--restart=Never', '--image=amazon/aws-cli:2.37.4', '--override-type=strategic', '--', 's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json']);
+      ['run', 'smoke-s3-test0001', '-n', 'fiapx', '--restart=Never', '--image=amazon/aws-cli:2.37.4', '--override-type=strategic', '--', 's3api', 'get-bucket-lifecycle-configuration', '--bucket', BUCKET, '--output', 'json']);
+    adapterExpect('kind s3api: never attaches, waits for the phase, reads logs, deletes the pod', seen.slice(2).map(({ args }) => args), [
+      ['get', 'pod', 'smoke-s3-test0001', '-n', 'fiapx', '-o', 'jsonpath={.status.phase}'],
+      ['logs', 'smoke-s3-test0001', '-n', 'fiapx'],
+      ['delete', 'pod', 'smoke-s3-test0001', '-n', 'fiapx', '--ignore-not-found', '--wait=false'],
+    ]);
     adapterExpect('kind s3api: storage keys from Secret fiapx-storage, endpoint and region literal', JSON.parse(run[overridesAt].slice('--overrides='.length)), {
       apiVersion: 'v1',
       spec: { containers: [{ name: 'smoke-s3-test0001', env: [
@@ -2215,11 +2254,38 @@ async function selfTest() {
     // Both kind command lines are accepted by the pinned helper and gain the
     // context there; neither names a context itself.
     adapterExpect('kind command lines go through kube.mjs with --context kind-fiapx', seen.map(({ args }) => kubectlArgs(args).slice(0, 3)),
-      [['--context', 'kind-fiapx', 'exec'], ['--context', 'kind-fiapx', 'run']]);
+      [['--context', 'kind-fiapx', 'exec'], ['--context', 'kind-fiapx', 'run'], ['--context', 'kind-fiapx', 'get'], ['--context', 'kind-fiapx', 'logs'], ['--context', 'kind-fiapx', 'delete']]);
+  }
+  {
+    // A Failed pod throws with its logs; a pod that never finishes times out;
+    // both still delete the pod.
+    const phases = (phase) => {
+      const seen = [];
+      const run = (args) => {
+        seen.push(args[0]);
+        if (args[0] === 'get') return phase;
+        return args[0] === 'logs' ? 'An error occurred (AccessDenied)\n' : '';
+      };
+      return { seen, run };
+    };
+    const failed = phases('Failed');
+    let message = '';
+    try { kindOneShot(failed.run, 'smoke-s3-f', lifecycleArgs); } catch (err) { message = err.message; }
+    adapterExpect('kind s3api: a Failed pod throws with its logs and is deleted', [message, failed.seen.at(-1)],
+      ['One-shot pod smoke-s3-f failed: An error occurred (AccessDenied)', 'delete']);
+    const stuck = phases('Pending');
+    let t = 0;
+    message = '';
+    try { kindOneShot(stuck.run, 'smoke-s3-p', lifecycleArgs, { timeoutMs: 1000, sleep: (ms) => { t += ms; }, now: () => t }); } catch (err) { message = err.message; }
+    adapterExpect('kind s3api: a pod that never finishes times out and is deleted', [message, stuck.seen.at(-1)],
+      ['One-shot pod smoke-s3-p did not finish within 1000 ms (phase Pending)', 'delete']);
   }
   adapterExpect('each one-shot pod gets its own name', (() => {
     const names = new Set();
-    const observer = observerFor('kind', { kind: (args) => { names.add(args[1]); return ''; } });
+    const observer = observerFor('kind', { kind: (args) => {
+      if (args[0] === 'run') names.add(args[1]);
+      return args[0] === 'get' ? 'Succeeded' : '';
+    } });
     observer.s3api(lifecycleArgs);
     observer.s3api(lifecycleArgs);
     return [names.size, [...names].every((n) => /^smoke-s3-[0-9a-f]{8}$/.test(n))];
