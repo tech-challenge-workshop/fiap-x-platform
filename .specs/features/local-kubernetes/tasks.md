@@ -112,15 +112,17 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Workflow parses (Service gate)
-- [ ] `push` expression is exactly `github.event_name == 'push' && github.ref == 'refs/heads/main'`; login step runs only under the same condition
-- [ ] No personal token referenced; tags use `github.sha` and `main`; `org.opencontainers.image.source` label set
-- [ ] Test count: n/a (workflow; the PR's own CI run proves build-without-push after push, recorded in T34)
+- [x] Workflow parses (Service gate)
+- [x] `push` expression is exactly `github.event_name == 'push' && github.ref == 'refs/heads/main'`; login step runs only under the same condition
+- [x] No personal token referenced; tags use `github.sha` and `main`; `org.opencontainers.image.source` label set
+- [x] Test count: n/a (workflow; the PR's own CI run proves build-without-push after push, recorded in T34)
 
 **Tests**: none
 **Gate**: Service
 
 **Commit**: `ci(api): publish multi-arch images to ghcr on main`
+
+**Status**: ✅ Complete (2026-09-29). Commit `f8d345b` on `fiap-x-api` `feat/publish-images`: the `image` job builds `linux/amd64,linux/arm64` (QEMU + buildx: `docker/setup-qemu-action@v4`, `docker/setup-buildx-action@v4`, `docker/login-action@v4`, `docker/build-push-action@v7`, the latest majors on 2026-09-29) and pushes `:${{ github.sha }}` and `:main` only when `github.event_name == 'push' && github.ref == 'refs/heads/main'`; the GHCR login step carries the same `if:`; job-level `permissions: contents: read, packages: write`; `timeout-minutes: 30`; `needs: quality` and the job name `image` kept; `org.opencontainers.image.source` label set; the only secret referenced is `GITHUB_TOKEN`. Service gate (`yaml.safe_load`) 0; a PyYAML structural check confirmed the push expression, login condition, tags, label and platforms. Only the `image` job changed. The PR run that proves build-without-push is recorded in T34 (not pushed: remote step).
 
 ---
 
@@ -136,13 +138,15 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Same checks as T1, with this repo's image name
-- [ ] The existing Postgres service container / `quality` job untouched
+- [x] Same checks as T1, with this repo's image name
+- [x] The existing Postgres service container / `quality` job untouched
 
 **Tests**: none
 **Gate**: Service
 
 **Commit**: `ci(catalog): publish multi-arch images to ghcr on main`
+
+**Status**: ✅ Complete (2026-09-29). Commit `fb67325` on `processing-catalog` `feat/publish-images`: same job as T1 with this repo's image; the `quality` job and its Postgres service container are untouched (diff is confined to the `image` job). Service gate 0.
 
 ---
 
@@ -158,12 +162,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Same checks as T1, with this repo's image name
+- [x] Same checks as T1, with this repo's image name
 
 **Tests**: none
 **Gate**: Service
 
 **Commit**: `ci(worker): publish multi-arch images to ghcr on main`
+
+**Status**: ✅ Complete (2026-09-29). Commit `8e7d047` on `processing-worker` `feat/publish-images`: same job as T1 with this repo's image; a comment notes the arm64 stage's `apk add ffmpeg` runs under QEMU, which the 30-minute timeout allows for. Service gate 0.
 
 ---
 
@@ -179,12 +185,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Same checks as T1, with this repo's image name
+- [x] Same checks as T1, with this repo's image name
 
 **Tests**: none
 **Gate**: Service
 
 **Commit**: `ci(notification): publish multi-arch images to ghcr on main`
+
+**Status**: ✅ Complete (2026-09-29). Commit `a019564` on `notification-service` `feat/publish-images`: same job as T1 with this repo's image. Service gate 0. Completion of T1-T4 is recorded in the platform repository with T5's commit, since the tasks file lives here.
 
 ---
 
@@ -200,15 +208,17 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Every built command starts with `kubectl --context kind-fiapx`
-- [ ] Self-test rejects: `--context` override, `--kubeconfig`, `config use-context`, `config current-context` (4 planted cases, each throws with its message)
-- [ ] Gate: `node scripts/kube.mjs --self-test` exits 0
-- [ ] Test count: ≥ 6 self-test assertions
+- [x] Every built command starts with `kubectl --context kind-fiapx`
+- [x] Self-test rejects: `--context` override, `--kubeconfig`, `config use-context`, `config current-context` (4 planted cases, each throws with its message)
+- [x] Gate: `node scripts/kube.mjs --self-test` exits 0
+- [x] Test count: ≥ 6 self-test assertions
 
 **Tests**: self-test
 **Gate**: Quick
 
 **Commit**: `feat(platform): add a kubectl helper pinned to the kind-fiapx context`
+
+**Status**: ✅ Complete (2026-09-29). Self-test: 50 assertions (planned ≥ 6): the three constants; 5 accepted calls each spawn exactly `kubectl --context kind-fiapx <args>` (get, kustomize, server-side apply, create configmap, exec with `--`) plus options pass-through; 13 refused calls each throw their exact message and spawn nothing: `--context` and `--context=`, `--kubeconfig` and `--kubeconfig=`, `--cluster`, `--server`, `-s`, `--user`, `config use-context`, `config current-context`, a leading flag before the subcommand, empty and non-string arguments. Beyond the task: `--cluster`/`--server`/`-s`/`--user` are refused too (each would redirect a call pinned to the context), and the subcommand must come first so `config` cannot hide behind a flag; arguments after `--` (the container command) are not checked. Five mutants on scratch copies (no `config` refusal, context not prepended, `-s` allowed, `--` split ignored, exact-flag match dropped) were each killed. Gate: `node scripts/kube.mjs --self-test` 0.
 
 ---
 
