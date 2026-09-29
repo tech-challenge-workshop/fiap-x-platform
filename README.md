@@ -307,14 +307,16 @@ node scripts/load-test.mjs --videos 3 --timeout-seconds 180
 node scripts/load-test.mjs --token-cmd "node scripts/get-token.mjs bob"
 ```
 
-`--videos` takes an integer from 1 to 50; `--base-url` overrides `http://localhost:3000`. To see the scaling, open the dashboard, then run:
+`--videos` takes an integer from 1 to 50; `--base-url` overrides `http://localhost:3000`.
+
+To see the scaling on the dashboard, the queue must stay busy across a scrape. The 8-second fixture is processed in well under a second, so a run of 6 videos drains before the broker's 5 s statistics refresh and Prometheus's 15 s scrape, and the queue depth panel stays at 0. A burst of 200 videos, four runs of 50 at once, is enough. Open the dashboard, then run:
 
 ```sh
 WORKER_REPLICAS=3 docker compose up -d --wait worker
-node scripts/load-test.mjs --videos 6
+for run in 1 2 3 4; do node scripts/load-test.mjs --videos 50 & done; wait
 ```
 
-During the run the `processing` queue depth rises above 0 and falls back as the three replicas drain it, the throughput panel follows it, and the Scrape targets row shows three `worker` targets up. Back to one Worker with `docker compose up -d --wait worker` and `WORKER_REPLICAS` unset.
+Each run prints its own summary, which must end `COMPLETED 50/50`. During the burst the `processing` queue depth rises above 0 and falls back as the three replicas drain it (22 at its peak on the recorded run), the throughput panel rises by 200 split about evenly across the three replicas, and the Scrape targets row shows three `worker` targets up. This shows the replicas sharing the work. It does not measure a throughput gain per replica: a run is bound by uploading and polling, not by the Worker, and 40 videos took 5 s on one replica and 3 s on three. Back to one Worker with `docker compose up -d --wait worker` and `WORKER_REPLICAS` unset.
 
 Its `--self-test` needs no stack. It drives the same functions with an injected HTTP driver and requires that every upload is in flight before the first status read, that each video gets its own `Idempotency-Key`, the status counts, and that a stuck or failed video is named. It also spawns a run against an API nothing listens on, which must exit 1, and a run with `--videos 51`, which must be refused. CI's `topology` job runs the self-test; the `integration` job runs `--videos 3` against the stack with one Worker.
 

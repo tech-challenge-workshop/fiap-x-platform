@@ -78,7 +78,7 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 5. WHEN `--self-test` is passed THEN the script SHALL run its assertion helpers against a fixture without a live stack and SHALL exit zero, proving the harness itself. <!-- event-driven -->
 6. WHEN the integration CI job runs THEN it SHALL execute the self-test plus a small live load (N≤3) against the stack and SHALL fail the job on a non-zero exit. <!-- event-driven -->
 
-**Independent Test**: `WORKER_REPLICAS=3 docker compose up -d worker && node scripts/load-test.mjs --videos 6` completes with 6/6 terminal; Prometheus shows `processing` queue depth >0 during the run and `fiapx_processing_total` accumulating ~2× the single-replica rate.
+**Independent Test**: `WORKER_REPLICAS=3 docker compose up -d worker && node scripts/load-test.mjs --videos 6` completes with 6/6 terminal. Then four concurrent `node scripts/load-test.mjs --videos 50` (a 200-video burst) each complete 50/50, and during the burst Prometheus shows `processing` queue depth >0 falling back to 0 and `fiapx_processing_total` rising by 200 across the three replicas. A per-replica throughput gain (for example ~2× the single-replica rate) is not measured: with the 8 s fixture a run is bound by upload and polling, not by the Worker.
 
 ---
 
@@ -149,5 +149,5 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 ## Success Criteria
 
 - [x] `docker compose up --build -d --wait` yields healthy `prometheus` and `grafana` containers, and Grafana's overview dashboard shows live series from all four services within 60 s.
-- [x] `WORKER_REPLICAS=3 docker compose up -d worker` yields 3 healthy workers, and `node scripts/load-test.mjs --videos 6` completes 6/6 terminal with the dashboard showing the queue-depth/processing-rate correlation. (T12: 6/6; the depth and rate series move together on a 200-video burst, since a 6-video run drains between scrapes)
+- [x] `WORKER_REPLICAS=3 docker compose up -d worker` yields 3 healthy workers, `node scripts/load-test.mjs --videos 6` completes 6/6 terminal, and a 200-video burst (four concurrent `--videos 50`) completes 200/200 with the dashboard showing the `processing` queue depth rise and drain while the processing rate follows. A 6-video run drains between scrapes, so it cannot show the depth. (T12: 6/6; burst depth 0 → 22 → 0, split 66/67/67 across the replicas)
 - [ ] CI's `topology` job runs the new check script self-test; the `integration` job runs the load-test self-test plus a small live load.
