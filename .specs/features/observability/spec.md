@@ -127,7 +127,7 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 | --- | --- | --- | --- |
 | OBS-61 | P1: Stack (Prometheus scrape set) | Design | Pending |
 | OBS-62 | P1: Stack (Grafana provisioning) | Design | Pending |
-| OBS-63 | P1: Stack (RabbitMQ plugin) | Design | Pending |
+| OBS-63 | P1: Stack (RabbitMQ plugin) | Execute | Implementing (T1 done; live assertion in T12) |
 | OBS-64 | P1: Stack (resilient startup) | Design | Pending |
 | OBS-65 | P1: Stack (recreate from repo) | Design | Pending |
 | OBS-66 | P1: Stack (config from repo, no creds on targets) | Design | Pending |

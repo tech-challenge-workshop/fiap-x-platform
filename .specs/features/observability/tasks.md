@@ -82,14 +82,16 @@ T12
 
 **Done when**:
 
-- [ ] The stack's rabbitmq container serves `http://localhost:15692/metrics` after `docker compose up -d rabbitmq` and the management UI still works (both plugins enabled — the mounted file overrides the image default)
-- [ ] Gate check passes: `docker compose config -q` + full self-test gate
-- [ ] Test count: asserted live in T12 (config layer - matrix)
+- [x] The stack's rabbitmq container serves `http://localhost:15692/metrics` after `docker compose up -d rabbitmq` and the management UI still works (both plugins enabled — the mounted file overrides the image default)
+- [x] Gate check passes: `docker compose config -q` + full self-test gate
+- [x] Test count: asserted live in T12 (config layer - matrix)
 
 **Tests**: none
 **Gate**: build
 
 **Commit**: `feat(platform): expose rabbitmq metrics via the prometheus plugin`
+
+**Status**: ✅ Complete (2026-09-28). Verified on a throwaway broker (same image and mounts, other host ports, removed after; the shared local stack was not touched): `rabbitmq_queue_messages{vhost="/",queue=...}` served for `video-validation`, `processing` and `notification.terminal`, management API 200, `rabbitmq-plugins list -E` shows both plugins. Beyond the design: `prometheus.return_per_object_metrics = true`, because the plugin aggregates all queues into one unlabelled series by default and OBS-63 AC3 needs the per-queue depth; compose also publishes 15692 on the host. The image default already lists both plugins; the mounted file makes the set repo-owned. Gate: `compose config -q` 0, docs-links 0, ci-governance self-test 0 (`check-observability`/`load-test` land in T6/T7).
 
 ---
 

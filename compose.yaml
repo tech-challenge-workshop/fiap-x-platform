@@ -198,12 +198,19 @@ services:
     # default, which a service's plain `durable: true` declaration accepts, so
     # the policy's delivery limit can stop a message that keeps killing its
     # consumer. No volume: the topology is rebuilt from the file on each start.
+    #
+    # enabled_plugins replaces the image's plugin list rather than adding to
+    # it, so it names both plugins: dropping rabbitmq_management would take
+    # the management UI on 15672 with it. rabbitmq_prometheus serves the
+    # broker's metrics on 15692 (OBS-63).
     volumes:
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/10-fiapx.conf:ro
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     ports:
       - "5672:5672"
       - "15672:15672"
+      - "15692:15692"
     healthcheck:
       test: rabbitmq-diagnostics -q ping
       interval: 5s
