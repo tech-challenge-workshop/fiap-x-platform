@@ -214,7 +214,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
-| K8S-01 | P1: Provision - cluster created/reused, topology applied | Tasks | In Tasks |
+| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24-T25 up command) |
 | K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Tasks | In Tasks |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
 | K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static scan; T24-T28 callers) |
@@ -244,7 +244,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
-| K8S-31 | P2: Publish - manifests reference GHCR images | Tasks | In Tasks |
+| K8S-31 | P2: Publish - manifests reference GHCR images | Execute | In progress (T6 image rule; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests) |
 | K8S-32 | P2: CI - topology renders, validates, checks | Tasks | In Tasks |
 | K8S-33 | P2: CI - offline check self-test | Execute | In progress (T6 self-test; T20 required workloads) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |

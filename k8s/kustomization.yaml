@@ -1,0 +1,59 @@
+# The FIAP X topology on the local kind cluster (S9a). Render it with
+#
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone k8s
+#
+# The restrictor is off because the ConfigMaps below are generated from the
+# same files Compose mounts (one source per config). Nothing here carries a
+# credential: scripts/k8s-up.mjs creates every Secret and the `fiapx-host`
+# ConfigMap before applying this, and scripts/check-kubernetes.mjs checks the
+# render offline.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fiapx
+
+resources:
+  - namespace.yaml
+
+# The service images CI publishes on main (AD-018); manifests name the bare
+# repository and pull :main with imagePullPolicy Always.
+images:
+  - name: fiap-x-api
+    newName: ghcr.io/tech-challenge-workshop/fiap-x-api
+    newTag: main
+  - name: processing-catalog
+    newName: ghcr.io/tech-challenge-workshop/processing-catalog
+    newTag: main
+  - name: processing-worker
+    newName: ghcr.io/tech-challenge-workshop/processing-worker
+    newTag: main
+  - name: notification-service
+    newName: ghcr.io/tech-challenge-workshop/notification-service
+    newTag: main
+
+# Each key is the source file's name. Grafana's provisioning directory is one
+# ConfigMap per subdirectory, since a ConfigMap holds no directories.
+# prometheus/prometheus.k8s.yml joins in T21.
+configMapGenerator:
+  - name: fiapx-rabbitmq-config
+    files:
+      - ../rabbitmq/rabbitmq.conf
+      - ../rabbitmq/enabled_plugins
+  - name: fiapx-identity-realm
+    files:
+      - ../identity/fiapx-realm.json
+  - name: fiapx-postgres-init
+    files:
+      - ../db/init/01-schemas.sql
+  - name: fiapx-storage-bootstrap
+    files:
+      - ../storage/bootstrap.sh
+  - name: fiapx-grafana-datasources
+    files:
+      - ../grafana/provisioning/datasources/prometheus.yml
+  - name: fiapx-grafana-dashboard-provider
+    files:
+      - ../grafana/provisioning/dashboards/dashboards.yml
+  - name: fiapx-grafana-dashboards
+    files:
+      - ../grafana/dashboards/overview.json

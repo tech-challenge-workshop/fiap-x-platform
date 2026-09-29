@@ -259,14 +259,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Renders with the load restrictor off; ConfigMaps carry the same bytes as the source files (spot-check `diff`)
-- [ ] Gate: Full gate exits 0
-- [ ] Test count: self-tests unchanged (config layer)
+- [x] Renders with the load restrictor off; ConfigMaps carry the same bytes as the source files (spot-check `diff`)
+- [x] Gate: Full gate exits 0
+- [x] Test count: self-tests unchanged (config layer)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the fiapx kustomization`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/kustomization.yaml` (`namespace: fiapx`, `resources: [namespace.yaml]`, the four `images:` mappings to `ghcr.io/tech-challenge-workshop/<name>:main`) and `k8s/namespace.yaml`. Seven generated ConfigMaps, each key the source file's name: `fiapx-rabbitmq-config` (`rabbitmq.conf`, `enabled_plugins`), `fiapx-identity-realm`, `fiapx-postgres-init`, `fiapx-storage-bootstrap`, and Grafana's provisioning split per subdirectory - `fiapx-grafana-datasources` (`prometheus.yml`), `fiapx-grafana-dashboard-provider` (`dashboards.yml`) - plus `fiapx-grafana-dashboards` (`overview.json`), since a ConfigMap holds no directories. Names keep kustomize's content hash suffix: manifests reference the base name and kustomize rewrites it, so a changed config rolls its pods. `prometheus/prometheus.k8s.yml` is left out until T21 creates it (T21 adds a `fiapx-prometheus-config` entry). Spot-check: all 8 rendered keys carry byte-identical content to their source files (compared through `parseYamlStream`). Found on the way: importing `check-kubernetes.mjs` ran its default check; fixed in its own commit `e4d8a79` (entry point guarded). Full gate 0: kube self-test, check-kubernetes self-test (35/9/7), default mode (8 objects), kubeconform `Valid: 8, Invalid: 0`.
 
 ---
 
