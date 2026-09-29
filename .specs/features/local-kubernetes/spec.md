@@ -249,8 +249,8 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-33 | P2: CI - offline check self-test | Execute | Implemented (T6 self-test; T20 required-workload rule + self-test; T29 runs it in the topology job) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Execute | In progress (T30 job `kubernetes`: pinned kind v0.33.0, up, smoke with SMOKE_TARGET=kind, live check, logs on failure, teardown always; first green run in T34) |
 | K8S-35 | P2: CI - governance guards the `kubernetes` job | Execute | Implemented (T31 check-ci-governance rule 6: no if/shell/continue-on-error, needs [topology] exactly, only log and teardown steps conditioned, the three cluster commands one-line; + self-test) |
-| K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |
-| K8S-37 | P3: Docs - the scaling scene | Tasks | In Tasks |
+| K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Execute | Implemented (T32 README "Local Kubernetes (kind)": up/down/smoke/live commands, kind 0.33 and kubectl 1.36, host ports and overrides, exclusivity with Compose, the private kubeconfig) |
+| K8S-37 | P3: Docs - the scaling scene | Execute | Implemented (T32 README scaling scene: burst of four `load-test --videos 50`, `get hpa -w` through the cluster's kubeconfig, expected 1 → N → 1) |
 
 **ID format:** `K8S-NN`. K8S-28..30 are implemented in the four service repos' CI workflows; every other requirement lives in `fiap-x-platform`.
 

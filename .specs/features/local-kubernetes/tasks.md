@@ -853,12 +853,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] `node scripts/check-docs-links.mjs` exits 0
+- [x] `node scripts/check-docs-links.mjs` exits 0
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `docs(platform): document the local kubernetes cluster`
+
+**Status**: ✅ Complete (2026-09-29). README section "Local Kubernetes (kind)" under "Running locally", before "CI and the required checks": prerequisites (Docker running, kind 0.33+, kubectl 1.36+, all checked by the preflight); the up, smoke (`SMOKE_TARGET=kind`), live-check and down commands and what each does (KEDA v2.21.0 checksum, create-if-absent Secrets, 600 s wait naming each not-Ready workload, idempotent re-run, refusal of an unhealthy or re-mapped cluster, down deletes only `fiapx`); why the cluster lives in `~/.kube/kind-fiapx.config` (kind always sets current-context in the file it writes; `~/.kube/config` is never touched) and that every manual kubectl, including `get hpa -w` and the password reads, is written `KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx …`; the ten host ports, `CATALOG_HOST_PORT`/`STORAGE_HOST_PORT` (fixed at creation), no Worker host port, and exclusivity with Compose (`docker compose down` first; the up command names each busy port); how to read the generated Grafana, Keycloak and RabbitMQ credentials; GHCR `:main` multi-arch images, the merge order (service PRs first, this repository last) and the `GHCR_TOKEN` → `ghcr-pull` fallback; the scaling scene (1 CPU per replica, targets 2 and 20, 1..5, `keda-hpa-worker`, five free CPUs for five replicas; `get hpa -w` and four concurrent `node scripts/load-test.mjs --videos 50`; expected 1 → N (≤ 5) → 1 within 300 s of the queues emptying, each run `COMPLETED 50/50`). The CI section lists the `kubernetes` job's guard and the topology guard's new commands, and says the job becomes a required check only after its first green run on `main`; the Layout table gains `k8s/` and the new scripts. `node scripts/check-docs-links.mjs` 0 (`0 unresolved link(s)`); the smoke self-test (which reads the README) 0; Build gate 0.
 
 ---
 
