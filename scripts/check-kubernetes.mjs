@@ -92,9 +92,9 @@ const REQUIRED = [
   'ScaledObject/worker',
   'TriggerAuthentication/rabbitmq-management',
 ];
-// Required objects whose manifest has not landed yet. The task that adds
-// each manifest removes it here: grafana (T23).
-const PENDING = ['Deployment/grafana'];
+// Required objects whose manifest has not landed yet: none since T23. A
+// future workload is added to REQUIRED and, until its manifest lands, here.
+const PENDING = [];
 
 // ---------------------------------------------------------------- YAML
 

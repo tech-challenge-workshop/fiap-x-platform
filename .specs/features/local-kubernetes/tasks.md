@@ -634,12 +634,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Build gate exits 0 (phase end)
+- [x] Build gate exits 0 (phase end)
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `feat(platform): add the grafana deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/grafana.yaml`, added to `resources`: Deployment `grafana` (1 replica, label `app=grafana`), image `grafana/grafana:13.2.2`; `GF_SECURITY_ADMIN_USER`/`GF_SECURITY_ADMIN_PASSWORD` from `secretKeyRef` `fiapx-grafana-admin` (same key names); named port `http` 3000 (Grafana's default; Compose's `GF_SERVER_HTTP_PORT=3005` is not carried over, the host still sees 3005 through the kind mapping); readiness `GET /api/health` (5 s period, 3 s timeout, 10 failures); requests 100m / 128Mi, memory limit 512Mi; no volume for Grafana's own state, as in Compose. The three generated ConfigMaps are mounted by `subPath` read-only at the Compose paths: `fiapx-grafana-datasources` → `/etc/grafana/provisioning/datasources/prometheus.yml`, `fiapx-grafana-dashboard-provider` → `/etc/grafana/provisioning/dashboards/dashboards.yml`, `fiapx-grafana-dashboards` → `/var/lib/grafana/dashboards/overview.json` (a directory mount would carry the kubelet's `..data` links into the dashboard provider's walk, the reason T13 mounts the realm by `subPath`). The datasource URL `http://prometheus:9090` resolves to T22's Service in the same namespace. Services: `grafana` ClusterIP 3000 and `grafana-host` NodePort 3000→30005. `PENDING` is now empty: every required workload is rendered, and the self-test's grafana case moved from accepted to rejected (52 corruptions rejected, 10 good inputs accepted, 62 cases as before). Full gate 0: default mode 45 objects with every required workload, kubeconform `Valid: 45, Invalid: 0`. Phase 5 Build gate 0: ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`.
 
 ---
 

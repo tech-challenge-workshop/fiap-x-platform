@@ -226,7 +226,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
-| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | In progress (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 remaining) |
+| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
@@ -240,7 +240,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Execute | Implemented (T6 no-host rule + self-test; T19 `TriggerAuthentication` `rabbitmq-management` from Secret `fiapx-keda-rabbitmq`) |
 | K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 ServiceAccount + Role for pod discovery; T28 live rule; T34 live) |
 | K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 Prometheus Deployment and Services; T28 live rule; T34 live) |
-| K8S-27 | P2: Observe - dashboard from the same JSON | Tasks | In Tasks |
+| K8S-27 | P2: Observe - dashboard from the same JSON | Execute | In progress (T23 Grafana provisioned from grafana/dashboards/overview.json through fiapx-grafana-dashboards; T28 live rule; T34 live) |
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
