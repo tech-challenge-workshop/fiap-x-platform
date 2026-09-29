@@ -308,12 +308,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Added to `resources`; Full gate exits 0 (kubeconform strict + offline rules)
+- [x] Added to `resources`; Full gate exits 0 (kubeconform strict + offline rules)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the postgres statefulset`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/postgres.yaml`, added to `resources`: Service `postgres` (ClusterIP, 5432 → named port `postgres`) and StatefulSet `postgres` (`serviceName: postgres`, 1 replica, label `app=postgres`), image `postgres:17-alpine`, `POSTGRES_DB=fiapx`, `POSTGRES_USER=postgres`, `POSTGRES_PASSWORD` from `secretKeyRef` `fiapx-postgres/POSTGRES_PASSWORD`; ConfigMap `fiapx-postgres-init` (kustomize rewrites it to the hashed name) read-only at `/docker-entrypoint-initdb.d`; `volumeClaimTemplates` `data` 1Gi `ReadWriteOnce` (default class) at `/var/lib/postgresql/data`; readiness `exec pg_isready -U postgres -d fiapx` (5 s period, 3 s timeout, 10 failures, the Compose healthcheck); requests 100m / 128Mi, memory limit 512Mi. Beyond the task: `PGDATA=/var/lib/postgresql/data/pgdata`, so initdb works on a volume whose mount point is not empty. Full gate 0: check-kubernetes default mode 10 objects, kubeconform `Valid: 10, Invalid: 0`.
 
 ---
 

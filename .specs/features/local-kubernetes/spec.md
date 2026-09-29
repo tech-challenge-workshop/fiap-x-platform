@@ -215,7 +215,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
 | K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24-T25 up command) |
-| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Tasks | In Tasks |
+| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9 postgres) |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
 | K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static scan; T24-T28 callers) |
 | K8S-05 | P1: Provision - missing tool preflight | Tasks | In Tasks |
@@ -226,7 +226,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
-| K8S-13 | P1: Secrets - credentials only via secret refs | Tasks | In Tasks |
+| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | In progress (T9 postgres) |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
