@@ -176,6 +176,54 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: scripts/check-ci-governance.mjs:202 (ci)
 - last seen: 2026-09-26T23:57:18Z
 
+### L-028 - Guard every CI step an acceptance criterion names with the governance check, not only the integration job's steps
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ci` · harmful: 0
+- features: observability
+- evidence: validation.md M7c/M7d/M12; .github/workflows/ci.yml:62-65 (ci)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-029 - Apply the dashboard metric and label rules to template variable queries as well as panel queries
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `grafana` · harmful: 0
+- features: observability
+- evidence: validation.md M9; scripts/check-observability.mjs:308-350 (grafana)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-030 - State the load size and observation window at which a live scaling outcome must be visible, and prove it with that exact command
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `load-test` · harmful: 0
+- features: observability
+- evidence: OBS-69; tasks.md:394 (load-test)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-031 - Run every README walkthrough command against the live stack and document only the output it actually produces
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `docs` · harmful: 0
+- features: observability
+- evidence: OBS-73; README.md:264-273 (docs)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-032 - Confirm a metric family is registered by the services before the design plans a dashboard row on it
+- signal: `spec_deviation` · recurrence: 1 feature(s) · scope: `grafana` · harmful: 0
+- features: observability
+- evidence: design.md SPEC_DEVIATION T4; scripts/check-observability.mjs:65-66 (grafana)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-033 - Publish a scalable service on a host port range that no other service's port falls inside
+- signal: `spec_deviation` · recurrence: 1 feature(s) · scope: `compose` · harmful: 0
+- features: observability
+- evidence: compose.yaml:125-133 SPEC_DEVIATION T5 (compose)
+- last seen: 2026-09-29T03:20:12Z
+
+### L-034 - Check offline that every published container port equals the port the service listens on, not only the host-side variable
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `compose` · harmful: 0
+- features: observability
+- evidence: validation.md round 2 M22; compose.yaml:88 (compose)
+- last seen: 2026-09-29T03:34:42Z
+
+### L-035 - Name the exact final statuses an end-to-end run must reach instead of saying terminal state
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `load-test` · harmful: 0
+- features: observability
+- evidence: validation.md round 2 P2-2 (OBS-68); scripts/load-test.mjs:339 (load-test)
+- last seen: 2026-09-29T03:34:42Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

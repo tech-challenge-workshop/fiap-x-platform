@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 28,
+  "next_id": 36,
   "lessons": [
     {
       "id": "L-001",
@@ -490,6 +490,150 @@
       ],
       "created": "2026-09-26T23:57:18Z",
       "last_seen": "2026-09-26T23:57:18Z"
+    },
+    {
+      "id": "L-028",
+      "key": "surviving_mutant::guard every ci step an acceptance criterion names with the governance check not only the integration job s steps",
+      "text": "Guard every CI step an acceptance criterion names with the governance check, not only the integration job's steps",
+      "signal": "surviving_mutant",
+      "scope": "ci",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "validation.md M7c/M7d/M12; .github/workflows/ci.yml:62-65 (ci)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-029",
+      "key": "surviving_mutant::apply the dashboard metric and label rules to template variable queries as well as panel queries",
+      "text": "Apply the dashboard metric and label rules to template variable queries as well as panel queries",
+      "signal": "surviving_mutant",
+      "scope": "grafana",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "validation.md M9; scripts/check-observability.mjs:308-350 (grafana)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-030",
+      "key": "spec_precision_gap::state the load size and observation window at which a live scaling outcome must be visible and prove it with that exact command",
+      "text": "State the load size and observation window at which a live scaling outcome must be visible, and prove it with that exact command",
+      "signal": "spec_precision_gap",
+      "scope": "load-test",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "OBS-69; tasks.md:394 (load-test)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-031",
+      "key": "ac_gap::run every readme walkthrough command against the live stack and document only the output it actually produces",
+      "text": "Run every README walkthrough command against the live stack and document only the output it actually produces",
+      "signal": "ac_gap",
+      "scope": "docs",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "OBS-73; README.md:264-273 (docs)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-032",
+      "key": "spec_deviation::confirm a metric family is registered by the services before the design plans a dashboard row on it",
+      "text": "Confirm a metric family is registered by the services before the design plans a dashboard row on it",
+      "signal": "spec_deviation",
+      "scope": "grafana",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "design.md SPEC_DEVIATION T4; scripts/check-observability.mjs:65-66 (grafana)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-033",
+      "key": "spec_deviation::publish a scalable service on a host port range that no other service s port falls inside",
+      "text": "Publish a scalable service on a host port range that no other service's port falls inside",
+      "signal": "spec_deviation",
+      "scope": "compose",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "compose.yaml:125-133 SPEC_DEVIATION T5 (compose)"
+      ],
+      "created": "2026-09-29T03:20:12Z",
+      "last_seen": "2026-09-29T03:20:12Z"
+    },
+    {
+      "id": "L-034",
+      "key": "surviving_mutant::check offline that every published container port equals the port the service listens on not only the host side variable",
+      "text": "Check offline that every published container port equals the port the service listens on, not only the host-side variable",
+      "signal": "surviving_mutant",
+      "scope": "compose",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "validation.md round 2 M22; compose.yaml:88 (compose)"
+      ],
+      "created": "2026-09-29T03:34:42Z",
+      "last_seen": "2026-09-29T03:34:42Z"
+    },
+    {
+      "id": "L-035",
+      "key": "spec_precision_gap::name the exact final statuses an end to end run must reach instead of saying terminal state",
+      "text": "Name the exact final statuses an end-to-end run must reach instead of saying terminal state",
+      "signal": "spec_precision_gap",
+      "scope": "load-test",
+      "status": "candidate",
+      "features": [
+        "observability"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "validation.md round 2 P2-2 (OBS-68); scripts/load-test.mjs:339 (load-test)"
+      ],
+      "created": "2026-09-29T03:34:42Z",
+      "last_seen": "2026-09-29T03:34:42Z"
     }
   ]
 }
