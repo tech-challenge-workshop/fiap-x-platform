@@ -309,14 +309,16 @@ T12
 
 **Done when**:
 
-- [ ] Both entries follow the AD format (Decision/Reason/Trade-off/Scope/Date/Status: active)
-- [ ] Gate check passes: `node scripts/check-docs-links.mjs`
-- [ ] Test count: docs layer (matrix)
+- [x] Both entries follow the AD format (Decision/Reason/Trade-off/Scope/Date/Status: active)
+- [x] Gate check passes: `node scripts/check-docs-links.mjs`
+- [x] Test count: docs layer (matrix)
 
 **Tests**: none
 **Gate**: quick
 
 **Commit**: `docs(platform): record the correlation contract and observability decisions`
+
+**Status**: ✅ Complete (2026-09-28). AD-016 and AD-017 appended before the Handoff section in the existing format; AD-016 also carries a `Merge order` line, as AD-015 does. Checked against the code on each service's `feat/observability`, not only the designs: the parse rule (`/^[\x20-\x7E]{1,128}$/` after trimming) in the API and Catalog `correlation-context.ts`; the API client sending header and body field; the Catalog's `varchar(128) NULL` migration and its 400 on an invalid id; the Worker's `withMessageCorrelation` (strict parse, fresh UUID, never fails the message); the four `logger.config.ts` (root `mixin` with `service`/`correlationId`, `timestamp`, bare and nested redact paths, probe paths out of the access log); `/health` 503 in the Catalog, Worker and Notification controllers and always 200 in the API's. Gate: docs-links 0.
 
 ---
 
