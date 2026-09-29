@@ -234,14 +234,16 @@ T12
 
 **Done when**:
 
-- [ ] `--self-test` exits 0 and each structural invariant has a failing-mutation probe (corrupt the dashboard JSON / drop a target / add a reverse depends_on → non-zero)
-- [ ] Gate check passes: `node scripts/check-observability.mjs --self-test`
-- [ ] Test count: 10 self-test scenarios pass (no silent deletions)
+- [x] `--self-test` exits 0 and each structural invariant has a failing-mutation probe (corrupt the dashboard JSON / drop a target / add a reverse depends_on → non-zero)
+- [x] Gate check passes: `node scripts/check-observability.mjs --self-test`
+- [x] Test count: 10 self-test scenarios pass (no silent deletions)
 
 **Tests**: self-test
 **Gate**: quick
 
 **Commit**: `feat(platform): add the observability wiring check script`
+
+**Status**: ✅ Complete (2026-09-28). Three modes. Default: the structural invariants over the repository and `docker compose config --format json` rendered with `WORKER_REPLICAS` unset (exit 0 on the committed tree, also with `WORKER_REPLICAS=3` exported). `--self-test` (no Docker): 36 corruptions each rejected with the exact message (planned 10) — 7 Prometheus (dropped target, static worker, SRV lookup, interval 1m, timeout 15s, credentials, unsupported YAML), 2 provisioning, 8 dashboard (corrupt JSON, panel and query datasource, near-miss metric, `fiapx_node_*`, owner label, request-id selector, uid), 4 broker (either plugin dropped, per-object off, port moved), 9 compose (reverse `depends_on` on prometheus and on grafana, prometheus waiting on the stack, missing health check, writable config, unmounted dashboards, missing service, unmounted `enabled_plugins`, default replicas 2), 6 live (no `fiapx_` line, a replica not live, aggregated queue metrics, a worker target down, fewer worker targets than replicas, dashboard not provisioned); the committed tree and a healthy live stack accepted; `load-test.mjs --self-test` composed; a spawned run on a corrupted copy exits 1 with the exact stderr. Ten mutants of the checker on scratch copies were each killed. `--live` probes each service's `/metrics` (`fiapx_` line) and `/health/live` (every worker replica by its published host port), the broker's per-queue depth, every Prometheus target up with one worker target per replica, and the provisioned dashboard; run against a stack that is not up it reports each missing piece and exits 1. The YAML files are read by a small strict parser (block maps, block and flow sequences) that throws on any other construct.
 
 ---
 

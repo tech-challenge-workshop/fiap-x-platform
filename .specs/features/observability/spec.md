@@ -138,7 +138,7 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 | OBS-71 | P2: Load test (self-test) | Execute | Implementing (T6) |
 | OBS-72 | P2: CI (self-test + small live load) | Design | Pending |
 | OBS-73 | P3: Documented operator walkthrough | Design | Pending |
-| OBS-74 | P1: Stack (observability check script) | Design | Pending |
+| OBS-74 | P1: Stack (observability check script) | Execute | Implementing (T7; CI in T8) |
 
 **ID format:** `OBS-[NUMBER]` — `fiap-x-api` owns OBS-01..15; `processing-catalog` OBS-16..30; `processing-worker` OBS-31..45; `notification-service` OBS-46..60; this repo owns OBS-61..75.
 
