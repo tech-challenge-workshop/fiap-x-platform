@@ -232,15 +232,15 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Execute | Implemented (T6 rule + self-test; T19 `ScaledObject` `worker`; scaling observed live in T34) |
-| K8S-19 | P1: Autoscale - HPA listed | Execute | In progress (T25 the up command waits for HPA keda-hpa-worker; T28 live rule; T34 live) |
+| K8S-19 | P1: Autoscale - HPA listed | Execute | In progress (T25 the up command waits for HPA keda-hpa-worker; T28 live rule + self-test; T34 live) |
 | K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
 | K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Execute | In progress (T19 HPA scale-down stabilization 60 s; T34 live) |
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
 | K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | Implemented (T6 rule + self-test; T18 manifest: `cpu: "1"` request and limit, `FFMPEG_THREADS=1`) |
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Execute | Implemented (T6 no-host rule + self-test; T19 `TriggerAuthentication` `rabbitmq-management` from Secret `fiapx-keda-rabbitmq`) |
-| K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 ServiceAccount + Role for pod discovery; T28 live rule; T34 live) |
-| K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 Prometheus Deployment and Services; T28 live rule; T34 live) |
-| K8S-27 | P2: Observe - dashboard from the same JSON | Execute | In progress (T23 Grafana provisioned from grafana/dashboards/overview.json through fiapx-grafana-dashboards; T28 live rule; T34 live) |
+| K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 ServiceAccount + Role for pod discovery; T28 live rule: one worker target per running pod + self-test; T34 live) |
+| K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 Prometheus Deployment and Services; T28 live rule: every target up + self-test; T34 live) |
+| K8S-27 | P2: Observe - dashboard from the same JSON | Execute | In progress (T23 Grafana provisioned from grafana/dashboards/overview.json; T28 live rule with the generated admin + self-test; T34 live) |
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |

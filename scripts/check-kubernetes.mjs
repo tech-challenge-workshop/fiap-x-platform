@@ -49,16 +49,27 @@
 // throws on anything else (anchors, aliases, tags, nested flow), so a
 // construct it does not know fails the check rather than being misread.
 //
+// `--live` checks the running cluster (K8S-19, K8S-25..27), through
+// scripts/kube.mjs and HTTP on the host ports: every required workload exists
+// and is Ready, Job storage-init is Complete, an HPA scales the worker
+// Deployment (the one KEDA creates from ScaledObject worker), Prometheus has
+// every job's targets up with exactly one worker target per running worker
+// pod (waiting up to 90 s for a scrape), and Grafana, logged in with the
+// admin from Secret fiapx-grafana-admin, serves the provisioned
+// fiapx-overview dashboard.
+//
 // `--self-test` needs no cluster: it corrupts an in-memory render once per
 // rule and requires the exact message, plants raw kubectl spawns in scanned
-// sources, and spawns this script on a corrupted render, which must exit
-// non-zero.
+// sources, spawns this script on a corrupted render, which must exit
+// non-zero, and feeds the live checks canned cluster and HTTP answers, one
+// fault at a time.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { kubectl } from './kube.mjs';
+import { NAMESPACE, kubectl } from './kube.mjs';
+import { pendingWorkloads } from './k8s-up.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(SELF), '..');
@@ -572,6 +583,93 @@ export function rawKubectlProblems(files) {
   return problems;
 }
 
+// ---------------------------------------------------------------- live
+
+const LIVE_JOBS = ['api', 'catalog', 'worker', 'notification', 'rabbitmq'];
+const OVERVIEW_UID = 'fiapx-overview';
+
+async function httpGet(url, headers = {}) {
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+    return { status: res.status, text: await res.text() };
+  } catch (err) {
+    return { status: 0, text: `unreachable (${err.cause?.code ?? err.message})` };
+  }
+}
+
+// `kube(args)` runs kubectl through scripts/kube.mjs (a canned answer in the
+// self-test) and returns spawnSync's shape.
+export async function liveProblems({ kube, http = httpGet, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), waitMs = 90000, host = 'localhost' }) {
+  const problems = [];
+  const read = (args, what) => {
+    const run = kube(args);
+    if (run.error || run.status !== 0) {
+      problems.push(`live: ${what} failed: ${(run.error?.message ?? run.stderr ?? '').trim()}`);
+      return undefined;
+    }
+    return JSON.parse(run.stdout);
+  };
+
+  // K8S-02: every required workload present and Ready, the bootstrap Job
+  // Complete. K8S-19: an HPA scales the worker.
+  const workloads = read(['get', 'deployments,statefulsets,jobs', '-n', NAMESPACE, '-o', 'json'], 'reading the workloads');
+  const hpas = read(['get', 'hpa', '-n', NAMESPACE, '-o', 'json'], 'reading the HPAs');
+  if (workloads) {
+    const present = new Set(workloads.items.map(id));
+    for (const name of REQUIRED.filter((n) => /^(Deployment|StatefulSet|Job)\//.test(n) && !present.has(n))) problems.push(`live: ${name} is not in the cluster`);
+    const { pending } = pendingWorkloads(workloads, ['keda-hpa-worker']);
+    for (const { id: which, state } of pending) problems.push(`live: ${which} is ${state}`);
+  }
+  if (hpas && !hpas.items.some((h) => h.spec?.scaleTargetRef?.kind === 'Deployment' && h.spec.scaleTargetRef.name === 'worker')) {
+    problems.push('live: no HPA scales the worker Deployment; KEDA creates keda-hpa-worker from ScaledObject worker');
+  }
+
+  // K8S-25/26: every target up, one worker target per running worker pod;
+  // Prometheus scrapes every 15 s, so wait for a scrape before judging.
+  const deadline = now() + waitMs;
+  let targetProblems;
+  for (;;) {
+    targetProblems = [];
+    const pods = read(['get', 'pods', '-n', NAMESPACE, '-l', 'app=worker', '-o', 'json'], 'reading the worker pods');
+    const running = (pods?.items ?? []).filter((p) => p.status?.phase === 'Running' && !p.metadata?.deletionTimestamp).map((p) => p.metadata.name).sort();
+    const answer = await http(`http://${host}:9090/api/v1/targets?state=active`);
+    let targets = [];
+    try {
+      targets = JSON.parse(answer.text).data.activeTargets;
+    } catch {
+      targetProblems.push(`live: Prometheus targets answered ${answer.status} with no target list`);
+    }
+    for (const job of LIVE_JOBS) {
+      const ofJob = targets.filter((t) => t.labels?.job === job);
+      if (ofJob.length === 0) targetProblems.push(`live: Prometheus has no ${job} target`);
+      for (const t of ofJob) if (t.health !== 'up') targetProblems.push(`live: Prometheus target ${job} ${t.labels.instance} is ${t.health}`);
+    }
+    const scraped = targets.filter((t) => t.labels?.job === 'worker').map((t) => t.labels.instance).sort();
+    if (JSON.stringify(scraped) !== JSON.stringify(running)) {
+      targetProblems.push(`live: Prometheus scrapes ${scraped.length} worker targets (${scraped.join(', ') || 'none'}), the cluster runs ${running.length} worker pods (${running.join(', ') || 'none'})`);
+    }
+    if (targetProblems.length === 0 || now() >= deadline) break;
+    await sleep(5000);
+  }
+  problems.push(...targetProblems);
+
+  // K8S-27: the dashboard, as the admin the up command generated.
+  const secret = read(['get', 'secret', 'fiapx-grafana-admin', '-n', NAMESPACE, '-o', 'json'], 'reading Secret fiapx-grafana-admin');
+  if (secret) {
+    const field = (key) => Buffer.from(secret.data?.[key] ?? '', 'base64').toString('utf8');
+    const auth = { Authorization: `Basic ${Buffer.from(`${field('GF_SECURITY_ADMIN_USER')}:${field('GF_SECURITY_ADMIN_PASSWORD')}`).toString('base64')}` };
+    const dashboard = await http(`http://${host}:3005/api/dashboards/uid/${OVERVIEW_UID}`, auth);
+    let provisioned = false;
+    try {
+      provisioned = JSON.parse(dashboard.text).meta?.provisioned === true;
+    } catch {
+      provisioned = false;
+    }
+    if (dashboard.status !== 200 || !provisioned) problems.push(`live: Grafana does not serve the provisioned ${OVERVIEW_UID} dashboard (answered ${dashboard.status})`);
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------- main
 
 function fail(message) {
@@ -810,7 +908,7 @@ function completeDocs() {
   return docs;
 }
 
-function selfTest() {
+async function selfTest() {
   const failures = [];
   let rejected = 0;
   let accepted = 0;
@@ -1026,20 +1124,116 @@ function selfTest() {
     rmSync(scratch, { recursive: true, force: true });
   }
 
+  // --live, with canned answers: a healthy cluster, then one fault at a time.
+  const liveCluster = (change = {}) => {
+    const dep = (name, ready = 1) => ({ kind: 'Deployment', metadata: { name, generation: 1, labels: { app: name } }, spec: { replicas: 1 }, status: { observedGeneration: 1, updatedReplicas: ready, readyReplicas: ready } });
+    const sts = (name) => ({ kind: 'StatefulSet', metadata: { name, generation: 1, labels: { app: name } }, spec: { replicas: 1 }, status: { observedGeneration: 1, updatedReplicas: 1, readyReplicas: 1 } });
+    const workloads = { items: [
+      ...['api', 'catalog', 'notification', 'rabbitmq', 'identity', 'mailpit', 'prometheus', 'grafana'].map((n) => dep(n)),
+      { ...dep('worker'), spec: { replicas: 2 }, status: { observedGeneration: 1, updatedReplicas: 2, readyReplicas: 2 } },
+      sts('postgres'), sts('storage'),
+      { kind: 'Job', metadata: { name: 'storage-init', labels: { app: 'storage-init' } }, status: { conditions: [{ type: 'Complete', status: 'True' }] } },
+    ] };
+    const hpas = { items: [{ metadata: { name: 'keda-hpa-worker' }, spec: { scaleTargetRef: { kind: 'Deployment', name: 'worker' } } }] };
+    const pods = { items: ['worker-a1', 'worker-b2'].map((name) => ({ metadata: { name, labels: { app: 'worker' } }, status: { phase: 'Running' } })) };
+    const target = (job, instance, health = 'up') => ({ labels: { job, instance }, health });
+    const targets = [target('api', 'api:3000'), target('catalog', 'catalog:3001'), target('notification', 'notification:3003'), target('rabbitmq', 'rabbitmq:15692'), target('worker', 'worker-a1'), target('worker', 'worker-b2')];
+    const grafana = { data: { GF_SECURITY_ADMIN_USER: Buffer.from('admin').toString('base64'), GF_SECURITY_ADMIN_PASSWORD: Buffer.from('Gen3rated').toString('base64') } };
+    return { workloads, hpas, pods, targets, grafana, dashboard: { status: 200, text: JSON.stringify({ meta: { provisioned: true } }) }, ...change };
+  };
+  const liveRun = async (world, waitMs = 0) => {
+    const seen = { kube: [], http: [] };
+    let clock = 0;
+    const answers = {
+      'deployments,statefulsets,jobs': () => world.workloads,
+      hpa: () => world.hpas,
+      pods: () => world.pods,
+      secret: () => world.grafana,
+    };
+    const problems = await liveProblems({
+      kube: (args) => {
+        seen.kube.push(args);
+        return { status: 0, stdout: JSON.stringify(answers[args[1]]()), stderr: '' };
+      },
+      http: async (url, headers) => {
+        seen.http.push({ url, headers });
+        if (url.endsWith('/api/v1/targets?state=active')) return { status: 200, text: JSON.stringify({ status: 'success', data: { activeTargets: world.targets } }) };
+        return world.dashboard;
+      },
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      waitMs,
+      host: 'h',
+    });
+    return { problems, seen, clock };
+  };
+  let liveCases = 0;
+  const expectLive = async (name, world, expected) => {
+    liveCases += 1;
+    const { problems } = await liveRun(world);
+    if (!same(problems, expected)) failures.push(`live: ${name}: got ${JSON.stringify(problems)}, expected ${JSON.stringify(expected)}`);
+  };
+  {
+    const { problems, seen } = await liveRun(liveCluster());
+    liveCases += 1;
+    if (!same(problems, [])) failures.push(`live: healthy cluster: got ${JSON.stringify(problems)}`);
+    // Every cluster read is namespaced to fiapx and names no context itself
+    // (kube.mjs adds it); Grafana is asked with the Secret's admin.
+    if (!seen.kube.every((args) => args.includes('-n') && args[args.indexOf('-n') + 1] === 'fiapx' && !args.some((a) => a.startsWith('--context')))) failures.push(`live: cluster reads ${JSON.stringify(seen.kube)}`);
+    const grafanaCall = seen.http.find((c) => c.url === 'http://h:3005/api/dashboards/uid/fiapx-overview');
+    if (grafanaCall?.headers?.Authorization !== `Basic ${Buffer.from('admin:Gen3rated').toString('base64')}`) failures.push(`live: Grafana asked with ${JSON.stringify(grafanaCall?.headers)}, expected the admin from Secret fiapx-grafana-admin`);
+  }
+  const base = liveCluster();
+  await expectLive('no HPA for the worker', liveCluster({ hpas: { items: [{ metadata: { name: 'keda-hpa-api' }, spec: { scaleTargetRef: { kind: 'Deployment', name: 'api' } } }] } }),
+    ['live: no HPA scales the worker Deployment; KEDA creates keda-hpa-worker from ScaledObject worker']);
+  await expectLive('a target down', liveCluster({ targets: base.targets.map((t) => (t.labels.job === 'rabbitmq' ? { ...t, health: 'down' } : t)) }),
+    ['live: Prometheus target rabbitmq rabbitmq:15692 is down']);
+  await expectLive('fewer worker targets than worker pods', liveCluster({ targets: base.targets.filter((t) => t.labels.instance !== 'worker-b2') }),
+    ['live: Prometheus scrapes 1 worker targets (worker-a1), the cluster runs 2 worker pods (worker-a1, worker-b2)']);
+  await expectLive('a worker target that is not a running pod', liveCluster({ targets: [...base.targets.filter((t) => t.labels.instance !== 'worker-b2'), { labels: { job: 'worker', instance: 'worker-old' }, health: 'up' }] }),
+    ['live: Prometheus scrapes 2 worker targets (worker-a1, worker-old), the cluster runs 2 worker pods (worker-a1, worker-b2)']);
+  await expectLive('no catalog target', liveCluster({ targets: base.targets.filter((t) => t.labels.job !== 'catalog') }),
+    ['live: Prometheus has no catalog target']);
+  await expectLive('the dashboard answers 404', liveCluster({ dashboard: { status: 404, text: '{"message":"Dashboard not found"}' } }),
+    ['live: Grafana does not serve the provisioned fiapx-overview dashboard (answered 404)']);
+  await expectLive('the dashboard exists but was not provisioned', liveCluster({ dashboard: { status: 200, text: JSON.stringify({ meta: { provisioned: false } }) } }),
+    ['live: Grafana does not serve the provisioned fiapx-overview dashboard (answered 200)']);
+  await expectLive('a workload not Ready', liveCluster({ workloads: { items: base.workloads.items.map((o) => (o.metadata.name === 'identity' ? { ...o, status: { ...o.status, readyReplicas: 0 } } : o)) } }),
+    ['live: Deployment/identity is 0/1 ready']);
+  await expectLive('a workload missing and the Job not complete', liveCluster({ workloads: { items: base.workloads.items.filter((o) => o.metadata.name !== 'mailpit').map((o) => (o.kind === 'Job' ? { ...o, status: {} } : o)) } }),
+    ['live: Deployment/mailpit is not in the cluster', 'live: Job/storage-init is not complete']);
+  {
+    // A target not scraped yet is retried every 5 s until the wait ends.
+    const { problems, clock } = await liveRun(liveCluster({ targets: base.targets.map((t) => (t.labels.job === 'api' ? { ...t, health: 'unknown' } : t)) }), 20000);
+    liveCases += 1;
+    if (!same([problems, clock], [['live: Prometheus target api api:3000 is unknown'], 20000])) failures.push(`live: retry until the wait ends: got ${JSON.stringify([problems, clock])}`);
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`check-kubernetes self-test failed: ${failure}`);
     process.exit(1);
   }
   console.log(
-    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the scan, spawned failures (worker replicas, catalog missing) exited non-zero and spawned complete render exited 0`,
+    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the scan, spawned failures (worker replicas, catalog missing) exited non-zero and spawned complete render exited 0, ${liveCases} live cases (healthy, missing HPA, target down, worker targets vs pods, dashboard) exact`,
   );
 }
 
 // Only when run as a script: the up command and the smoke may import the
 // parser and the rules.
+async function live() {
+  const problems = await liveProblems({ kube: (args) => kubectl(args) });
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`check-kubernetes: ${problem}`);
+    process.exit(1);
+  }
+  console.log('check-kubernetes --live: every workload is Ready, storage-init is Complete, an HPA scales the worker, every Prometheus target is up with one worker target per worker pod, Grafana serves the fiapx-overview dashboard');
+}
+
 if (process.argv[1] === SELF) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    await selfTest();
+  } else if (process.argv.includes('--live')) {
+    await live();
   } else {
     main();
   }

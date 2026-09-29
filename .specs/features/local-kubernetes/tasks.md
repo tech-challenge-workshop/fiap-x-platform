@@ -756,14 +756,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Self-test: missing HPA, a down target, fewer worker targets than pods, dashboard 404 - each exits 1 with its message
-- [ ] Build gate exits 0 (phase end)
-- [ ] Test count: T20 count + ≥ 4
+- [x] Self-test: missing HPA, a down target, fewer worker targets than pods, dashboard 404 - each exits 1 with its message
+- [x] Build gate exits 0 (phase end)
+- [x] Test count: T20 count + ≥ 4
 
 **Tests**: self-test
 **Gate**: Build
 
 **Commit**: `feat(platform): add the live kubernetes check`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/check-kubernetes.mjs --live`: `liveProblems({ kube, http, now, sleep, waitMs, host })`, with `kube` = `kubectl()` from `scripts/kube.mjs` (every read `-n fiapx`, JSON output) and HTTP on the host ports. Workloads: every required Deployment/StatefulSet/Job exists ("… is not in the cluster") and each is ready by the up command's own rule (`pendingWorkloads` imported from `k8s-up.mjs`: updated and Ready replicas, `storage-init` Complete). HPA: one whose `scaleTargetRef` is Deployment `worker` (KEDA's `keda-hpa-worker`). Prometheus (`:9090/api/v1/targets?state=active`): each of `api`, `catalog`, `worker`, `notification`, `rabbitmq` has a target, every target `up`, and the worker targets' `instance` labels equal the names of the running worker pods (`get pods -l app=worker`), retried every 5 s for up to 90 s so a first scrape can land. Grafana (`:3005/api/dashboards/uid/fiapx-overview`): 200 with `meta.provisioned: true`, asked with Basic auth built from Secret `fiapx-grafana-admin` (`GF_SECURITY_ADMIN_USER`/`GF_SECURITY_ADMIN_PASSWORD`). Any failure prints each problem and exits 1. `selfTest` is now async. Self-test: 11 live cases (planned T20 count + ≥ 4) on canned answers: a healthy cluster (also: every cluster read is namespaced to `fiapx` and names no context; Grafana is asked with the Secret's admin); missing HPA (an HPA for another Deployment); a target down; fewer worker targets than pods; a worker target that is not a running pod; no catalog target; dashboard 404; dashboard not provisioned; a workload not Ready; a workload missing plus the Job not complete; a target still `unknown` retried until the wait ends (20 s). Offline cases unchanged (52 rejected, 10 accepted, 7 parser readings). Six line-targeted mutants on scratch copies (HPA check off, worker count only compared one way, dashboard status ignored, Grafana password not from the Secret, only `down` counted as unhealthy, missing workloads ignored) were each killed; an unmutated copy passed. Not run against a cluster (T34). Phase 6 Build gate 0: Full gate (kube, check-kubernetes and k8s-up self-tests, default mode 45 objects, kubeconform `Valid: 45`), ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`; `node scripts/k8s-down.mjs --self-test` and `node scripts/smoke-local-integration.mjs --self-test` 0.
 
 ---
 
