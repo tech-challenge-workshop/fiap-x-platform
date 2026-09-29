@@ -40,7 +40,8 @@
 - **Trade-off**: The team operates its own dependencies instead of consuming managed services, and the cloud-deployment story becomes documented evolution rather than delivered work. In exchange, no slice is blocked and the protocol-level ports keep a later migration to a managed provider at the cost of adapters and environment variables.
 - **Scope**: All FIAP X services, specifications, and deployment artifacts. Supersedes AD-002.
 - **Date**: 2026-09-19
-- **Status**: active (the object storage server was amended by AD-014: RustFS replaces MinIO behind the same S3 port)
+- **Status**: active (the object storage server was amended by AD-014: RustFS replaces MinIO behind the same S3 port; the Kubernetes distribution was settled by AD-018)
+- **Amended 2026-09-29**: of "kind/k3d", only kind is used: AD-018 runs the topology on a kind cluster named `fiapx`, beside Compose rather than instead of it. k3d was never adopted.
 
 ### AD-006
 - **Decision**: The Processing Worker stays on NestJS and runs FFmpeg in a child process. Concurrency comes from a configured `prefetchCount` per queue, an explicit `ffmpeg -threads` value matched to the pod's CPU limit, and horizontal replicas scaled by queue depth. `worker_threads` is not used.
@@ -96,7 +97,8 @@
 - **Trade-off**: A transient failure is retried indefinitely, one attempt per pause, so a bug misclassified as transient loops slowly instead of reaching the DLQ; the log names the event on every retry. Quorum queues cost more disk and memory than classic ones, irrelevant at this volume. The topology is rebuilt from the file on every broker start, so a queue created by hand does not survive a restart.
 - **Scope**: `fiap-x-platform` broker definitions; consumer error handling in all services (`processing-catalog` implements it; the Worker and Notification still requeue without a pause).
 - **Date**: 2026-09-24
-- **Status**: active
+- **Status**: active (Scope amended 2026-09-29)
+- **Amended 2026-09-29**: the Scope's parenthesis is no longer true. `processing-worker` (`src/messaging/settle-failed-message.ts`, 2026-09-25) and `notification-service` (`src/notifications/infrastructure/messaging/settle-failed-message.ts`, 2026-09-26) now classify and pause like `processing-catalog`: a permanent failure (Worker: `MessageRejectedError`; Notification: `InvalidTerminalEventError`) is nacked without requeue, anything else is requeued after `RABBITMQ_RETRY_BACKOFF_MS` (default 1000 ms, which neither Compose nor `k8s/` overrides). All three services now implement this decision.
 
 ### AD-013
 - **Decision**: In `processing-catalog`, a lifecycle event is applied under a row lock (`SELECT … FOR UPDATE` inside the unit of work), and the state machine tolerates the order in which `ProcessingStarted` and `ProcessingCompleted` arrive: completion is accepted from `QUEUED`, a start that finds the request already `PROCESSING` or terminal changes nothing, and a completion that restates the stored archive key changes nothing and publishes nothing. Each of these no-ops still records the event as processed.
@@ -112,7 +114,8 @@
 - **Trade-off**: RustFS is younger than MinIO (1.0.0 released 2026-09-16), so behaviour outside what the smoke asserts is less proven. In exchange, no script depends on a storage vendor's CLI any more: replacing the server again is an image and credentials change, which is what AD-005 intended and what this incident showed was not yet true.
 - **Scope**: `fiap-x-platform` topology and scripts; the object storage used by `processing-worker`'s CI.
 - **Date**: 2026-09-26
-- **Status**: active
+- **Status**: active (script list amended 2026-09-29)
+- **Amended 2026-09-29**: the seed script named in the Decision no longer exists: S6 removed `scripts/seed-source-video.mjs` on 2026-09-26, when sources started arriving through the API, and `scripts/check-no-storage-writes.mjs` now fails any script that writes into the bucket. The scripts that touch storage are the bootstrap (`storage/bootstrap.sh` in `storage-init`), `scripts/check-storage-bootstrap.mjs` and the smoke; on the kind cluster (AD-018) the smoke runs the same `amazon/aws-cli` image as a one-shot pod instead of through `storage-init`.
 
 ### AD-015
 - **Decision**: The owner's email address is resolved exactly once, at `fiap-x-api`, by reading the standard OIDC `email` claim already present on the verified access token — never by querying Keycloak's Admin API and never through a second contact registry. It is stored on `processing-catalog`'s `ProcessingRequest` and added only to the terminal event; `VideoValidationRequested`, `ProcessingQueued`, and `ProcessingStarted` never carry it, so the Worker's PII surface stays at zero.
@@ -138,7 +141,8 @@
 - **Trade-off**: Redaction is by key name, so a value logged under a new key is not caught; each service tests its redaction through its own logger configuration. Unauthenticated `/metrics` is acceptable only because the metrics carry no personal data and the stack is local; a deployed environment must keep the port off the public network. Per-queue broker metrics multiply the broker's series by the number of queues, which is small here. The platform PR depends on the four service PRs, so it merges last (AD-016).
 - **Scope**: logging, metrics and health in `fiap-x-api`, `processing-catalog`, `processing-worker` and `notification-service`; `fiap-x-platform`'s `prometheus/`, `grafana/`, `rabbitmq/` plugin configuration, compose services and `scripts/check-observability.mjs` and `scripts/load-test.mjs`.
 - **Date**: 2026-09-28
-- **Status**: active
+- **Status**: active (Worker discovery amended by AD-018)
+- **Amended 2026-09-29**: the DNS lookup is how Prometheus finds the Worker replicas under Compose (`prometheus/prometheus.yml`). On the kind cluster (AD-018) it uses Kubernetes pod discovery instead (`prometheus/prometheus.k8s.yml`, pods labelled `app=worker`), so every replica KEDA adds is scraped the same way.
 
 ### AD-018
 - **Decision**: The topology runs on a local kind cluster named `fiapx`, rendered from one kustomization in `k8s/` and brought up by `scripts/k8s-up.mjs`, alongside Compose rather than instead of it. **Addressing**: the cluster lives in its own kubeconfig, `~/.kube/kind-fiapx.config`, never in `~/.kube/config`; the scripts reach it only through `scripts/kube.mjs`, whose `kubectl()` always prepends `--context kind-fiapx`, sets `KUBECONFIG` to that file alone and refuses any flag or subcommand that could point elsewhere or touch the kubeconfig, and whose `kind()` pins every create and delete to `--name fiapx --kubeconfig ~/.kube/kind-fiapx.config`. `scripts/check-kubernetes.mjs` fails when any other script spawns kubectl or kind directly, and every documented or CI kubectl command names the file and the context. **Images**: each service's CI publishes `ghcr.io/tech-challenge-workshop/<repo>` for `linux/amd64` and `linux/arm64` on every merge to `main`, as `:<commit sha>` and `:main`, with the workflow's `GITHUB_TOKEN`; the cluster builds nothing and runs `:main` with `imagePullPolicy: Always`. **Credentials**: generated at random per cluster by the up command into Secrets, created only when absent, never versioned and never applied with `kubectl apply`; the manifests read them only by `secretKeyRef` or a Secret volume, and the fixture identities already in the repository (the demo realm users, the Postgres init roles) stay fixtures. **Scaling**: KEDA's RabbitMQ scaler over the management API drives the Worker from 1 to 5 replicas (target 2 on `processing`, 20 on `video-validation`), each replica with 1 CPU and `FFMPEG_THREADS=1` (AD-006). **Gates**: Compose stays the inner dev loop and CI's `integration` gate; the `topology` job proves the manifests offline (the rules, kustomize, kubeconform) and a `kubernetes` job, after `topology`, runs the up command, the smoke with `SMOKE_TARGET=kind` and the live check on a real kind cluster.
@@ -148,6 +152,7 @@
 - **Merge order**: the four services' `feat/publish-images` merge first (any order); this repository's `feat/local-kubernetes` merges last, after the four `:main` images exist on GHCR.
 - **Date**: 2026-09-29
 - **Status**: active
+- **Amended 2026-09-29**: the `kubernetes` job had its first green run on `main` when `fiap-x-platform#15` merged as `372c861` (K8S-34). It is still not a required check: `ci/required-checks.json` lists `topology`, `docs-links` and `integration` for this repository, and adding it changes the remote ruleset, which waits for a go-ahead.
 
 ## Handoff
 
