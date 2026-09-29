@@ -682,14 +682,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Self-test: checksum mismatch exits 1 naming both hashes; a fake `get pods` with `ImagePullBackOff`/`CrashLoopBackOff` produces the named report; timeout path exits 1
-- [ ] Gate: Quick + Full exit 0
-- [ ] Test count: T24 count + ≥ 5
+- [x] Self-test: checksum mismatch exits 1 naming both hashes; a fake `get pods` with `ImagePullBackOff`/`CrashLoopBackOff` produces the named report; timeout path exits 1
+- [x] Gate: Quick + Full exit 0
+- [x] Test count: T24 count + ≥ 5
 
 **Tests**: self-test
 **Gate**: Full
 
 **Commit**: `feat(platform): install keda and wait for the topology in the up command`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/k8s-up.mjs` part 2; `up()` runs provision → `installKeda` → `applyTopology` → `waitForTopology` → endpoints. KEDA: `KEDA.url` = the v2.21.0 release manifest, `KEDA.sha256` = `b43c89ffeef81722d7e2dd2c079d74789767a0f89cae1336cff784994814f6d7` (the real file, downloaded once with curl, 782 690 bytes); a download failure or checksum mismatch stops before anything is applied, the mismatch naming the expected and actual hashes; `apply --server-side --force-conflicts -f -` with the downloaded bytes; `wait --for=condition=Available --timeout=180s -n keda` on `keda-operator`, `keda-metrics-apiserver` and `keda-admission` (the release names the metrics server `keda-metrics-apiserver`, not the design's `keda-operator-metrics-apiserver`; the admission webhook is waited for too, since it validates the ScaledObject the apply sends). Apply: a **finished** Job `storage-init` (Complete or Failed) is always deleted first (`delete job --wait=true`), because its pod template is immutable and carries the bootstrap ConfigMap's hash suffix, and the bootstrap is idempotent; a running one is left alone; then the `kubectl kustomize --load-restrictor LoadRestrictionsNone k8s` output goes to `apply -f -`. Wait: every 5 s, `get deployments,statefulsets,jobs` and `get hpa` in `fiapx`; ready means each Deployment/StatefulSet has `observedGeneration` ≥ `generation` and all desired replicas updated and Ready, Job `storage-init` Complete, and HPA `keda-hpa-worker` present (K8S-19). After 600 s, or at once when `storage-init` has Failed, it reads the pods and exits 1 listing each pending workload with its pods' reasons: waiting reason per container (image named for pull errors, message for `CreateContainerConfigError`), non-`Completed` terminations with exit code, a running container not ready, a `wait-` init container still waiting, or `Pending (Unschedulable)`. On success it prints the host endpoints (with the moved catalog/storage ports), the commands that read the generated Grafana, Keycloak and RabbitMQ credentials, and the `get hpa -w` watch command, all as `KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx …`. Self-test: 99 assertions (T24: 66; planned T24 + ≥ 5): the pin; checksum mismatch naming both hashes with nothing applied; download failure; the server-side apply of the exact bytes and the KEDA wait; apply with no, completed, failed and running bootstrap Job (delete only for finished ones); ready at once and after three polls (10 s slept); a 600 s timeout (121 polls) naming `ImagePullBackOff` with the image, `CrashLoopBackOff` and `CreateContainerConfigError` with its message; a running-but-not-ready pod and a missing HPA; a failed bootstrap Job stopping at once and naming the API still waiting for the bucket; generation lag, partial update, a scaled-out Worker, no Job, unschedulable; the whole command's step order and printed hints. Six mutants on scratch copies (checksum check off, finished Job never deleted, a failed Job ignored until timeout, waiting reasons dropped, updated-replica check dropped, HPA not required) were each killed. Full gate 0.
 
 ---
 

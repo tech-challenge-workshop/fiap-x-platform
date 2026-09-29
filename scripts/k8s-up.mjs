@@ -23,6 +23,25 @@
 //    generated user. With GHCR_TOKEN set, a `ghcr-pull` Secret is created and
 //    the namespace's default ServiceAccount pulls with it (the fallback while
 //    the GHCR packages are private).
+// 4. KEDA v2.21.0: the release manifest downloaded from GitHub, its sha256
+//    checked against the pinned value, applied server-side (its CRDs exceed
+//    the client-side annotation limit), and its three Deployments waited for
+//    (the admission webhook must answer before a ScaledObject is applied).
+// 5. The topology: `kubectl kustomize --load-restrictor LoadRestrictionsNone
+//    k8s` applied. A finished Job `storage-init` is deleted first, always:
+//    a Job's pod template is immutable and carries the bootstrap
+//    ConfigMap's hash suffix, so re-applying a changed bootstrap onto a
+//    finished Job would fail; the bootstrap is idempotent, so running it
+//    again on every up is harmless. A Job still running is left alone.
+// 6. The wait (K8S-02, K8S-03, K8S-19): every Deployment and StatefulSet in
+//    `fiapx` with all replicas updated and Ready, Job `storage-init`
+//    Complete, and the HPA KEDA creates for the Worker (`keda-hpa-worker`)
+//    present, within 600 s. On timeout, or at once when `storage-init`
+//    fails, each workload that is not ready is printed with the waiting
+//    reason of its pods (ImagePullBackOff, CrashLoopBackOff,
+//    CreateContainerConfigError, ...) and the command exits 1. On success it
+//    prints the host endpoints and how to read the generated admin
+//    passwords.
 //
 // Every kubectl and kind call goes through scripts/kube.mjs: kubectl always
 // runs as `--context kind-fiapx` against the cluster's own kubeconfig, and
@@ -33,13 +52,13 @@
 // kubectl, kind, docker and the port probe, and requires the exact commands,
 // objects and messages.
 import { spawnSync } from 'node:child_process';
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KIND_CLUSTER, KUBECTL_BIN, NAMESPACE, kind, kubectl } from './kube.mjs';
+import { KIND_CLUSTER, KUBECONFIG_PATH, KUBECTL_BIN, KUBE_CONTEXT, NAMESPACE, kind, kubectl } from './kube.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(SELF), '..');
@@ -47,6 +66,19 @@ const DOWN_HINT = 'run node scripts/k8s-down.mjs first';
 const HOST_CONFIGMAP = 'fiapx-host';
 const DEFAULT_PORTS = { CATALOG_HOST_PORT: 3001, STORAGE_HOST_PORT: 9000 };
 const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+// KEDA's release manifest, pinned by version and content.
+export const KEDA = {
+  version: '2.21.0',
+  url: 'https://github.com/kedacore/keda/releases/download/v2.21.0/keda-2.21.0.yaml',
+  sha256: 'b43c89ffeef81722d7e2dd2c079d74789767a0f89cae1336cff784994814f6d7',
+  namespace: 'keda',
+  deployments: ['keda-operator', 'keda-metrics-apiserver', 'keda-admission'],
+};
+const WAIT_BUDGET_MS = 600000;
+const POLL_MS = 5000;
+const WORKER_HPA = 'keda-hpa-worker';
+const BOOTSTRAP_JOB = 'storage-init';
 
 // Fixture passwords of the roles db/init/01-schemas.sql creates (spec
 // Assumptions: test identities of a throwaway cluster, not secrets).
@@ -157,6 +189,69 @@ export function clusterDecision(state, ports) {
   return 'reuse';
 }
 
+// Whether a Deployment or StatefulSet has every replica updated and Ready.
+function rolledOut(obj) {
+  const desired = obj.spec?.replicas ?? 1;
+  const st = obj.status ?? {};
+  return (st.observedGeneration ?? 0) >= (obj.metadata?.generation ?? 0) && (st.updatedReplicas ?? 0) >= desired && (st.readyReplicas ?? 0) >= desired;
+}
+const jobCondition = (job, type) => (job.status?.conditions ?? []).some((c) => c.type === type && c.status === 'True');
+
+// What still stands between the topology and Ready, from `get
+// deployments,statefulsets,jobs -o json` and the HPA names: a list of
+// { id, app, state } plus `failed` when the bootstrap Job has failed.
+export function pendingWorkloads(workloads, hpas) {
+  const pending = [];
+  let failed = false;
+  const items = workloads.items ?? [];
+  for (const obj of items) {
+    const id = `${obj.kind}/${obj.metadata.name}`;
+    const app = obj.metadata.labels?.app ?? obj.metadata.name;
+    if (obj.kind === 'Job') {
+      if (obj.metadata.name !== BOOTSTRAP_JOB || jobCondition(obj, 'Complete')) continue;
+      failed = failed || jobCondition(obj, 'Failed');
+      pending.push({ id, app, state: jobCondition(obj, 'Failed') ? 'failed' : 'not complete' });
+    } else if (!rolledOut(obj)) {
+      pending.push({ id, app, state: `${obj.status?.readyReplicas ?? 0}/${obj.spec?.replicas ?? 1} ready` });
+    }
+  }
+  if (!items.some((o) => o.kind === 'Job' && o.metadata.name === BOOTSTRAP_JOB)) pending.push({ id: `Job/${BOOTSTRAP_JOB}`, app: BOOTSTRAP_JOB, state: 'not created' });
+  if (!hpas.includes(WORKER_HPA)) pending.push({ id: `HorizontalPodAutoscaler/${WORKER_HPA}`, app: null, state: `not created by KEDA yet (see ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} describe scaledobject worker)` });
+  return { pending, failed };
+}
+
+// Why a pod is not ready: every container's (init containers first) waiting
+// reason, or its last termination reason, or the pod's phase.
+export function podReasons(pod) {
+  const reasons = [];
+  for (const status of [...(pod.status?.initContainerStatuses ?? []), ...(pod.status?.containerStatuses ?? [])]) {
+    const waiting = status.state?.waiting;
+    if (waiting?.reason && waiting.reason !== 'PodInitializing') {
+      const detail = /ImagePull|ErrImage|InvalidImageName/.test(waiting.reason) ? ` (${status.image})` : waiting.reason === 'CreateContainerConfigError' && waiting.message ? ` (${waiting.message})` : '';
+      reasons.push(`${status.name} ${waiting.reason}${detail}`);
+    } else if (status.state?.terminated && status.state.terminated.reason !== 'Completed') {
+      reasons.push(`${status.name} ${status.state.terminated.reason ?? 'terminated'} (exit ${status.state.terminated.exitCode})`);
+    } else if (status.state?.running && status.ready === false && !status.name.startsWith('wait-')) {
+      reasons.push(`${status.name} running, not ready`);
+    } else if (status.state?.running && status.name.startsWith('wait-')) {
+      reasons.push(`${status.name} still waiting`);
+    }
+  }
+  if (reasons.length === 0) reasons.push(pod.status?.phase === 'Pending' ? `Pending${pod.status?.conditions?.find((c) => c.type === 'PodScheduled' && c.status === 'False')?.reason ? ` (${pod.status.conditions.find((c) => c.type === 'PodScheduled').reason})` : ''}` : (pod.status?.phase ?? 'unknown'));
+  return reasons;
+}
+
+// The report printed when the topology is not ready: one line per pending
+// workload, with the reasons of each of its pods (matched by label app).
+export function pendingReport(pending, pods) {
+  return pending.map(({ id, app, state }) => {
+    if (app === null) return `  ${id}: ${state}`;
+    const own = (pods.items ?? []).filter((pod) => pod.metadata.labels?.app === app);
+    const why = own.length === 0 ? 'no pod' : own.map((pod) => `${pod.metadata.name}: ${podReasons(pod).join(', ')}`).join('; ');
+    return `  ${id} ${state}: ${why}`;
+  }).join('\n');
+}
+
 // ---------------------------------------------------------------- effects
 
 // A port is free when both the wildcard and the loopback address bind.
@@ -179,6 +274,13 @@ export const realDeps = {
   random: (length) => randomAlphanumeric(length),
   readRepoFile: (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8'),
   log: (line) => console.log(line),
+  fetchText: async (url) => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+    if (!res.ok) throw new UpError(`downloading ${url} answered ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  },
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 const missing = (run) => run.error?.code === 'ENOENT';
@@ -290,6 +392,81 @@ export function provisionNamespace(ports, deps, env) {
   return created;
 }
 
+// KEDA's pinned release, server-side applied, its Deployments Available.
+export async function installKeda(deps) {
+  let body;
+  try {
+    body = await deps.fetchText(KEDA.url);
+  } catch (error) {
+    throw new UpError(`could not download KEDA v${KEDA.version} from ${KEDA.url}: ${error.message}`);
+  }
+  const actual = createHash('sha256').update(body).digest('hex');
+  if (actual !== KEDA.sha256) {
+    throw new UpError(`the KEDA v${KEDA.version} manifest does not match its pinned checksum: expected sha256 ${KEDA.sha256}, got ${actual}; nothing was applied`);
+  }
+  deps.log(`k8s-up: installing KEDA v${KEDA.version}`);
+  must(deps.kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: body.toString('utf8') }), `applying KEDA v${KEDA.version}`);
+  must(deps.kubectl(['wait', '--for=condition=Available', '--timeout=180s', '-n', KEDA.namespace, ...KEDA.deployments.map((d) => `deployment/${d}`)]), `waiting for KEDA (${KEDA.deployments.join(', ')})`);
+}
+
+// A finished bootstrap Job is deleted so the apply can recreate it (its
+// template is immutable); a running one is left alone.
+function clearFinishedBootstrap(deps) {
+  const run = deps.kubectl(['get', 'job', BOOTSTRAP_JOB, '-n', NAMESPACE, '-o', 'json']);
+  if (run.status !== 0 && /NotFound/.test(output(run))) return false;
+  const job = JSON.parse(must(run, `reading Job ${BOOTSTRAP_JOB}`));
+  if (!jobCondition(job, 'Complete') && !jobCondition(job, 'Failed')) return false;
+  must(deps.kubectl(['delete', 'job', BOOTSTRAP_JOB, '-n', NAMESPACE, '--wait=true']), `deleting the finished Job ${BOOTSTRAP_JOB}`);
+  return true;
+}
+
+export function applyTopology(deps) {
+  if (clearFinishedBootstrap(deps)) deps.log(`k8s-up: deleted the finished Job ${BOOTSTRAP_JOB}; the apply runs the bootstrap again`);
+  const rendered = must(deps.kubectl(['kustomize', '--load-restrictor', 'LoadRestrictionsNone', join(REPO_ROOT, 'k8s')]), 'rendering k8s/');
+  must(deps.kubectl(['apply', '-f', '-'], { input: rendered }), 'applying the topology');
+}
+
+// Polls until the topology is ready; throws the named report on timeout or
+// when the bootstrap Job fails.
+export async function waitForTopology(deps, budgetMs = WAIT_BUDGET_MS) {
+  const deadline = deps.now() + budgetMs;
+  deps.log(`k8s-up: waiting up to ${budgetMs / 1000} s for every workload in ${NAMESPACE}`);
+  for (;;) {
+    const workloads = JSON.parse(must(deps.kubectl(['get', 'deployments,statefulsets,jobs', '-n', NAMESPACE, '-o', 'json']), 'reading the workloads'));
+    const hpas = must(deps.kubectl(['get', 'hpa', '-n', NAMESPACE, '-o', 'jsonpath={.items[*].metadata.name}']), 'reading the HPAs').split(/\s+/).filter(Boolean);
+    const { pending, failed } = pendingWorkloads(workloads, hpas);
+    if (pending.length === 0) return;
+    const timedOut = deps.now() >= deadline;
+    if (failed || timedOut) {
+      const pods = JSON.parse(must(deps.kubectl(['get', 'pods', '-n', NAMESPACE, '-o', 'json']), 'reading the pods'));
+      const head = failed ? `Job ${BOOTSTRAP_JOB} failed; the topology cannot become ready` : `not ready after ${budgetMs / 1000} s`;
+      throw new UpError(`${head}:\n${pendingReport(pending, pods)}`);
+    }
+    await deps.sleep(POLL_MS);
+  }
+}
+
+export function endpoints(ports) {
+  const read = (secret, key) => `KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} get secret ${secret} -o jsonpath='{.data.${key}}' | base64 -d`;
+  return [
+    'k8s-up: the topology is ready on the kind cluster fiapx',
+    '  API           http://localhost:3000',
+    `  Catalog       http://localhost:${ports.CATALOG_HOST_PORT}`,
+    '  Notification  http://localhost:3003',
+    '  Keycloak      http://localhost:8080 (issuer http://localhost:8080/realms/fiapx)',
+    `  Storage (S3)  http://localhost:${ports.STORAGE_HOST_PORT}`,
+    '  Mailpit       http://localhost:8025',
+    '  RabbitMQ      http://localhost:15672 (metrics :15692)',
+    '  Prometheus    http://localhost:9090',
+    '  Grafana       http://localhost:3005 (user admin)',
+    'Generated passwords:',
+    `  Grafana admin:   ${read('fiapx-grafana-admin', 'GF_SECURITY_ADMIN_PASSWORD')}`,
+    `  Keycloak admin:  ${read('fiapx-identity-admin', 'KC_BOOTSTRAP_ADMIN_PASSWORD')}`,
+    `  RabbitMQ user:   ${read('fiapx-rabbitmq', 'USERNAME')}, password ${read('fiapx-rabbitmq', 'PASSWORD')}`,
+    `Watch the Worker scale: KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context ${KUBE_CONTEXT} -n ${NAMESPACE} get hpa -w`,
+  ].join('\n');
+}
+
 // Part 1 of the up command: preflight, cluster, namespace, fiapx-host and
 // Secrets.
 export async function provision(deps, env) {
@@ -309,9 +486,18 @@ export async function provision(deps, env) {
   return { decision, ports, created };
 }
 
+// The whole up command.
+export async function up(deps, env) {
+  const { ports } = await provision(deps, env);
+  await installKeda(deps);
+  applyTopology(deps);
+  await waitForTopology(deps);
+  deps.log(endpoints(ports));
+}
+
 async function main() {
   try {
-    await provision(realDeps, process.env);
+    await up(realDeps, process.env);
   } catch (error) {
     if (!(error instanceof UpError)) throw error;
     console.error(`k8s-up: ${error.message}`);
@@ -321,11 +507,39 @@ async function main() {
 
 // ---------------------------------------------------------------- self-test
 
+// A KEDA body whose sha256 is the pinned one cannot be forged here, so the
+// fakes serve a stand-in and the tests pin KEDA.sha256 to its hash for the
+// duration of a run (withPinned).
+const KEDA_FIXTURE = 'apiVersion: v1\nkind: Namespace\nmetadata:\n  name: keda\n';
+const sha = (text) => createHash('sha256').update(text).digest('hex');
+async function withPinned(hash, run) {
+  const pinned = KEDA.sha256;
+  KEDA.sha256 = hash;
+  try {
+    return await run();
+  } finally {
+    KEDA.sha256 = pinned;
+  }
+}
+
+const deployment = (name, desired, ready, extra = {}) => ({ kind: 'Deployment', metadata: { name, generation: 1, labels: { app: name } }, spec: { replicas: desired }, status: { observedGeneration: 1, updatedReplicas: ready, readyReplicas: ready, ...extra } });
+const statefulSet = (name, ready) => ({ kind: 'StatefulSet', metadata: { name, generation: 1, labels: { app: name } }, spec: { replicas: 1 }, status: { observedGeneration: 1, updatedReplicas: 1, readyReplicas: ready } });
+const job = (condition) => ({ kind: 'Job', metadata: { name: 'storage-init', labels: { app: 'storage-init' } }, status: { conditions: condition ? [{ type: condition, status: 'True' }] : [] } });
+const TOPOLOGY = ['api', 'catalog', 'notification', 'worker', 'rabbitmq', 'identity', 'mailpit', 'prometheus', 'grafana'];
+// Every workload ready, the Job complete, the HPA present; `change` edits it.
+function readyRound(change = (r) => r) {
+  return change({
+    workloads: { items: [...TOPOLOGY.map((n) => deployment(n, 1, 1)), statefulSet('postgres', 1), statefulSet('storage', 1), job('Complete')] },
+    hpas: ['keda-hpa-worker'],
+  });
+}
+const replaceItem = (round, name, item) => ({ ...round, workloads: { items: round.workloads.items.map((o) => (o.metadata.name === name ? item : o)) } });
+
 // Fakes of every effect. `world` describes the machine: tools present, the
 // daemon, the clusters kind lists, node readiness, the recorded host map,
 // the Secrets present and the busy ports.
 function fakeDeps(world = {}) {
-  const w = { tools: { kind: true, kubectl: true, docker: true }, daemon: true, clusters: [], nodes: 'fiapx-control-plane=True', api: true, hostMap: undefined, secrets: {}, busy: [], ...world };
+  const w = { tools: { kind: true, kubectl: true, docker: true }, daemon: true, clusters: [], nodes: 'fiapx-control-plane=True', api: true, hostMap: undefined, secrets: {}, busy: [], keda: KEDA_FIXTURE, job: undefined, rounds: [readyRound()], pods: { items: [] }, clock: 0, ...world };
   w.clusters = [...w.clusters];
   w.secrets = { ...w.secrets };
   const calls = [];
@@ -357,6 +571,14 @@ function fakeDeps(world = {}) {
         return w.hostMap ? ok(JSON.stringify({ data: w.hostMap })) : { status: 1, stdout: '', stderr: `Error from server (NotFound): configmaps "${name}" not found` };
       }
       if (verb === 'get' && what === 'secrets') return ok(Object.keys(w.secrets).join(' '));
+      if (verb === 'get' && what === 'job') return w.job ? ok(JSON.stringify(w.job)) : { status: 1, stdout: '', stderr: `Error from server (NotFound): jobs.batch "${name}" not found` };
+      if (verb === 'get' && what === 'deployments,statefulsets,jobs') {
+        deps.polls += 1;
+        return ok(JSON.stringify(w.rounds[Math.min(deps.polls - 1, w.rounds.length - 1)].workloads));
+      }
+      if (verb === 'get' && what === 'hpa') return ok(w.rounds[Math.min(deps.polls - 1, w.rounds.length - 1)].hpas.join(' '));
+      if (verb === 'get' && what === 'pods') return ok(JSON.stringify(w.pods));
+      if (verb === 'kustomize') return ok('rendered topology');
       if (verb === 'get' && what === 'secret') return ok(JSON.stringify({ data: b64(w.secrets[name]) }));
       if (verb === 'create') {
         const secret = JSON.parse(opts.input);
@@ -376,6 +598,15 @@ function fakeDeps(world = {}) {
     random: (length) => randomAlphanumeric(length),
     readRepoFile: (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8'),
     log: (line) => deps.logs.push(line),
+    polls: 0,
+    fetchText: async (url) => {
+      calls.push({ tool: 'fetch', args: [url] });
+      return Buffer.from(w.keda);
+    },
+    now: () => w.clock,
+    sleep: async (ms) => {
+      w.clock += ms;
+    },
   };
   return deps;
 }
@@ -546,11 +777,132 @@ async function selfTest() {
   expect('no context or kubeconfig flag built here', fresh.calls.some((c) => c.args.some((a) => /^--(context|kubeconfig)/.test(a))), false);
   expect('realDeps use the kube.mjs helpers', [realDeps.kubectl.toString().includes('kubectl(args'), realDeps.kind.toString().includes('kind(args')], [true, true]);
 
+  // ---- part 2: KEDA, apply, wait.
+  const kubectlCalls = (deps) => deps.calls.filter((c) => c.tool === KUBECTL_BIN);
+
+  // The pinned value is the real release's sha256 (downloaded once, T25).
+  expect('KEDA pin', [KEDA.url, KEDA.sha256, KEDA.deployments], ['https://github.com/kedacore/keda/releases/download/v2.21.0/keda-2.21.0.yaml', 'b43c89ffeef81722d7e2dd2c079d74789767a0f89cae1336cff784994814f6d7', ['keda-operator', 'keda-metrics-apiserver', 'keda-admission']]);
+  // A checksum mismatch names both hashes and applies nothing.
+  {
+    const deps = fakeDeps({ keda: `${KEDA_FIXTURE}# tampered\n` });
+    await withPinned(sha(KEDA_FIXTURE), () => expectThrows('KEDA checksum mismatch', () => installKeda(deps),
+      `the KEDA v2.21.0 manifest does not match its pinned checksum: expected sha256 ${sha(KEDA_FIXTURE)}, got ${sha(`${KEDA_FIXTURE}# tampered\n`)}; nothing was applied`));
+    expect('KEDA checksum mismatch: nothing applied', kubectlCalls(deps).length, 0);
+  }
+  {
+    const deps = fakeDeps();
+    deps.fetchText = async () => { throw new Error('getaddrinfo ENOTFOUND github.com'); };
+    await expectThrows('KEDA download failure', () => installKeda(deps), `could not download KEDA v2.21.0 from ${KEDA.url}: getaddrinfo ENOTFOUND github.com`);
+  }
+  // A matching download: fetched from the pinned URL, applied server-side
+  // with its exact bytes, then its three Deployments waited for.
+  {
+    const deps = fakeDeps();
+    await withPinned(sha(KEDA_FIXTURE), () => installKeda(deps));
+    expect('KEDA fetched from the pinned URL', deps.calls.filter((c) => c.tool === 'fetch').map((c) => c.args[0]), [KEDA.url]);
+    const [apply, wait] = kubectlCalls(deps);
+    expect('KEDA applied server-side with the downloaded bytes', [apply?.args, apply?.opts.input], [['apply', '--server-side', '--force-conflicts', '-f', '-'], KEDA_FIXTURE]);
+    expect('KEDA Deployments waited for', wait?.args, ['wait', '--for=condition=Available', '--timeout=180s', '-n', 'keda', 'deployment/keda-operator', 'deployment/keda-metrics-apiserver', 'deployment/keda-admission']);
+  }
+
+  // The apply: a finished storage-init Job is deleted first, a running or
+  // absent one is not; the render goes to apply -f - unchanged.
+  const applyCase = (name, jobState, deletes) => {
+    const deps = fakeDeps({ job: jobState });
+    applyTopology(deps);
+    const verbs = kubectlCalls(deps).map((c) => c.args.slice(0, 3).join(' '));
+    const expected = ['get job storage-init', ...(deletes ? ['delete job storage-init'] : []), `kustomize --load-restrictor LoadRestrictionsNone`, 'apply -f -'];
+    expect(`apply with ${name}`, verbs, expected);
+    expect(`apply with ${name}: the render is applied`, kubectlCalls(deps).at(-1).opts.input, 'rendered topology');
+    expect(`apply with ${name}: the kustomization directory`, kubectlCalls(deps).find((c) => c.args[0] === 'kustomize').args[3], join(REPO_ROOT, 'k8s'));
+  };
+  applyCase('no bootstrap Job yet', undefined, false);
+  applyCase('a completed bootstrap Job', job('Complete'), true);
+  applyCase('a failed bootstrap Job', job('Failed'), true);
+  applyCase('a running bootstrap Job', job(null), false);
+
+  // The wait: ready at once, ready after two polls.
+  {
+    const deps = fakeDeps();
+    await waitForTopology(deps);
+    expect('wait: ready at once polls once and sleeps never', [deps.polls, deps.world.clock], [1, 0]);
+  }
+  {
+    const slow = readyRound((r) => replaceItem(r, 'identity', deployment('identity', 1, 0)));
+    const deps = fakeDeps({ rounds: [slow, readyRound((r) => ({ ...r, hpas: [] })), readyRound()] });
+    await waitForTopology(deps);
+    expect('wait: keeps polling until the workloads and the HPA are ready', [deps.polls, deps.world.clock], [3, 10000]);
+  }
+  // Timeout: each workload not ready, named with its pods' reasons.
+  const pod = (name, app, statuses, init = [], phase = 'Pending') => ({ metadata: { name, labels: { app } }, status: { phase, initContainerStatuses: init, containerStatuses: statuses } });
+  const waiting = (name, reason, image, message) => ({ name, image, ready: false, state: { waiting: { reason, ...(message ? { message } : {}) } } });
+  {
+    const stuck = readyRound((r) => replaceItem(replaceItem(replaceItem(r, 'worker', deployment('worker', 1, 0)), 'api', deployment('api', 1, 0)), 'catalog', deployment('catalog', 1, 0)));
+    const pods = { items: [
+      pod('worker-7d9f-abc', 'worker', [waiting('worker', 'ImagePullBackOff', 'ghcr.io/tech-challenge-workshop/processing-worker:main')], [{ name: 'wait-for-bucket', ready: true, state: { terminated: { reason: 'Completed', exitCode: 0 } } }]),
+      pod('api-5c6d-def', 'api', [waiting('api', 'CrashLoopBackOff', 'ghcr.io/tech-challenge-workshop/fiap-x-api:main')], [], 'Running'),
+      pod('catalog-1a2b-ghi', 'catalog', [waiting('catalog', 'CreateContainerConfigError', 'x', 'secret "fiapx-postgres" not found')]),
+      pod('mailpit-0-jkl', 'mailpit', [{ name: 'mailpit', ready: true, state: { running: {} } }], [], 'Running'),
+    ] };
+    const deps = fakeDeps({ rounds: [stuck], pods });
+    await expectThrows('wait: timeout names each workload and its reason', () => waitForTopology(deps), [
+      'not ready after 600 s:',
+      '  Deployment/api 0/1 ready: api-5c6d-def: api CrashLoopBackOff',
+      '  Deployment/catalog 0/1 ready: catalog-1a2b-ghi: catalog CreateContainerConfigError (secret "fiapx-postgres" not found)',
+      '  Deployment/worker 0/1 ready: worker-7d9f-abc: worker ImagePullBackOff (ghcr.io/tech-challenge-workshop/processing-worker:main)',
+    ].join('\n'));
+    expect('wait: the budget is 600 s of 5 s polls', [deps.world.clock, deps.polls], [600000, 121]);
+  }
+  {
+    const stuck = readyRound((r) => ({ ...replaceItem(r, 'grafana', deployment('grafana', 1, 0)), hpas: [] }));
+    const deps = fakeDeps({ rounds: [stuck], pods: { items: [pod('grafana-x', 'grafana', [{ name: 'grafana', ready: false, state: { running: {} } }], [], 'Running')] } });
+    await expectThrows('wait: a running pod that is not ready and a missing HPA', () => waitForTopology(deps, 10000), [
+      'not ready after 10 s:',
+      '  Deployment/grafana 0/1 ready: grafana-x: grafana running, not ready',
+      `  HorizontalPodAutoscaler/keda-hpa-worker: not created by KEDA yet (see ${KUBECTL_BIN} --context kind-fiapx -n fiapx describe scaledobject worker)`,
+    ].join('\n'));
+  }
+  // The bootstrap Job failing stops the wait at once, naming it; the API
+  // and Worker still waiting for the bucket are named too.
+  {
+    const broken = readyRound((r) => replaceItem(replaceItem(r, 'storage-init', job('Failed')), 'api', deployment('api', 1, 0)));
+    const pods = { items: [
+      pod('storage-init-p1', 'storage-init', [{ name: 'bootstrap', ready: false, state: { terminated: { reason: 'Error', exitCode: 254 } } }], [], 'Failed'),
+      pod('api-q1', 'api', [waiting('api', 'PodInitializing', 'img')], [{ name: 'wait-for-bucket', ready: false, state: { running: {} } }]),
+    ] };
+    const deps = fakeDeps({ rounds: [broken], pods });
+    await expectThrows('wait: the bootstrap Job failed', () => waitForTopology(deps), [
+      'Job storage-init failed; the topology cannot become ready:',
+      '  Deployment/api 0/1 ready: api-q1: wait-for-bucket still waiting',
+      '  Job/storage-init failed: storage-init-p1: bootstrap Error (exit 254)',
+    ].join('\n'));
+    expect('wait: a failed Job stops without sleeping', deps.world.clock, 0);
+  }
+  // A rollout still in progress (new pods not all updated) is not ready.
+  expect('wait: an old generation or a partial update is pending', pendingWorkloads({ items: [deployment('api', 1, 1, { observedGeneration: 0 }), deployment('worker', 3, 3, { updatedReplicas: 2 }), job('Complete'), statefulSet('postgres', 0)] }, ['keda-hpa-worker']).pending.map((p) => p.id),
+    ['Deployment/api', 'Deployment/worker', 'StatefulSet/postgres']);
+  expect('wait: a scaled-out Worker with every replica ready is ready', pendingWorkloads({ items: [deployment('worker', 4, 4), job('Complete')] }, ['keda-hpa-worker']).pending, []);
+  expect('wait: no bootstrap Job at all is pending', pendingWorkloads({ items: [] }, ['keda-hpa-worker']).pending.map((p) => p.id), ['Job/storage-init']);
+  expect('wait: a pending unschedulable pod names why', podReasons({ status: { phase: 'Pending', conditions: [{ type: 'PodScheduled', status: 'False', reason: 'Unschedulable' }] } }), ['Pending (Unschedulable)']);
+
+  // The whole command on a fresh machine: provision, KEDA, apply, wait,
+  // endpoints, in that order.
+  {
+    const deps = fakeDeps();
+    await withPinned(sha(KEDA_FIXTURE), () => up(deps, {}));
+    const order = deps.calls.map((c) => (c.tool === 'kind' ? `kind ${c.args[0]}` : c.tool === 'fetch' ? 'fetch' : c.tool === 'docker' ? 'docker' : `${c.args[0]} ${c.args[1] ?? ''}`.trim()))
+      .filter((step) => ['kind create', 'fetch', 'apply --server-side', 'wait --for=condition=Available', 'kustomize --load-restrictor', 'get deployments,statefulsets,jobs'].includes(step) || step.startsWith('create -f'));
+    expect('up: steps in order', [...new Set(order)], ['kind create', 'create -f', 'fetch', 'apply --server-side', 'wait --for=condition=Available', 'kustomize --load-restrictor', 'get deployments,statefulsets,jobs']);
+    const printed = deps.logs.at(-1);
+    expect('up: endpoints and the password hints', [printed.startsWith('k8s-up: the topology is ready on the kind cluster fiapx'), printed.includes(`KUBECONFIG=${KUBECONFIG_PATH} ${KUBECTL_BIN} --context kind-fiapx -n fiapx get secret fiapx-grafana-admin -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d`)], [true, true]);
+    expect('up: moved ports are the ones printed', endpoints({ CATALOG_HOST_PORT: 33001, STORAGE_HOST_PORT: 39000 }).split('\n').filter((l) => /Catalog|Storage/.test(l)), ['  Catalog       http://localhost:33001', '  Storage (S3)  http://localhost:39000']);
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`k8s-up self-test failed: ${failure}`);
     process.exit(1);
   }
-  console.log(`k8s-up self-test passed: ${passed} assertions (kind config rendering, preflight, busy ports, cluster reuse and refusal, fiapx-host, Secret shapes and fixtures, definitions rewrite, create-if-absent, ghcr-pull)`);
+  console.log(`k8s-up self-test passed: ${passed} assertions (kind config rendering, preflight, busy ports, cluster reuse and refusal, fiapx-host, Secret shapes and fixtures, definitions rewrite, create-if-absent, ghcr-pull; KEDA checksum and install, bootstrap Job handling, apply, the 600 s wait and its named report)`);
 }
 
 if (process.argv[1] === SELF) {

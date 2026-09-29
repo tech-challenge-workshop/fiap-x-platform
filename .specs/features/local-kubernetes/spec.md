@@ -214,9 +214,9 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
-| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 apply; T34 live) |
-| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 wait; T34 live) |
-| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
+| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 KEDA install and topology apply; T34 live) |
+| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 readiness wait + self-test; T34 live) |
+| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Execute | Implemented (T25 600 s wait naming each not-ready workload and its pods' reasons + self-test; observed live in T34) |
 | K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers) |
 | K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
 | K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
@@ -232,7 +232,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Execute | Implemented (T6 rule + self-test; T19 `ScaledObject` `worker`; scaling observed live in T34) |
-| K8S-19 | P1: Autoscale - HPA listed | Tasks | In Tasks |
+| K8S-19 | P1: Autoscale - HPA listed | Execute | In progress (T25 the up command waits for HPA keda-hpa-worker; T28 live rule; T34 live) |
 | K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
 | K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Execute | In progress (T19 HPA scale-down stabilization 60 s; T34 live) |
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
