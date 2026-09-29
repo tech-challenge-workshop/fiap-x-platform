@@ -354,12 +354,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the storage statefulset`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/storage.yaml`, added to `resources`: StatefulSet `storage` (`serviceName: storage`, 1 replica, label `app=storage`), image `rustfs/rustfs:1.0.0` with its default entrypoint (`RUSTFS_VOLUMES=/data`, as Compose runs it), `RUSTFS_ACCESS_KEY`/`RUSTFS_SECRET_KEY` from `secretKeyRef` `fiapx-storage` keys `ACCESS_KEY`/`SECRET_KEY`; named port `s3` 9000; readiness `GET /health` on `s3` (5 s period, 3 s timeout, 10 failures, the Compose healthcheck); `volumeClaimTemplates` `data` 2Gi `ReadWriteOnce` at `/data`; requests 100m / 128Mi, memory limit 1Gi. Services: `storage` ClusterIP 9000 and `storage-host` NodePort 9000→30900 (the `${STORAGE_HOST_PORT}` mapping of `kind-config.template.yaml`). Beyond the task: pod `securityContext.fsGroup: 10001`, since the image runs as `rustfs` (uid 10001, checked with `docker run … id`); kind's local-path claims are created world-writable, so this only matters on a provisioner that honours `fsGroup`. Full gate 0: default mode 16 objects, kubeconform `Valid: 16, Invalid: 0`.
 
 ---
 
