@@ -248,7 +248,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-32 | P2: CI - topology renders, validates, checks | Execute | Implemented (T29: topology renders with kubectl kustomize, validates with pinned kubeconform v0.8.0 strict over the Kubernetes and KEDA schemas, runs check-kubernetes; proven on the PR run in T34) |
 | K8S-33 | P2: CI - offline check self-test | Execute | Implemented (T6 self-test; T20 required-workload rule + self-test; T29 runs it in the topology job) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Execute | In progress (T30 job `kubernetes`: pinned kind v0.33.0, up, smoke with SMOKE_TARGET=kind, live check, logs on failure, teardown always; first green run in T34) |
-| K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
+| K8S-35 | P2: CI - governance guards the `kubernetes` job | Execute | Implemented (T31 check-ci-governance rule 6: no if/shell/continue-on-error, needs [topology] exactly, only log and teardown steps conditioned, the three cluster commands one-line; + self-test) |
 | K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |
 | K8S-37 | P3: Docs - the scaling scene | Tasks | In Tasks |
 

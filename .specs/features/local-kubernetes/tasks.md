@@ -828,14 +828,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Self-test: removing each command, masking with `|| true`, `if:` on the job, `needs` changed - each rejected
-- [ ] Gate: Build gate exits 0
-- [ ] Test count: previous governance self-test count + ≥ 5
+- [x] Self-test: removing each command, masking with `|| true`, `if:` on the job, `needs` changed - each rejected
+- [x] Gate: Build gate exits 0
+- [x] Test count: previous governance self-test count + ≥ 5
 
 **Tests**: self-test
 **Gate**: Build
 
 **Commit**: `ci(platform): guard the kubernetes job's commands`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/check-ci-governance.mjs` rule 6, `kubernetesProblems`: the `kubernetes` job must exist; sets no `if:`, `shell:` or `continue-on-error` (job or any step); sets `needs: [topology]` exactly (`[topology]` or the scalar `topology`; anything else, a second job, or no `needs` is named with its value); only "Collect cluster state and pod logs" and "Upload cluster logs" may carry `failure()` and "Delete the kind cluster" `always()`, and no step running a cluster command may be conditioned; `node scripts/k8s-up.mjs`, `SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs` and `node scripts/check-kubernetes.mjs --live` each run as the whole one-line `run:` of their own step. As design.md's CI section says, the topology guard now also protects T29's seven new commands (the kube, check-kubernetes, k8s-up and k8s-down proofs, the kustomize render, the kubeconform validation). The kustomize command string is built from `KUBECTL_BIN` (imported from `scripts/kube.mjs`) and the fixture's kind download path is not spawn-shaped, because the static kubectl and kind scans of `check-kubernetes` (found by the gate) refuse a raw tool string in any script but `kube.mjs`. Self-test: 56 bad workflows rejected (was 39; +17), 3 good accepted (was 2): the up command removed, the cluster smoke masked by `|| true`, the smoke without `SMOKE_TARGET=kind`, the live check under `set +e` in a `run: |`, `if:` on the job, `needs` changed to `[integration]`, `needs` with a second job, no `needs`, the up step gated on the event, the smoke renamed to an allow-listed log step, `failure()` on the teardown, `continue-on-error` on a step, `shell:` on a step, no `kubernetes` job; the offline Kubernetes check and the render removed from topology, kubeconform masked by `|| true`; accepted: `needs: topology` as a scalar. Ten mutants on scratch copies (each job rule removed, needs parsed as its first entry only, any condition accepted on allow-listed names, a command accepted inside a larger run, the rule not wired in, the new topology commands dropped, the smoke command without `SMOKE_TARGET`) were each killed. `node scripts/check-ci-governance.mjs` passes on the real workflow; `apply-required-checks --self-test` (which imports this script) 0. Build gate 0.
 
 ---
 
