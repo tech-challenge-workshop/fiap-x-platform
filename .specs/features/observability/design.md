@@ -84,6 +84,7 @@ graph TD
 
 - **Purpose**: OBS-67.
 - **Location**: `compose.yaml` worker service: `deploy: { replicas: ${WORKER_REPLICAS:-1} }`; `.env`-style host override only (no `.env` file committed — documented in README; the integration job runs with default 1)
+- **SPEC_DEVIATION (T5)**: the worker's host port becomes the range `${WORKER_HOST_PORT:-3010-3019}:3002` (was `3002:3002`). One host port binds one replica only, so a fixed port makes a second replica fail to start; a range starting at 3002 would contain 3003 (notification) and 3005 (grafana). Docker picks any free port in the range; `docker compose port --index N worker 3002` names it. A single `WORKER_HOST_PORT` still works for one replica.
 - **Interfaces**: `WORKER_REPLICAS=3 docker compose up -d worker`
 - **Dependencies**: none
 - **Reuses**: the S4 concurrency model (replicas compete on the same queues); smoke/deliveries assertions are per-request-id, so replicas don't disturb them

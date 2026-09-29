@@ -173,7 +173,7 @@ T12
 
 ### T5: Compose wiring + worker replicas
 
-**What**: `compose.yaml`: `prometheus` service (pinned image, config ro-mounted, `:9090`, healthcheck `/-/healthy`) and `grafana` service (pinned image, env admin/admin, `:3005`, healthcheck `/api/health`) — with **no business service gaining `depends_on` either**; worker service gains `deploy.replicas: ${WORKER_REPLICAS:-1}`.
+**What**: `compose.yaml`: `prometheus` service (pinned image, config ro-mounted, `:9090`, healthcheck `/-/healthy`) and `grafana` service (pinned image, env admin/admin, `:3005`, healthcheck `/api/health`) — with **no business service gaining `depends_on` either**; worker service gains `deploy.replicas: ${WORKER_REPLICAS:-1}` and its host port becomes the range `${WORKER_HOST_PORT:-3010-3019}` (SPEC_DEVIATION: a fixed host port admits one replica).
 **Where**: `compose.yaml`
 **Depends on**: T4
 **Reuses**: existing service conventions (healthchecks, pins)
@@ -183,15 +183,17 @@ T12
 
 **Done when**:
 
-- [ ] `docker compose config` renders; `WORKER_REPLICAS=3 docker compose config` shows 3 replicas; `--wait` brings prometheus+grafana healthy
-- [ ] T7 self-test: no business service depends on prometheus/grafana
-- [ ] Gate check passes: full self-test gate + render
-- [ ] Test count: asserted in T7 self-test
+- [x] `docker compose config` renders; `WORKER_REPLICAS=3 docker compose config` shows 3 replicas; `--wait` brings prometheus+grafana healthy
+- [x] T7 self-test: no business service depends on prometheus/grafana
+- [x] Gate check passes: full self-test gate + render
+- [x] Test count: asserted in T7 self-test
 
 **Tests**: self-test
 **Gate**: build
 
 **Commit**: `feat(platform): add prometheus and grafana to the compose stack`
+
+**Status**: ✅ Complete (2026-09-28). Rendered replicas: 1 by default, 3 with `WORKER_REPLICAS=3`; `WORKER_HOST_PORT=33002` renders the single port. `docker compose -p obs-t5 up -d --wait prometheus grafana` (a throwaway project with only the two services, torn down after) brought both healthy with no business service running, Grafana served `fiapx-overview` as provisioned, and Prometheus listed the absent targets as down rather than blocking (OBS-64). Images pinned: `prom/prometheus:v3.15.0`, `grafana/grafana:13.2.2`; Grafana listens on 3005 inside and out (`GF_SERVER_HTTP_PORT`). SPEC_DEVIATION: the worker host port range (design.md, Worker replicas). Phase 1 build gate: `compose config -q` 0, `check-worker-sizing` and its self-test 0, `check-ci-governance` and its self-test 0, docs-links 0 (the two new scripts arrive in T6/T7).
 
 ---
 

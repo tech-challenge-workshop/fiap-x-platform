@@ -125,13 +125,13 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| OBS-61 | P1: Stack (Prometheus scrape set) | Execute | Implementing (T2) |
+| OBS-61 | P1: Stack (Prometheus scrape set) | Execute | Implementing (T2, T5) |
 | OBS-62 | P1: Stack (Grafana provisioning) | Execute | Implementing (T3) |
 | OBS-63 | P1: Stack (RabbitMQ plugin) | Execute | Implementing (T1 done; live assertion in T12) |
-| OBS-64 | P1: Stack (resilient startup) | Execute | Implementing (T2) |
-| OBS-65 | P1: Stack (recreate from repo) | Design | Pending |
-| OBS-66 | P1: Stack (config from repo, no creds on targets) | Design | Pending |
-| OBS-67 | P2: Replicas (N workers) | Design | Pending |
+| OBS-64 | P1: Stack (resilient startup) | Execute | Implementing (T2, T5) |
+| OBS-65 | P1: Stack (recreate from repo) | Execute | Implementing (T5) |
+| OBS-66 | P1: Stack (config from repo, no creds on targets) | Execute | Implementing (T5) |
+| OBS-67 | P2: Replicas (N workers) | Execute | Implementing (T5; live in T12) |
 | OBS-68 | P2: Load test (N pipelines) | Design | Pending |
 | OBS-69 | P2: Load test (dashboard evidence) | Design | Pending |
 | OBS-70 | P2: Load test (failure exit) | Design | Pending |

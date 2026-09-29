@@ -114,9 +114,24 @@ services:
     # values disagree. Top-level `cpus`, not deploy.resources.limits, which
     # Compose ignores outside Swarm.
     cpus: ${WORKER_CPUS:-2}
+    # OBS-67: WORKER_REPLICAS containers compete on the same queues. The
+    # default of 1 keeps the stack as it was; the load test's evidence runs
+    # `WORKER_REPLICAS=3 docker compose up -d worker`. Prometheus finds every
+    # replica by DNS (prometheus/prometheus.yml), not by this port.
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
     ports:
       # WORKER_HOST_PORT moves only the host side, like POSTGRES_HOST_PORT.
-      - "${WORKER_HOST_PORT:-3002}:3002"
+      # SPEC_DEVIATION: the host side is a range, 3010-3019 by default, where
+      # it was the single port 3002.
+      # Reason: every replica publishes container port 3002, and one host
+      # port can be bound by one replica only, so a second replica would fail
+      # to start. A range that began at 3002 would contain 3003 and 3005,
+      # which notification and grafana publish, and a worker that starts
+      # first could take them. Docker picks a free port from the range, not
+      # always its first; `docker compose port --index N worker 3002` names
+      # it. A single port (WORKER_HOST_PORT=33002) still works for one replica.
+      - "${WORKER_HOST_PORT:-3010-3019}:3002"
     environment:
       - PORT=3002
       - RABBITMQ_URL=amqp://rabbitmq:5672
@@ -167,6 +182,50 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  prometheus:
+    # Scrapes every service's /metrics and the broker's metrics plugin every
+    # 15 s (OBS-61), from the read-only file in this repository (OBS-66). No
+    # business service depends on it, and it depends on none of them: a
+    # target that is not up yet is retried on the next scrape (OBS-64), and
+    # the business stack starts whether or not monitoring does.
+    image: prom/prometheus:v3.15.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  grafana:
+    # The overview dashboard and its Prometheus datasource are provisioned
+    # from grafana/ on every start (OBS-62). No volume: a recreated container
+    # comes back with exactly the repository's state (OBS-65). Host port 3005,
+    # since 3000 is the API's.
+    image: grafana/grafana:13.2.2
+    environment:
+      # Local development credentials only. Nothing here reaches a deployed
+      # environment: AD-005 keeps secrets in Kubernetes secrets.
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_HTTP_PORT=3005
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3005:3005"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3005/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
   mailpit:
     # SMTP sink for local email (RF-5). No 1025 port mapping: SMTP stays
