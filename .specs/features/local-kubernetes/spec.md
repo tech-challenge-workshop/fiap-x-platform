@@ -214,47 +214,47 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
-| K8S-01 | P1: Provision - cluster created/reused, topology applied | Design | Pending |
-| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Design | Pending |
-| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Design | Pending |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Design | Pending |
-| K8S-05 | P1: Provision - missing tool preflight | Design | Pending |
-| K8S-06 | P1: Provision - busy host port preflight | Design | Pending |
-| K8S-07 | P1: Provision - idempotent re-run | Design | Pending |
-| K8S-08 | P1: Provision - down deletes only `fiapx` | Design | Pending |
-| K8S-09 | P1: Provision - readiness/liveness probes | Design | Pending |
-| K8S-10 | P1: Provision - smoke passes with cluster target | Design | Pending |
-| K8S-11 | P1: Provision - host token accepted (issuer) | Design | Pending |
-| K8S-12 | P1: Provision - presigned URL usable from host | Design | Pending |
-| K8S-13 | P1: Secrets - credentials only via secret refs | Design | Pending |
-| K8S-14 | P1: Secrets - no Secret with data in the repo | Design | Pending |
-| K8S-15 | P1: Secrets - generated at provisioning | Design | Pending |
-| K8S-16 | P1: Secrets - check rejects literal credential env | Design | Pending |
-| K8S-17 | P1: Secrets - check rejects committed Secret data | Design | Pending |
-| K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Design | Pending |
-| K8S-19 | P1: Autoscale - HPA listed | Design | Pending |
-| K8S-20 | P1: Autoscale - scale out under load | Design | Pending |
-| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Design | Pending |
-| K8S-22 | P1: Autoscale - in-flight job survives scale-in | Design | Pending |
-| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Design | Pending |
-| K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Design | Pending |
-| K8S-25 | P2: Observe - every Worker pod scraped | Design | Pending |
-| K8S-26 | P2: Observe - other targets up | Design | Pending |
-| K8S-27 | P2: Observe - dashboard from the same JSON | Design | Pending |
-| K8S-28 | P2: Publish - push `:sha` and `:main` on main | Design | Pending |
-| K8S-29 | P2: Publish - PRs build without pushing | Design | Pending |
-| K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Design | Pending |
-| K8S-31 | P2: Publish - manifests reference GHCR images | Design | Pending |
-| K8S-32 | P2: CI - topology renders, validates, checks | Design | Pending |
-| K8S-33 | P2: CI - offline check self-test | Design | Pending |
-| K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Design | Pending |
-| K8S-35 | P2: CI - governance guards the `kubernetes` job | Design | Pending |
-| K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Design | Pending |
-| K8S-37 | P3: Docs - the scaling scene | Design | Pending |
+| K8S-01 | P1: Provision - cluster created/reused, topology applied | Tasks | In Tasks |
+| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Tasks | In Tasks |
+| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Tasks | In Tasks |
+| K8S-05 | P1: Provision - missing tool preflight | Tasks | In Tasks |
+| K8S-06 | P1: Provision - busy host port preflight | Tasks | In Tasks |
+| K8S-07 | P1: Provision - idempotent re-run | Tasks | In Tasks |
+| K8S-08 | P1: Provision - down deletes only `fiapx` | Tasks | In Tasks |
+| K8S-09 | P1: Provision - readiness/liveness probes | Tasks | In Tasks |
+| K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
+| K8S-11 | P1: Provision - host token accepted (issuer) | Tasks | In Tasks |
+| K8S-12 | P1: Provision - presigned URL usable from host | Tasks | In Tasks |
+| K8S-13 | P1: Secrets - credentials only via secret refs | Tasks | In Tasks |
+| K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
+| K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
+| K8S-16 | P1: Secrets - check rejects literal credential env | Tasks | In Tasks |
+| K8S-17 | P1: Secrets - check rejects committed Secret data | Tasks | In Tasks |
+| K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Tasks | In Tasks |
+| K8S-19 | P1: Autoscale - HPA listed | Tasks | In Tasks |
+| K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
+| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Tasks | In Tasks |
+| K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
+| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Tasks | In Tasks |
+| K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Tasks | In Tasks |
+| K8S-25 | P2: Observe - every Worker pod scraped | Tasks | In Tasks |
+| K8S-26 | P2: Observe - other targets up | Tasks | In Tasks |
+| K8S-27 | P2: Observe - dashboard from the same JSON | Tasks | In Tasks |
+| K8S-28 | P2: Publish - push `:sha` and `:main` on main | Tasks | In Tasks |
+| K8S-29 | P2: Publish - PRs build without pushing | Tasks | In Tasks |
+| K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Tasks | In Tasks |
+| K8S-31 | P2: Publish - manifests reference GHCR images | Tasks | In Tasks |
+| K8S-32 | P2: CI - topology renders, validates, checks | Tasks | In Tasks |
+| K8S-33 | P2: CI - offline check self-test | Tasks | In Tasks |
+| K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |
+| K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
+| K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |
+| K8S-37 | P3: Docs - the scaling scene | Tasks | In Tasks |
 
 **ID format:** `K8S-NN`. K8S-28..30 are implemented in the four service repos' CI workflows; every other requirement lives in `fiap-x-platform`.
 
-**Coverage:** 37 total, 0 mapped to tasks (Tasks phase pending).
+**Coverage:** 37 total, 37 mapped to tasks (T1–T34 in `tasks.md`), 0 unmapped.
 
 ---
 
