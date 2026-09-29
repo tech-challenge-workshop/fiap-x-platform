@@ -245,8 +245,8 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
 | K8S-31 | P2: Publish - manifests reference GHCR images | Execute | Implemented (T6 image rule + self-test; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests render `ghcr.io/tech-challenge-workshop/<repo>:main`) |
-| K8S-32 | P2: CI - topology renders, validates, checks | Tasks | In Tasks |
-| K8S-33 | P2: CI - offline check self-test | Execute | In progress (T6 self-test; T20 required-workload rule + self-test; T29 runs it in CI) |
+| K8S-32 | P2: CI - topology renders, validates, checks | Execute | Implemented (T29: topology renders with kubectl kustomize, validates with pinned kubeconform v0.8.0 strict over the Kubernetes and KEDA schemas, runs check-kubernetes; proven on the PR run in T34) |
+| K8S-33 | P2: CI - offline check self-test | Execute | Implemented (T6 self-test; T20 required-workload rule + self-test; T29 runs it in the topology job) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |
 | K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
 | K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |

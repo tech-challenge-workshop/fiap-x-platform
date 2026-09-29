@@ -781,13 +781,15 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] `node scripts/check-ci-governance.mjs` exits 0 (topology still unconditioned)
-- [ ] Gate: Build gate exits 0
+- [x] `node scripts/check-ci-governance.mjs` exits 0 (topology still unconditioned)
+- [x] Gate: Build gate exits 0
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `ci(platform): prove the kubernetes manifests in the topology job`
+
+**Status**: ✅ Complete (2026-09-29). `topology` gains nine unconditioned steps after the load-test self-test: install kubeconform v0.8.0 from the release tarball `kubeconform-linux-amd64.tar.gz`, checked with `sha256sum -c` against `9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883` (computed from the downloaded file and equal to the release's `CHECKSUMS` line), extracted into `$RUNNER_TEMP/bin` and added to `GITHUB_PATH`; then one one-line step each for `node scripts/kube.mjs --self-test`, `node scripts/check-kubernetes.mjs`, `node scripts/check-kubernetes.mjs --self-test`, `node scripts/k8s-up.mjs --self-test`, `node scripts/k8s-down.mjs --self-test`; then the render and the schema check as two steps, `kubectl kustomize --load-restrictor LoadRestrictionsNone k8s > rendered-k8s.yaml` and `kubeconform -strict -summary -schema-location default -schema-location '<datreeio CRDs-catalog>' rendered-k8s.yaml`. SPEC_DEVIATION (design: a `kustomize | kubeconform` pipe): the default `run` shell is `bash -e` without `pipefail` and the governance guard forbids `shell:` in `topology`, so a failed render piped into kubeconform would validate empty input and pass; the file between two steps fails on either. kubectl is the runner image's (ubuntu-24.04 lists Kubectl 1.37.0, Kustomize 5.8.1; `kustomize --load-restrictor` is a local render that needs no kubeconfig, checked here with `~/.kube/kind-fiapx.config` absent). Each new step's command ran locally under `bash -e`: exit 0, kubeconform `Valid: 45, Invalid: 0` (local kubeconform 0.7.0; CI runs the pinned 0.8.0). Build gate 0, including `check-ci-governance` (topology still unconditioned) and a PyYAML parse of the workflow.
 
 ---
 

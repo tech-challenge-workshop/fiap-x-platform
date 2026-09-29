@@ -65,6 +65,33 @@ jobs:
         run: node scripts/check-observability.mjs --self-test
       - name: Prove the load test names a video that does not complete
         run: node scripts/load-test.mjs --self-test
+      # The Kubernetes manifests, offline (K8S-32, K8S-33). kubectl is the
+      # runner image's (1.37 on ubuntu-24.04); `kustomize` renders locally and
+      # reads no cluster. kubeconform is pinned by version and checksum.
+      - name: Install kubeconform v0.8.0 (checksum pinned)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kubeconform.tar.gz" https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Prove every kubectl call is pinned to kind-fiapx
+        run: node scripts/kube.mjs --self-test
+      - name: Check the Kubernetes manifests against the offline rules
+        run: node scripts/check-kubernetes.mjs
+      - name: Prove each Kubernetes rule rejects a corruption
+        run: node scripts/check-kubernetes.mjs --self-test
+      - name: Prove the up command's preflight, secrets and wait
+        run: node scripts/k8s-up.mjs --self-test
+      - name: Prove the down command deletes only the fiapx cluster
+        run: node scripts/k8s-down.mjs --self-test
+      # Rendered to a file, then validated: a pipe would hide a failed render
+      # behind kubeconform's exit 0 on empty input (the default shell has no
+      # pipefail, and this job may not set shell:).
+      - name: Render the Kubernetes manifests
+        run: kubectl kustomize --load-restrictor LoadRestrictionsNone k8s > rendered-k8s.yaml
+      - name: Validate the rendered manifests against the Kubernetes and KEDA schemas
+        run: kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' rendered-k8s.yaml
 
 
   integration:
