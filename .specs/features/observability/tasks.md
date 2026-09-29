@@ -396,6 +396,16 @@ Open items (Validar depois):
 
 ---
 
+## Post-verification fixes
+
+The Verifier's round 1 (`validation.md`, FAIL) found four gaps and seven observations. Each fix below is one commit.
+
+| Fix | Finding | Change | Evidence |
+| --- | ------- | ------- | -------- |
+| F2 | Major: the `topology` job's observability steps could be removed or masked (M7c, M7d, M12 survived) | `check-ci-governance.mjs` requires `node scripts/check-observability.mjs`, its `--self-test` and `node scripts/load-test.mjs --self-test` as one-line steps of the `topology` job, which sets no `if:`, `shell:` or `continue-on-error` and conditions no step. The good fixture no longer gates a topology step | Governance self-test 30 → 39 bad workflows rejected; M7c, M7d, M12 re-run in a scratch worktree, each killed by `check-ci-governance.mjs` |
+
+---
+
 ## Phase Execution Map
 
 ```

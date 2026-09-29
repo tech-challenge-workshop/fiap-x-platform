@@ -324,7 +324,8 @@ The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 
 - a stack command is not the whole one-line `run:` of its own step, so that no `set +e` or `|| true` can surround it;
 - the workflow references `SERVICES_READ_TOKEN`;
 - the ten stack commands stop running in order;
-- the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step.
+- the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step;
+- the `topology` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run each of `node scripts/check-observability.mjs`, `node scripts/check-observability.mjs --self-test` and `node scripts/load-test.mjs --self-test` as a one-line step of its own, so none can be removed or masked with `|| true`.
 
 Renaming one of the three conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
 
