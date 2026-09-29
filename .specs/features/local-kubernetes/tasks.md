@@ -446,12 +446,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0 (probe, secret and image rules now apply to a real object)
+- [x] Full gate exits 0 (probe, secret and image rules now apply to a real object)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the catalog deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/catalog.yaml`, added to `resources`: Deployment `catalog` (1 replica, label `app=catalog`), image `processing-catalog` (rendered `ghcr.io/tech-challenge-workshop/processing-catalog:main`), `imagePullPolicy: Always`; env as Compose (`PORT=3001`, `LOCAL_INTEGRATION=true`, `DATABASE_HOST=postgres`, `DATABASE_PORT=5432`, `DATABASE_NAME=fiapx`, `DATABASE_SCHEMA=catalog`, `DATABASE_USER=catalog`), with `DATABASE_PASSWORD` from `secretKeyRef` `fiapx-postgres/CATALOG_DB_PASSWORD` and `RABBITMQ_URL` from `fiapx-rabbitmq/URL`; named port `http` 3001; readiness `GET /health` (5 s period, 3 s timeout, 3 failures), liveness `GET /health/live` (10 s delay, 10 s period, 6 failures); requests 100m / 128Mi, memory limit 512Mi. Services: `catalog` ClusterIP 3001 and `catalog-host` NodePort 3001→30001 (the `${CATALOG_HOST_PORT}` mapping). No init container: the service retries the database and broker, and readiness gates it. Full gate 0: probe, credential and image rules now apply to a real object; default mode 26 objects, kubeconform `Valid: 26, Invalid: 0`.
 
 ---
 
