@@ -152,10 +152,10 @@
 ## Handoff
 
 - **Feature**: S9a local Kubernetes (`.specs/features/local-kubernetes/`)
-- **Phase / Task**: Execute, Phase 7 complete (T29-T33); next is Phase 8, T34 (live verification)
-- **Completed**: T1-T33 (T1-T4 on `feat/publish-images` in the four service repos; T5-T33 here), plus the kind-spawn scan in `check-kubernetes`
+- **Phase / Task**: Verify; T1-T34 complete, Verifier FAIL fixed (M17, M26 killed; see tasks.md "Post-verification fixes")
+- **Completed**: T1-T34 (T1-T4 merged to each service's `main`; T5-T34 here), plus the kind-spawn scan in `check-kubernetes` and the two post-verification fixes
 - **In-progress** (file:line): none
-- **Next step**: Get the explicit go-ahead to push and merge the four service PRs (`feat/publish-images`); after the first `:main` publish, check an anonymous `docker pull ghcr.io/tech-challenge-workshop/<repo>:main` (packages may need to be set public), then run T34 on this machine with Compose down, recording `kubectl config current-context` before and after.
-- **Blockers**: T34 and CI's `kubernetes` job need the four `:main` images on GHCR (merge order, AD-018). Pushing, merging and any ruleset change are remote steps that need a go-ahead.
+- **Next step**: Re-run the Verifier on the fixes; then, with the go-ahead, push `feat/local-kubernetes`, open the platform PR and watch the first `kubernetes` CI run (K8S-34), which pulls the private images through `ghcr-pull` (V69).
+- **Blockers**: none on the images: the four `:main` images are published on GHCR (K8S-28 verified); the packages stay private until delivery (V69). Pushing, the platform PR and any ruleset change are remote steps that need a go-ahead.
 - **Uncommitted files**: none
 - **Branch**: `feat/local-kubernetes` in `fiap-x-platform`; `feat/publish-images` in the four service repositories

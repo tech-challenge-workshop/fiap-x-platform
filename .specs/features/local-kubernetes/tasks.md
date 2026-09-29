@@ -931,6 +931,32 @@ Observed for the service (not fixed here): the Worker does not act on SIGTERM. `
 
 ---
 
+## Post-verification fixes
+
+The Verifier (`validation.md`) returned FAIL with two surviving mutants. Both are fixed; no cluster was touched (offline gate and scratch-worktree mutants only).
+
+### Fix 1: close the raw kubectl spawn hole (K8S-04, M17, blocking)
+
+**Root cause**: `scripts/kube.mjs` exported `KUBECTL_BIN = 'kubectl'`, and `rawKubectlProblems` only matched a quoted `kubectl` literal, so `spawnSync(KUBECTL_BIN, args)` in the smoke's kind adapter ran against the current (EKS) context and passed every check.
+**Change**: the binary names are private constants in `kube.mjs`; other scripts use `kubectlHint()` (always `KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx …`), `KUBECTL_NOT_FOUND` and `KUSTOMIZE_RENDER_STEP` (`k8s-up.mjs`, `check-ci-governance.mjs`). `kube.mjs --self-test` fails when any export holds a bare or path-to `kubectl`/`kind` and pins the export list. `check-kubernetes` refuses the identifiers `KUBECTL`, `KUBECTL_BIN` (kubectl rule) and `KIND`, `KIND_BIN` (kind rule) in any non-comment line outside `kube.mjs`: spawned, interpolated or imported. The smoke's `kubectlObservation` already called `kubectl()`; unchanged.
+**Self-test**: kubectl scan +7 cases (`spawnSync(KUBECTL_BIN, …)`, ``execSync(`${KUBECTL_BIN} get pods …`)``, the import, a local `KUBECTL`, kube.mjs exempt, near-misses `KUBECTL_NOT_FOUND`/`KUBECTL_CALLS`/`kubectlHint`); kind scan +4 (`KIND_BIN` spawned, imported, `${KIND}` interpolated; `KIND_CLUSTER` near-miss); kube self-test: hints and 3 refused hints, no export holds a binary name.
+**Sensor** (scratch worktree `/private/tmp/s9a-fix-m17`, removed; real tree unchanged): M17 (smoke imports `KUBECTL_BIN` and spawns it) → `check-kubernetes` exit 1 `scripts/smoke-local-integration.mjs:8: spawns kubectl directly …`, and the smoke self-test exits 1 (`does not provide an export named 'KUBECTL_BIN'`); a local constant → exit 1 at `:212`; an interpolated `execSync` → exit 1 at `:213`; `kube.mjs` re-exporting the name → kube self-test exit 1 `exports holding a binary name: got ["KUBECTL_BIN"]`. **Killed.**
+**Commit**: aa132a3 `fix(platform): close the raw kubectl spawn hole in the context guard`
+
+### Fix 2: credentials inside URL values (K8S-13, M26, minor)
+
+**Root cause**: the K8S-16 rule keys on the variable's name only.
+**Change**: `manifestProblems` also rejects a literal env `value` that is a URL whose userinfo carries a password (`scheme://user:pass@host`), naming the object, container and variable.
+**Self-test**: `RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672` rejected with `Deployment/worker: container worker sets RABBITMQ_URL to a literal URL with a password in it; credentials come from a Secret (secretKeyRef)`; `http://storage:9000` and `smtp://fiapx@mailpit:1025` (a user, no password) accepted.
+**Sensor**: M26 (`k8s/worker.yaml` `RABBITMQ_URL` as that literal) → `check-kubernetes` exit 1 with the message above. **Killed.**
+**Commit**: 033f479 `feat(platform): reject credentials embedded in manifest urls`
+
+### Docs
+
+`spec.md` traceability: K8S-28..30 Verified with the run ids (PR runs skipped the GHCR login; `main` runs published; the API's attempt 2 is V68), K8S-04 and K8S-13 cite the fixes. `.specs/STATE.md` Handoff: images published, packages private until delivery (V69); next is the platform PR and the first `kubernetes` CI run.
+
+---
+
 ## Phase Execution Map
 
 ```
