@@ -611,12 +611,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the prometheus deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/prometheus.yaml`, added to `resources`: ServiceAccount `prometheus`; Role `prometheus-pod-discovery` (`get`, `list`, `watch` on `pods`, core group, namespaced to `fiapx`) and RoleBinding of the same name to the ServiceAccount; Deployment `prometheus` (1 replica, label `app=prometheus`, `serviceAccountName: prometheus`), image `prom/prometheus:v3.15.0` with its default command, ConfigMap `fiapx-prometheus-config` key `prometheus.k8s.yml` mounted by `subPath` read-only at `/etc/prometheus/prometheus.yml` (the Compose path; the hash suffix rolls the pod on a config change); named port `http` 9090; readiness `GET /-/ready` (5 s period, 3 s timeout, 10 failures); requests 100m / 256Mi, memory limit 1Gi; no volume, as in Compose. Services: `prometheus` ClusterIP 9090 (the name Grafana's datasource `http://prometheus:9090` resolves) and `prometheus-host` NodePort 9090→30090. `PENDING` in `check-kubernetes.mjs` now holds only `Deployment/grafana`, so the self-test's prometheus case moved from "pending, accepted when absent" to "required, rejected when absent": 51 corruptions rejected, 11 good inputs accepted (62 cases, as before). Full gate 0: default mode 42 objects, kubeconform `Valid: 42, Invalid: 0`.
 
 ---
 

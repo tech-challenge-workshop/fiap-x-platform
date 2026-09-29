@@ -93,8 +93,8 @@ const REQUIRED = [
   'TriggerAuthentication/rabbitmq-management',
 ];
 // Required objects whose manifest has not landed yet. The task that adds
-// each manifest removes it here: prometheus (T22), grafana (T23).
-const PENDING = ['Deployment/prometheus', 'Deployment/grafana'];
+// each manifest removes it here: grafana (T23).
+const PENDING = ['Deployment/grafana'];
 
 // ---------------------------------------------------------------- YAML
 
