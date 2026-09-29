@@ -76,7 +76,9 @@ graph TD
 - **Dependencies**: prometheus service
 - **Reuses**: provisioning-as-code replaces any UI setup
 
-**Dashboard panels (foundation minimum set)**: row "Traffic" — upload outcomes rate, download authorized/denied, HTTP request rate + 5xx; row "Pipeline" — `rabbitmq_queue_messages{queue=~"(video-validation|processing|notification.terminal)"}` depth, outbox pending/oldest gauges, `fiapx_processing_total` rate, `fiapx_processing_duration_seconds` p95, `fiapx_jobs_inflight`; row "Notifications" — `fiapx_email_delivery_total` by outcome; row "Node" — `fiapx_node_*` defaults per instance.
+**Dashboard panels (foundation minimum set)**: row "Traffic" — upload outcomes rate, download authorized/denied, HTTP request rate + 5xx; row "Pipeline" — `rabbitmq_queue_messages{queue=~"(video-validation|processing|notification.terminal)"}` depth, outbox pending/oldest gauges, `fiapx_processing_total` rate, `fiapx_processing_duration_seconds` p95, `fiapx_jobs_inflight`; row "Notifications" — `fiapx_email_delivery_total` by outcome; row "Scrape targets" — Prometheus's own `up` per job and instance (the worker count is the number of replicas discovered).
+
+> SPEC_DEVIATION (T4): the planned row "Node" (`fiapx_node_*` defaults per instance) is replaced by "Scrape targets". No service registers prom-client's default metrics (`collectDefaultMetrics` appears in none of the four `src/observability/metrics.ts`), so `fiapx_node_*` has no series and the row would be empty; `up` is always present and shows each replica.
 
 ### Worker replicas
 

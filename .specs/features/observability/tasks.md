@@ -148,7 +148,7 @@ T12
 
 ### T4: Overview dashboard JSON
 
-**What**: `grafana/dashboards/overview.json` (uid `fiapx-overview`, datasource the provisioned uid) with the foundation minimum set: uploads/downloads outcomes; queue depth (`rabbitmq_queue_messages`) for `video-validation`/`processing`/`notification.terminal`; outbox gauges; processing rate + p95 duration; email outcomes; jobs inflight; `fiapx_node_*` row.
+**What**: `grafana/dashboards/overview.json` (uid `fiapx-overview`, datasource the provisioned uid) with the foundation minimum set: uploads/downloads outcomes; queue depth (`rabbitmq_queue_messages`) for `video-validation`/`processing`/`notification.terminal`; outbox gauges; processing rate + p95 duration; email outcomes; jobs inflight; ~~`fiapx_node_*` row~~ scrape-targets row on `up` (SPEC_DEVIATION: no service exports Node default metrics).
 **Where**: `grafana/dashboards/overview.json`
 **Depends on**: T3
 **Reuses**: metric names from the four service specs
@@ -158,14 +158,16 @@ T12
 
 **Done when**:
 
-- [ ] T7 self-test: JSON parses; every panel references the provisioned datasource; every PromQL expression references only metric families the services expose
-- [ ] Gate check passes: full self-test gate
-- [ ] Test count: asserted in T7 self-test
+- [x] T7 self-test: JSON parses; every panel references the provisioned datasource; every PromQL expression references only metric families the services expose
+- [x] Gate check passes: full self-test gate
+- [x] Test count: asserted in T7 self-test
 
 **Tests**: self-test
 **Gate**: build
 
 **Commit**: `feat(platform): add the overview dashboard`
+
+**Status**: ✅ Complete (2026-09-28). 4 rows, 16 panels, every target on datasource uid `prometheus`. All 18 expressions (with `$__rate_interval` as `1m`) were accepted by a throwaway `prom/prometheus:v3.15.0` query API; a throwaway Grafana provisioned the dashboard (`provisioned: true`, uid `fiapx-overview`). Metric names come from each service's `src/observability/metrics.ts` on `feat/observability` and, for Notification, its design (`fiapx_email_delivery_total{outcome}`, `fiapx_email_send_duration_seconds`). SPEC_DEVIATION: the `fiapx_node_*` row became a scrape-targets row on `up` (recorded in design.md). No expression selects or groups by an owner, email or request-id label.
 
 ---
 
