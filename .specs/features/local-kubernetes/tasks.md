@@ -423,12 +423,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0; Build gate exits 0 (phase end)
+- [x] Full gate exits 0; Build gate exits 0 (phase end)
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `feat(platform): add the mailpit deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/mailpit.yaml`, added to `resources`: Deployment `mailpit` (1 replica, label `app=mailpit`), image `axllent/mailpit:v1.31.2`, named ports `smtp` 1025 and `http` 8025; readiness `exec /mailpit readyz` (absolute path, as Compose; 5 s period, 3 s timeout, 10 failures); requests 50m / 32Mi, memory limit 128Mi. Services: `mailpit` ClusterIP (1025, 8025) and `mailpit-host` NodePort 8025→30825; SMTP stays internal, as in Compose. Full gate 0: default mode 23 objects, kubeconform `Valid: 23, Invalid: 0`. Phase 3 Build gate 0: ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`.
 
 ---
 

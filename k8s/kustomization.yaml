@@ -19,6 +19,7 @@ resources:
   - storage.yaml
   - storage-init-job.yaml
   - identity.yaml
+  - mailpit.yaml
 
 # The service images CI publishes on main (AD-018); manifests name the bare
 # repository and pull :main with imagePullPolicy Always.
