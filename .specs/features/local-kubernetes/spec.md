@@ -238,8 +238,8 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
 | K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | Implemented (T6 rule + self-test; T18 manifest: `cpu: "1"` request and limit, `FFMPEG_THREADS=1`) |
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Execute | Implemented (T6 no-host rule + self-test; T19 `TriggerAuthentication` `rabbitmq-management` from Secret `fiapx-keda-rabbitmq`) |
-| K8S-25 | P2: Observe - every Worker pod scraped | Tasks | In Tasks |
-| K8S-26 | P2: Observe - other targets up | Tasks | In Tasks |
+| K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 RBAC; T28 live rule; T34 live) |
+| K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 deployment; T28 live rule; T34 live) |
 | K8S-27 | P2: Observe - dashboard from the same JSON | Tasks | In Tasks |
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |

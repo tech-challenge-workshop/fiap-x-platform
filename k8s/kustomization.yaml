@@ -44,7 +44,6 @@ images:
 
 # Each key is the source file's name. Grafana's provisioning directory is one
 # ConfigMap per subdirectory, since a ConfigMap holds no directories.
-# prometheus/prometheus.k8s.yml joins in T21.
 configMapGenerator:
   - name: fiapx-rabbitmq-config
     files:
@@ -68,3 +67,6 @@ configMapGenerator:
   - name: fiapx-grafana-dashboards
     files:
       - ../grafana/dashboards/overview.json
+  - name: fiapx-prometheus-config
+    files:
+      - ../prometheus/prometheus.k8s.yml

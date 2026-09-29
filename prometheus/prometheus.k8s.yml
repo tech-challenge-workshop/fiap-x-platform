@@ -1,0 +1,55 @@
+# Prometheus on the local kind cluster (S9a; K8S-25, K8S-26). The same jobs,
+# interval and timeout as prometheus/prometheus.yml, which Compose mounts;
+# kustomize turns this file into ConfigMap `fiapx-prometheus-config`
+# (k8s/kustomization.yaml) and k8s/prometheus.yaml mounts it.
+#
+# Every static target is a Service name in namespace `fiapx`, the namespace
+# Prometheus itself runs in. No target needs credentials: /metrics is public
+# by convention (AD-017).
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ['api:3000']
+
+  - job_name: catalog
+    static_configs:
+      - targets: ['catalog:3001']
+
+  # The Worker has no Service: KEDA scales it from 1 to 5 pods, and each pod
+  # must be its own target. Pod discovery (the ServiceAccount's Role in
+  # k8s/prometheus.yaml allows get/list/watch on pods in `fiapx`) finds every
+  # replica as it starts, with no manifest change. Only running pods labelled
+  # app=worker, on container port 3002, are kept; the pod name is the
+  # instance, so a target names the replica `kubectl get pods` shows.
+  - job_name: worker
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [fiapx]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: worker
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        regex: '3002'
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: instance
+
+  - job_name: notification
+    static_configs:
+      - targets: ['notification:3003']
+
+  # The broker's built-in rabbitmq_prometheus plugin (rabbitmq/rabbitmq.conf):
+  # per-queue depth, including video-validation, processing and
+  # notification.terminal (OBS-63).
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']

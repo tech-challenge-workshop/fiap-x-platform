@@ -586,14 +586,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] `promtool check config` (via `prom/prometheus:v3.15.0` container) reports valid
-- [ ] `node scripts/check-observability.mjs` still exits 0 (Compose config untouched)
-- [ ] Full gate exits 0
+- [x] `promtool check config` (via `prom/prometheus:v3.15.0` container) reports valid
+- [x] `node scripts/check-observability.mjs` still exits 0 (Compose config untouched)
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the prometheus config for the cluster`
+
+**Status**: ✅ Complete (2026-09-29). `prometheus/prometheus.k8s.yml`: the global block (`scrape_interval: 15s`, `scrape_timeout: 10s`) and the five jobs in the same order as `prometheus/prometheus.yml` (checked equal with PyYAML); `api:3000`, `catalog:3001`, `notification:3003` and `rabbitmq:15692` are static targets on the Services of namespace `fiapx`. The `worker` job uses `kubernetes_sd_configs` role `pod` restricted to namespace `fiapx`, with relabel `keep` on `__meta_kubernetes_pod_label_app=worker` and `__meta_kubernetes_pod_container_port_number=3002`, and `instance` ← `__meta_kubernetes_pod_name`. Beyond the task: a third `keep` on `__meta_kubernetes_pod_phase=Running`, so a replica still in its `wait-for-bucket` init container is not listed as a down target (T28 counts worker targets against worker pods). `k8s/kustomization.yaml` gains the `fiapx-prometheus-config` generator entry (key `prometheus.k8s.yml`, rendered bytes identical to the file). `promtool check config` in `prom/prometheus:v3.15.0`: SUCCESS. `node scripts/check-observability.mjs` 0 (Compose config untouched). Full gate 0: default mode 36 objects, kubeconform `Valid: 36, Invalid: 0`.
 
 ---
 
