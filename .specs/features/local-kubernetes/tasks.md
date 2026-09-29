@@ -731,14 +731,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Compose-target argument lists unchanged (self-test compares them)
-- [ ] Gate: `node scripts/smoke-local-integration.mjs --self-test` + Full gate exit 0
-- [ ] Test count: previous smoke self-test count + ≥ 4
+- [x] Compose-target argument lists unchanged (self-test compares them)
+- [x] Gate: `node scripts/smoke-local-integration.mjs --self-test` + Full gate exit 0
+- [x] Test count: previous smoke self-test count + ≥ 4
 
 **Tests**: self-test
 **Gate**: Full
 
 **Commit**: `feat(platform): let the smoke observe a kind cluster`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/smoke-local-integration.mjs`: the observations now go through `observerFor(target)` with two calls, `psql(args, sql)` and `s3api(args)`, and `observationCommand(target, kind, args, podName)` builds each command line. The smoke had three `dockerCompose` call sites, not the design's four: `countDeliveries` (psql), `listArchives` and `readBucketLifecycle` (s3api); all three moved. `SMOKE_TARGET=compose` (default) produces the pre-adapter lists byte for byte through `dockerCompose`. `SMOKE_TARGET=kind` goes through `kubectl()` from `scripts/kube.mjs` (so `--context kind-fiapx` and the cluster's own kubeconfig): psql as `exec -i -n fiapx statefulset/postgres -- psql …` with the SQL on stdin; s3api as `run smoke-s3-<8 hex> -n fiapx --rm -i --quiet --restart=Never --image=amazon/aws-cli:2.37.4 --override-type=strategic --overrides=<json> -- s3api …`, the overrides adding `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from `secretKeyRef` `fiapx-storage` and literal `AWS_DEFAULT_REGION=us-east-1`, `AWS_ENDPOINT_URL=http://storage:9000` to the generated container. `--quiet` keeps kubectl's `pod "…" deleted` line out of the aws-cli output the smoke parses (kubectl `run.go`: `deleteOpts.Quiet = o.Quiet`); `--override-type=strategic` merges the env into the container by name, keeping the stdin and args kubectl generates (the default JSON merge would replace the container list). An unknown target is refused before any step runs. Self-test: 9 adapter cases added (planned ≥ 4) on top of the unchanged 32 steps / 189 rejections / 63 acceptances: compose output passes through; the three compose command lines equal the pre-adapter literals; kind psql exact with stdin; kind s3api exact; its overrides exact; both kind lines accepted by `kubectlArgs` and pinned to `--context kind-fiapx`; a fresh pod name per call; an unknown target refused; the spawned run with `SMOKE_TARGET=k8s` exits 1 with that message alone. Four mutants on scratch copies (`--quiet` dropped, unknown target accepted, compose `-T` dropped, the secret key swapped) were each killed. Full gate 0.
 
 ---
 

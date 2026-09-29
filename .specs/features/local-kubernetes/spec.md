@@ -223,7 +223,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
 | K8S-08 | P1: Provision - down deletes only `fiapx` | Execute | Implemented (T26 down command deleting only fiapx + self-test; observed live in T34) |
 | K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
-| K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
+| K8S-10 | P1: Provision - smoke passes with cluster target | Execute | In progress (T27 smoke observation adapter SMOKE_TARGET=kind + self-test; T30 CI; T34 live) |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
 | K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
