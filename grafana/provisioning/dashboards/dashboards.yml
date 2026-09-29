@@ -1,0 +1,14 @@
+# Loads every dashboard JSON that compose mounts at /var/lib/grafana/dashboards
+# (grafana/dashboards in this repository) on every start (OBS-62, OBS-65).
+# Edits made in the UI are refused: the file is the source of truth.
+apiVersion: 1
+
+providers:
+  - name: fiapx
+    orgId: 1
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

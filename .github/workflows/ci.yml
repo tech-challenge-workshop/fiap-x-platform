@@ -59,6 +59,12 @@ jobs:
         run: node scripts/check-docs-links.mjs --self-test
       - name: Prove the required-checks applier replaces the list exactly
         run: node scripts/apply-required-checks.mjs --self-test
+      - name: Check the monitoring configuration and its compose wiring
+        run: node scripts/check-observability.mjs
+      - name: Prove each observability check rejects a corruption
+        run: node scripts/check-observability.mjs --self-test
+      - name: Prove the load test names a video that does not complete
+        run: node scripts/load-test.mjs --self-test
 
 
   integration:
@@ -112,6 +118,12 @@ jobs:
       - name: Check the identity service again after the recreate
         working-directory: fiap-x-platform
         run: node scripts/check-identity.mjs
+      - name: Run a small concurrent load
+        working-directory: fiap-x-platform
+        run: node scripts/load-test.mjs --videos 3
+      - name: Check every service is scraped and the dashboard provisioned
+        working-directory: fiap-x-platform
+        run: node scripts/check-observability.mjs --live
       - name: Collect container logs
         if: failure()
         working-directory: fiap-x-platform

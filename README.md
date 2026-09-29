@@ -42,7 +42,7 @@ Compose builds each service from its sibling repository, so all five repositorie
 
 ### Logging in as a demo user
 
-Every API route except `/health` needs a bearer token. The `identity` service (Keycloak, on `localhost:8080`) imports the `fiapx` realm from [`identity/fiapx-realm.json`](identity/fiapx-realm.json) on every start, so nothing changed by hand in its console survives a restart. The realm has two demo users and no self-registration:
+Every API route except `/health`, `/health/live` and `/metrics` needs a bearer token. The `identity` service (Keycloak, on `localhost:8080`) imports the `fiapx` realm from [`identity/fiapx-realm.json`](identity/fiapx-realm.json) on every start, so nothing changed by hand in its console survives a restart. The realm has two demo users and no self-registration:
 
 | User | Password |
 | --- | --- |
@@ -214,21 +214,24 @@ Each service evolves its own tables through its own migrations. This file only c
 
 ### Host ports already in use
 
-Three host ports can be moved when another program on the machine already holds them. Set the variable in `.env` or the shell:
+Four host ports can be moved when another program on the machine already holds them. Set the variable in `.env` or the shell:
 
 | Variable | Default | Service |
 | --- | --- | --- |
 | `POSTGRES_HOST_PORT` | 5432 | `postgres` |
 | `STORAGE_HOST_PORT` | 9000 | `storage` (the S3 API) |
-| `WORKER_HOST_PORT` | 3002 | `worker` |
+| `CATALOG_HOST_PORT` | 3001 | `catalog` |
+| `WORKER_HOST_PORT` | the range `3010-3019` | `worker` |
 
 ```sh
-export POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002
+export POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 CATALOG_HOST_PORT=33001 WORKER_HOST_PORT=33002
 docker compose up --build -d --wait
 node scripts/smoke-local-integration.mjs
 ```
 
-Only the host side moves. The services still reach `postgres:5432`, `storage:9000` and `worker:3002` inside the network, so nothing else changes. The API signs its URLs for `localhost:${STORAGE_HOST_PORT}`, and the smoke reads the same variable to require that port in every URL, so the same exports run the whole gate. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, needs `DATABASE_PORT` set to the value of `POSTGRES_HOST_PORT`.
+The Worker's default is a range, not a port, because the Worker can run several replicas (see [Worker replicas and the load test](#worker-replicas-and-the-load-test)) and one host port binds one container only. Docker gives each replica a free port from the range, and `docker compose port --index N worker 3002` prints the one replica N got (`--index 1` is the first). A single port, such as `WORKER_HOST_PORT=33002` above, works only while one replica runs. The range starts at 3010 because one starting at 3002 would contain 3003 and 3005, which `notification` and `grafana` publish.
+
+Only the host side moves. The services still reach `postgres:5432`, `storage:9000`, `catalog:3001` and `worker:3002` inside the network, so nothing else changes. The API signs its URLs for `localhost:${STORAGE_HOST_PORT}`, and the smoke reads the same variable to require that port in every URL. The smoke and `node scripts/check-observability.mjs --live` reach the Catalog on `CATALOG_HOST_PORT`, so the same exports run the whole gate. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, needs `DATABASE_PORT` set to the value of `POSTGRES_HOST_PORT`.
 
 ### Worker sizing
 
@@ -238,10 +241,89 @@ Only the host side moves. The services still reach `postgres:5432`, `storage:900
 
 This declared value is the contract S9a carries into the Worker's Kubernetes `limits`.
 
+### Observability
+
+`docker compose up --build -d --wait` also starts Prometheus and Grafana, and the broker serves its own metrics. Nothing needs a click in a UI: the scrape configuration, the datasource and the dashboard are files in this repository, mounted read-only, so a removed container comes back with the same state.
+
+| What | Where | Notes |
+| --- | --- | --- |
+| Prometheus | `http://localhost:9090` | Scrapes every 15 s with a 10 s timeout ([`prometheus/prometheus.yml`](prometheus/prometheus.yml)); `http://localhost:9090/targets` lists every target and whether it is up |
+| Grafana | `http://localhost:3005` | `admin` / `admin`. The overview dashboard is `http://localhost:3005/d/fiapx-overview` (uid `fiapx-overview`) |
+| RabbitMQ metrics | `http://localhost:15692/metrics` | The broker's built-in `rabbitmq_prometheus` plugin, with one series per queue |
+| RabbitMQ management | `http://localhost:15672` | `guest` / `guest` |
+| Service metrics | `http://localhost:3000/metrics` (api), `:3001` (catalog, or `CATALOG_HOST_PORT`), `:3003` (notification), the Worker on its [published port](#host-ports-already-in-use) | Prometheus text format, no token |
+
+Prometheus scrapes `api:3000`, `catalog:3001`, `notification:3003` and `rabbitmq:15692` by name. It finds the Worker by a DNS lookup of `worker` every 15 s, so each replica is a target of its own and a replica added while the stack runs is picked up. No business service depends on Prometheus or Grafana, and Prometheus depends on nothing: a service that is not up yet is only a target marked down, retried at the next scrape.
+
+What the services expose, the same in all four ([AD-017](.specs/STATE.md)):
+
+- **`/metrics`**, unauthenticated. Every metric is named `fiapx_…` and lives in the service's own registry. Labels hold only bounded values, such as an outcome, a queue, a method or a route template (`/processing-requests/:id`, or `unmatched`), never a raw path, a user, an email address or a request id.
+- **`/health`** is readiness. The Catalog, the Worker and the Notification Service answer 503 naming the dependency that is down (the broker, the database, FFmpeg or storage) and 200 once it is back; compose's `--wait` probes it. The API has no dependency it must reach to serve, so its `/health` answers 200 while it serves.
+- **`/health/live`** is liveness: 200 while the process serves, whatever its dependencies.
+- **Logs** are one JSON object per line, each carrying `service`, `timestamp` and, inside a request or a message, `correlationId`. Authorization headers, email addresses and storage keys are removed from every line by the logger configuration, not by each call site. `/metrics`, `/health` and `/health/live` are not written to the access log.
+
+**Correlation id.** Every request the API serves carries an `X-Correlation-Id`: the caller's own when it is 1 to 128 printable ASCII characters, a new UUID otherwise, and the API echoes it on the response. The API passes it to the Catalog, which stores it on the request (`catalog.processing_request.correlation_id`) and puts it on every event it publishes about that request, to the Worker and to the Notification Service ([AD-016](.specs/STATE.md)). The id a request keeps is the one its confirmation carried. To follow one video, send your own id on step 3 of [the upload](#uploading-a-video-and-downloading-its-frames):
+
+```sh
+curl -s -X POST http://localhost:3000/uploads/<uploadId>/complete \
+  -H "Authorization: Bearer $TOKEN" -H 'Idempotency-Key: my-traced-upload' \
+  -H 'X-Correlation-Id: my-trace-1'
+# The two request log lines: the API's POST /uploads/<uploadId>/complete and the Catalog's POST /processing-requests.
+docker compose logs api catalog | grep my-trace-1
+# The request that carries it, and each event the Catalog published with it.
+docker compose exec -T postgres psql -U postgres -d fiapx \
+  -c "select processing_request_id, status from catalog.processing_request where correlation_id = 'my-trace-1'" \
+  -c "select id, queue, pattern from catalog.outbox where payload->>'correlationId' = 'my-trace-1' order by id"
+```
+
+For a video that completes, the outbox shows three events with the id: `VideoValidationRequested` on `video-validation`, `ProcessingQueued` on `processing` and `terminal.event` on `notification.terminal`. The Worker and the Notification Service write no log line per message they handle, so their logs do not show the id; the events above are where it travels past the Catalog. The id is optional on every event, and a message without a valid one is still handled.
+
+**The overview dashboard** has four rows:
+
+| Row | Shows | What it proves |
+| --- | --- | --- |
+| Traffic | Uploads and downloads by outcome, HTTP requests with 5xx, HTTP p95 latency | The edge is taking uploads and refusing what it must |
+| Pipeline | Depth of `video-validation`, `processing` and `notification.terminal`; processing and validation throughput; processing p95 duration; jobs in flight per replica; events the Catalog consumed; outbox pending rows, oldest pending age and publish failures | Work queues up under load, and the Worker replicas drain it |
+| Notifications | Email deliveries by outcome, email send p95 duration | Emails go out, and a failed send shows as one; a redelivered event is not counted twice |
+| Scrape targets | Prometheus's `up` per job and instance | Every service is scraped; the number of `worker` targets is the number of replicas |
+
+On an external or exFAT volume, macOS writes AppleDouble `._*` files next to the repository's files. Grafana refuses to start when one sits in `grafana/provisioning`, and they break Docker builds, so run `node clean-appledouble.mjs` from the workspace root (the parent directory of the five repositories) before `docker compose up`. A CI checkout never has them.
+
+`node scripts/check-observability.mjs` fails, naming the invariant, when the wiring stops matching this section: a scrape target, interval or credential in `prometheus/prometheus.yml`; the datasource or dashboard provider; a dashboard that does not parse, queries another datasource, uses a metric nothing exports or selects by an owner, email or id label, in a panel or in a query template variable; the broker's plugins or per-queue metrics; compose making a business service wait on monitoring, or running more than one Worker by default. It reads the repository and the rendered compose, so it needs no running stack. `--live` checks a running one: every service's `/metrics` has a `fiapx_` line, every `/health/live` (each Worker replica on its own published port) answers 200, the broker reports each queue's depth, every Prometheus target is up with one `worker` target per replica, and Grafana serves the provisioned dashboard. Its `--self-test` needs neither: it corrupts an in-memory copy of the repository once per invariant, requires the exact message, and feeds the live checks injected answers. CI's `topology` job runs it and its `--self-test`; the `integration` job runs `--live`.
+
+### Worker replicas and the load test
+
+`WORKER_REPLICAS` sets how many Worker containers run, competing for the same queues. It defaults to 1. Set it in `.env` or the shell:
+
+```sh
+WORKER_REPLICAS=3 docker compose up -d --wait worker
+```
+
+`node scripts/load-test.mjs` drives several videos through the whole pipeline at once, through the API's public contract only: it gets one token for `alice`, then for each video starts an upload of `fixtures/sample-8s.mp4`, puts its parts, confirms it with an `Idempotency-Key` of its own, and polls the request until it is terminal. It prints each video's latency and final status, then the count per status, and exits 1 naming every video that did not reach `COMPLETED` within its timeout. It reads only the requests it created, so whatever else the stack holds does not change the verdict.
+
+```sh
+node scripts/load-test.mjs --videos 6                          # default: 6 videos, 120 s each
+node scripts/load-test.mjs --videos 3 --timeout-seconds 180
+node scripts/load-test.mjs --token-cmd "node scripts/get-token.mjs bob"
+```
+
+`--videos` takes an integer from 1 to 50; `--base-url` overrides `http://localhost:3000`.
+
+To see the scaling on the dashboard, the queue must stay busy across a scrape. The 8-second fixture is processed in well under a second, so a run of 6 videos drains before the broker's 5 s statistics refresh and Prometheus's 15 s scrape, and the queue depth panel stays at 0. A burst of 200 videos, four runs of 50 at once, is enough. Open the dashboard, then run:
+
+```sh
+WORKER_REPLICAS=3 docker compose up -d --wait worker
+for run in 1 2 3 4; do node scripts/load-test.mjs --videos 50 & done; wait
+```
+
+Each run prints its own summary, which must end `COMPLETED 50/50`. During the burst the `processing` queue depth rises above 0 and falls back as the three replicas drain it (22 at its peak on the recorded run), the throughput panel rises by 200 split about evenly across the three replicas, and the Scrape targets row shows three `worker` targets up. This shows the replicas sharing the work. It does not measure a throughput gain per replica: a run is bound by uploading and polling, not by the Worker, and 40 videos took 5 s on one replica and 3 s on three. Back to one Worker with `docker compose up -d --wait worker` and `WORKER_REPLICAS` unset.
+
+Its `--self-test` needs no stack. It drives the same functions with an injected HTTP driver and requires that every upload is in flight before the first status read, that each video gets its own `Idempotency-Key`, the status counts, and that a stuck or failed video is named. It also spawns a run against an API nothing listens on, which must exit 1, and a run with `--videos 51`, which must be refused. CI's `topology` job runs the self-test; the `integration` job runs `--videos 3` against the stack with one Worker.
+
 ### CI and the required checks
 
 The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) always runs the stack. It checks out the four service repositories at their `main` with no personal access token or secret, since they are public; `actions/checkout` uses the job's default `GITHUB_TOKEN`.
- It then runs the build gate's steps 6 to 11 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, and the smoke and identity check again. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
+ It then runs the build gate's steps 6 to 12 in order: bring the stack up, the bootstrap scenarios, the database drift check, the smoke, the identity check, the force-recreate, the smoke and identity check again, then a load of 3 videos and the live observability check. Any failure fails the job. The container logs are uploaded on failure, and `docker compose down -v` always runs. No step is skipped for lack of a secret, so a green `integration` means the stack was built, exercised and found healthy.
 
 `node scripts/check-ci-governance.mjs` guards that. It fails, naming the job or step, when:
 
@@ -249,8 +331,9 @@ The `integration` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 
 - a step other than `Collect container logs` and `Upload container logs` (which may carry `failure()`) or `Tear the stack down` (which may carry `always()`) is conditioned, or a step that runs a stack command is;
 - a stack command is not the whole one-line `run:` of its own step, so that no `set +e` or `|| true` can surround it;
 - the workflow references `SERVICES_READ_TOKEN`;
-- the eight stack commands stop running in order;
-- the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step.
+- the ten stack commands stop running in order;
+- the `docs-links` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run `node scripts/check-docs-links.mjs` as a one-line step;
+- the `topology` job sets `if:`, `shell:` or `continue-on-error`, conditions a step, or does not run each of `node scripts/check-observability.mjs`, `node scripts/check-observability.mjs --self-test` and `node scripts/load-test.mjs --self-test` as a one-line step of its own, so none can be removed or masked with `|| true`.
 
 Renaming one of the three conditioned steps means updating the check in the same change. CI's `topology` job runs it and its `--self-test`.
 
@@ -267,7 +350,7 @@ The checks each repository's `protect main` ruleset must require are versioned i
 
 The last task of each phase runs every check in this order, from the repository with the sibling repositories on `main`. It starts from an empty stack and ends by discarding it:
 
-1. `node clean-appledouble.mjs`, from the workspace root.
+1. `node clean-appledouble.mjs`, from the workspace root (see [Observability](#observability) for why).
 2. `docker compose config -q`.
 3. `node scripts/check-worker-sizing.mjs` and its `--self-test`.
 4. `node scripts/check-no-storage-writes.mjs` and its `--self-test`.
@@ -278,9 +361,11 @@ The last task of each phase runs every check in this order, from the repository 
 9. `node scripts/check-identity.mjs` and its `--self-test`.
 10. `docker compose up -d --wait --force-recreate identity storage-init api`.
 11. The smoke and `node scripts/check-identity.mjs` again.
-12. `docker compose down -v`.
-13. `node scripts/check-docs-links.mjs`, which must report `0 unresolved link(s)`, and its `--self-test`.
-14. `node scripts/check-ci-governance.mjs`, its `--self-test` and `--live`, and `node scripts/apply-required-checks.mjs --self-test`.
+12. `node scripts/load-test.mjs --videos 3`, then `node scripts/check-observability.mjs --live`.
+13. `docker compose down -v`.
+14. `node scripts/check-docs-links.mjs`, which must report `0 unresolved link(s)`, and its `--self-test`.
+15. `node scripts/check-ci-governance.mjs`, its `--self-test` and `--live`, and `node scripts/apply-required-checks.mjs --self-test`.
+16. `node scripts/check-observability.mjs` and its `--self-test`, and `node scripts/load-test.mjs --self-test`.
 
 Step 10 recreates rather than restarts. A recreated `identity` starts from an empty database on tmpfs and re-imports the realm, so `sub pinned` proves the demo users' ids survive it; a recreated `storage-init` reruns the bootstrap on a bucket that already exists; and a recreated `api` must find both again. A plain restart would keep each container's state and prove none of that. When a host port is taken, export the variables from [Host ports already in use](#host-ports-already-in-use) first; the same exports run the whole gate.
 
@@ -293,9 +378,11 @@ Step 10 recreates rather than restarts. A recreated `identity` starts from an em
 | `.specs/STATE.md` | Cross-repository decision log (AD-001 onward) |
 | `.specs/features/` | Cross-repository feature specifications |
 | `compose.yaml` | Local runtime topology |
+| `prometheus/` | The Prometheus scrape configuration |
+| `grafana/` | Grafana's provisioned datasource and dashboard provider, and the overview dashboard |
+| `rabbitmq/` | The broker's definitions (queues, dead-letter policy), configuration and enabled plugins |
 | `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
-| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check |
-
+| `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check, load test, observability check |
 | `ci/` | The required checks of each repository's `protect main` ruleset |
 | `fixtures/` | The committed source video the smoke uploads, the corrupted copy that must fail in processing, and their provenance ([`fixtures/README.md`](fixtures/README.md)) |
 | `db/` | The database bootstrap and the generated database creation script |

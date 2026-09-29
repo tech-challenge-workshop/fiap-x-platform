@@ -13,11 +13,19 @@
 
 //   no token           SERVICES_READ_TOKEN appears nowhere in the workflow:
 //                      the four service repositories are public;
-//   the stack steps    the eight stack commands of the build gate run in
-//                      this order, and no other stack command is mixed in;
+//   the stack steps    the ten stack commands of the build gate run in
+//                      this order, and no other stack command is mixed in
+//                      (the last two, the small concurrent load and the live
+//                      observability check, are OBS-72's: guarded like the
+//                      smoke so neither can be masked or skipped);
 //   docs-links         the `docs-links` job sets no `if:`, `shell:` or
 //                      `continue-on-error`, conditions no step, and runs
-//                      `node scripts/check-docs-links.mjs` as a one-line step.
+//                      `node scripts/check-docs-links.mjs` as a one-line step;
+//   topology           the `topology` job sets no `if:`, `shell:` or
+//                      `continue-on-error`, conditions no step, and runs each
+//                      observability check (OBS-74's default mode and
+//                      --self-test, and the load test's --self-test) as the
+//                      whole one-line `run:` of its own step.
 
 //
 // The block is parsed as text: the repository has no package.json, and the
@@ -63,7 +71,10 @@ export const ACTIONS_APP_ID = 15368;
 const SMOKE = 'node scripts/smoke-local-integration.mjs';
 const IDENTITY = 'node scripts/check-identity.mjs';
 const RECREATE = 'docker compose up -d --wait --force-recreate identity storage-init api';
-// The build gate's stack steps (platform-gate-hardening, steps 6-11).
+const LOAD = 'node scripts/load-test.mjs --videos 3';
+const OBSERVABILITY_LIVE = 'node scripts/check-observability.mjs --live';
+// The build gate's stack steps (platform-gate-hardening, steps 6-11), then
+// observability's live load and live wiring check (OBS-72, OBS-74).
 const STACK_COMMANDS = [
   'docker compose up --build -d --wait',
   'node scripts/check-storage-bootstrap.mjs',
@@ -73,11 +84,20 @@ const STACK_COMMANDS = [
   RECREATE,
   SMOKE,
   IDENTITY,
+  LOAD,
+  OBSERVABILITY_LIVE,
 ];
 const STACK_SET = new Set(STACK_COMMANDS);
 const TOKEN = 'SERVICES_READ_TOKEN';
 const DOCS_LINKS = 'node scripts/check-docs-links.mjs';
 const DOCS_RUN_MESSAGE = `the docs-links job must run "${DOCS_LINKS}" as a one-line step of its own`;
+// The topology job's observability checks (OBS-74, OBS-71): each must run
+// unmasked, or a corrupted dashboard or a broken load test passes CI.
+const OBSERVABILITY = 'node scripts/check-observability.mjs';
+const OBSERVABILITY_SELF_TEST = 'node scripts/check-observability.mjs --self-test';
+const LOAD_SELF_TEST = 'node scripts/load-test.mjs --self-test';
+const TOPOLOGY_COMMANDS = [OBSERVABILITY, OBSERVABILITY_SELF_TEST, LOAD_SELF_TEST];
+const topologyRunMessage = (command) => `the topology job must run "${command}" as a one-line step of its own`;
 
 
 function fail(message) {
@@ -259,7 +279,7 @@ function workflowProblems(text) {
     problems.push(`integration stack step ${i + 1} must be ${expected}, but ${actual}`);
     break;
   }
-  return [...problems, ...docsLinksProblems(text)];
+  return [...problems, ...docsLinksProblems(text), ...topologyProblems(text)];
 }
 
 // Rule 4: the docs-links job is blocking. It is never conditioned, never lets
@@ -284,6 +304,30 @@ function docsLinksProblems(text) {
   return problems;
 }
 
+// Rule 5: the topology job is blocking in the same way, and runs each
+// observability check as the whole one-line `run:` of its own step, so a
+// removed step, `|| true` or `set +e` fails the check.
+function topologyProblems(text) {
+  const block = jobBlock(text, 'topology');
+  if (!block) return ['the workflow has no `topology` job under `jobs:`'];
+  const problems = [];
+  const { keys, steps } = parseSteps(block.lines);
+  if (Object.hasOwn(keys, 'if')) problems.push('the topology job must not set if');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?shell:/.test(line))) problems.push('the topology job must not set shell');
+  if (block.lines.some((line) => /^\s*(?:-\s+)?continue-on-error:/.test(line))) {
+    problems.push('the topology job must not set continue-on-error');
+  }
+  for (const step of steps) {
+    if (step.if === undefined) continue;
+    const label = step.name ?? step.run ?? step.uses ?? `#${step.index}`;
+    problems.push(`topology step "${label}" must not be conditioned on "${expressionOf(step.if)}"`);
+  }
+  for (const command of TOPOLOGY_COMMANDS) {
+    if (!steps.some((step) => !step.multiline && step.run === command)) problems.push(topologyRunMessage(command));
+  }
+  return problems;
+}
+
 
 function main() {
   let text;
@@ -294,7 +338,7 @@ function main() {
   }
   const problems = workflowProblems(text);
   if (problems.length > 0) fail(problems.join('\ncheck-ci-governance: '));
-  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token; docs-links runs ${DOCS_LINKS} unconditionally`);
+  console.log(`integration job runs the ${STACK_COMMANDS.length} stack commands in order, with no skip path and no token; docs-links runs ${DOCS_LINKS} unconditionally; topology runs the ${TOPOLOGY_COMMANDS.length} observability checks unconditionally`);
 
 }
 
@@ -417,9 +461,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Only a topology step may be gated
-        if: github.event_name == 'push'
+      - name: Check the integration job always runs the stack
         run: node scripts/check-ci-governance.mjs
+      - name: Check the monitoring configuration and its compose wiring
+        run: node scripts/check-observability.mjs
+      - name: Prove each observability check rejects a corruption
+        run: node scripts/check-observability.mjs --self-test
+      - name: Prove the load test names a video that does not complete
+        run: node scripts/load-test.mjs --self-test
 
   integration:
     needs: topology
@@ -457,6 +506,12 @@ jobs:
       - name: Check the identity service again after the recreate
         working-directory: fiap-x-platform
         run: node scripts/check-identity.mjs
+      - name: Run a small concurrent load
+        working-directory: fiap-x-platform
+        run: node scripts/load-test.mjs --videos 3
+      - name: Check every service is scraped and the dashboard provisioned
+        working-directory: fiap-x-platform
+        run: node scripts/check-observability.mjs --live
       - name: Collect container logs
         if: failure()
         working-directory: fiap-x-platform
@@ -706,6 +761,11 @@ function selfTest() {
   const docsOrTrue = replaceOnce(GOOD, `run: ${DOCS_LINKS}\n`, `run: ${DOCS_LINKS} || true\n`);
   const docsShell = replaceOnce(GOOD, DOCS_STEP, `${DOCS_STEP}        shell: bash {0}\n`);
   const noDocs = replaceOnce(GOOD, '  docs-links:\n', '  docs-links-disabled:\n');
+  const TOPOLOGY_JOB = '  topology:\n    runs-on: ubuntu-latest\n';
+  const OBS_STEP = '      - name: Check the monitoring configuration and its compose wiring\n';
+  const OBS_SELF_STEP = '      - name: Prove each observability check rejects a corruption\n';
+  const LOAD_SELF_STEP = '      - name: Prove the load test names a video that does not complete\n';
+  const withoutStep = (step, command) => replaceOnce(GOOD, `${step}        run: ${command}\n`, '');
 
 
   const rejections = [
@@ -757,12 +817,39 @@ function selfTest() {
     ['the link check masked by || true (near-miss)', docsOrTrue, [DOCS_RUN_MESSAGE]],
     ['a shell: override on the docs-links job (near-miss)', docsShell, ['the docs-links job must not set shell']],
     ['no docs-links job', noDocs, ['the workflow has no `docs-links` job under `jobs:`']],
+    ['M12: the observability check dropped from topology', withoutStep(OBS_STEP, OBSERVABILITY), [topologyRunMessage(OBSERVABILITY)]],
+    ['M7c: the observability self-test dropped from topology', withoutStep(OBS_SELF_STEP, OBSERVABILITY_SELF_TEST), [
+      topologyRunMessage(OBSERVABILITY_SELF_TEST),
+    ]],
+    ['the load-test self-test dropped from topology', withoutStep(LOAD_SELF_STEP, LOAD_SELF_TEST), [topologyRunMessage(LOAD_SELF_TEST)]],
+    ['M7d: the observability self-test masked by || true (near-miss)',
+      replaceOnce(GOOD, `run: ${OBSERVABILITY_SELF_TEST}\n`, `run: ${OBSERVABILITY_SELF_TEST} || true\n`),
+      [topologyRunMessage(OBSERVABILITY_SELF_TEST)]],
+    ['the load-test self-test masked by set +e in a run: | block (near-miss)',
+      replaceOnce(GOOD, `run: ${LOAD_SELF_TEST}\n`, `run: |\n          set +e\n          ${LOAD_SELF_TEST}\n`),
+      [topologyRunMessage(LOAD_SELF_TEST)]],
+    ['a topology step gated on the event (the old good fixture)',
+      replaceOnce(GOOD, OBS_STEP, `${OBS_STEP}        if: github.event_name == 'push'\n`),
+      [`topology step "Check the monitoring configuration and its compose wiring" must not be conditioned on "github.event_name == 'push'"`]],
+    ['continue-on-error on a topology step (near-miss)', replaceOnce(GOOD, OBS_SELF_STEP, `${OBS_SELF_STEP}        continue-on-error: true\n`),
+      ['the topology job must not set continue-on-error']],
+    ['an if: on the topology job', replaceOnce(GOOD, TOPOLOGY_JOB, `${TOPOLOGY_JOB}    if: github.event_name == 'push'\n`),
+      ['the topology job must not set if']],
+    ['a shell: override on a topology step (near-miss)', replaceOnce(GOOD, LOAD_SELF_STEP, `${LOAD_SELF_STEP}        shell: bash {0}\n`),
+      ['the topology job must not set shell']],
     ['no integration job', noIntegration, ['the workflow has no `integration` job under `jobs:`']],
     ['a recreate that skips storage-init (near-miss)', recreateNearMiss, [
       `integration stack step 6 must be "${RECREATE}", but it is "${SMOKE}"`,
     ]],
     ['an extra smoke after the stack steps', extraSmoke, [
-      `integration stack step 9 must be nothing more, but it is "${SMOKE}"`,
+      `integration stack step 11 must be nothing more, but it is "${SMOKE}"`,
+    ]],
+    ['the load test masked with || true', replaceOnce(GOOD, `run: ${LOAD}\n`, `run: ${LOAD} || true\n`), [
+      `stack command "${LOAD}" must be a one-line run step of its own`,
+      `integration stack step 9 must be "${LOAD}", but it is "${OBSERVABILITY_LIVE}"`,
+    ]],
+    ['the live observability check dropped', replaceOnce(GOOD, `        run: ${OBSERVABILITY_LIVE}\n`, '        run: echo skipped\n'), [
+      `integration stack step 10 must be "${OBSERVABILITY_LIVE}", but the job runs no further stack command`,
     ]],
     ['every stack command missing', noStack, [
       'integration stack step 1 must be "docker compose up --build -d --wait", but the job runs no further stack command',
