@@ -359,14 +359,40 @@ T12
 
 **Done when**:
 
-- [ ] Every step above observed and captured (target list, dashboard screenshot/excerpt, load-test summary)
-- [ ] Gate check passes: the load test exits 0 with 6/6 terminal
-- [ ] Test count: live evidence recorded in the feature validation phase
+- [x] Every step above observed and captured (target list, dashboard excerpt, load-test summary), except "~2× the single-replica rate" (see Status)
+- [x] Gate check passes: the load test exits 0 with 6/6 terminal
+- [ ] Test count: live evidence recorded in the feature validation phase (the evidence is below; the Verifier carries it into `validation.md`)
 
 **Tests**: self-test
 **Gate**: full
 
 **Commit**: `chore(platform): record the live observability verification run`
+
+**Status**: ⚠️ Partial (2026-09-29). Every step ran and passed. Two things are open: the ~2× rate cannot be shown with the 8 s fixture, and the log-grep correlation trace does not reach the Worker or the Notification Service. The outcome still has to go in the PR description.
+
+Environment. The four siblings were clean on `feat/observability`. `node clean-appledouble.mjs` ran first, then `docker compose down -v`. Host ports 5432 and 9000 belong to unrelated containers, so `POSTGRES_HOST_PORT=55433 STORAGE_HOST_PORT=39000`. Host port 3001 is held by an unrelated local `node` process, and compose hard-codes `3001:3001` for `catalog`. So the run used an uncommitted override (`services.catalog.ports: !override ["33001:3001"]`, through `COMPOSE_FILE`) and `CATALOG_URL=http://localhost:33001` for the smoke. For the same reason, `check-observability --live` unmodified exits 1 with exactly two problems, `catalog /metrics answered 404` and `catalog /health/live answered 404`, which is the foreign process answering. The run's live verdict comes from the script's own exported `liveProblems`, with an HTTP driver that only rewrites `localhost:3001/` to `localhost:33001/`. Nothing else changed.
+
+| Step | Evidence |
+| --- | --- |
+| `docker compose up --build -d --wait` | exit 0 in 35 s; 11 services running and healthy (`prometheus`, `grafana` included) |
+| Smoke | `node scripts/smoke-local-integration.mjs` exit 0 (11 s) |
+| `check-observability` | default exit 0; `--live` (port rewrite above) no problems at 1 replica, at 3, and again at 1 |
+| Targets, 1 replica | `api:3000`, `catalog:3001`, `notification:3003`, `rabbitmq:15692`, `worker 172.18.0.8:3002`: all `up` |
+| `WORKER_REPLICAS=3 docker compose up -d --wait worker` | exit 0 in 10 s; replicas on host 3011/3012/3013, all healthy; Prometheus worker targets `172.18.0.8`, `.13`, `.14:3002` all `up`; `count by (job)(up==1)` through Grafana's datasource proxy: `worker: 3` |
+| `node scripts/load-test.mjs --videos 6` (3 replicas) | `COMPLETED 6/6` in 4 s wall, latencies 2.1-3.2 s; `fiapx_processing_total{outcome="completed"}` delta per replica 3 + 1 + 2 = 6 |
+| Heavier runs | 1 replica `--videos 40`: 40/40 in 5 s (avg 3.7 s, max 4.6 s). 3 replicas `--videos 40`: 40/40 in 3 s (avg 3.0 s, max 3.6 s), delta 14 + 13 + 13 = 40. 3 replicas, four concurrent `--videos 50`: 200/200 COMPLETED (max latency 11.3 s), split 66 / 67 / 67 across the replicas |
+| Queue depth from 15692 | Prometheus `rabbitmq_queue_messages{queue="processing"}` at 5 s steps over the 200-video burst: `0 … 0, 22, 22, 22, 0 …` (the same broker snapshot at 3 scrapes, then drained); `video-validation` `0, 2, 2, 2, 0`. Direct 0.5 s samples of `:15692` peaked at 3 (1 replica, 40 videos), 13 (3 replicas, 40) and 22 (burst) |
+| `fiapx_processing_total` across replicas | `sum(fiapx_processing_total{outcome="completed"})` 93 → 293 over the burst (+200); 93 = 1 smoke + 6 + 40 + 6 + 40 |
+| Grafana | `/api/health` 200; `/api/dashboards/uid/fiapx-overview` 200, `meta.provisioned: true`, title `FIAP X Overview`. Its PromQL run against Prometheus over the load window: 17 of 18 return series; the empty one is the 5xx rate, and no 5xx happened |
+| Correlation id | Confirmation with `X-Correlation-Id: t12-trace-1790651303` answered 201, echoing the header, and the request (`aef57137-…`) reached `COMPLETED`. `catalog.processing_request.correlation_id` holds it. All three Catalog outbox events carry `"correlationId": "t12-trace-1790651303"`: `VideoValidationRequested` (to the Worker), `ProcessingQueued` (to the Worker) and `terminal.event` (to the Notification Service). `docker compose logs api catalog worker notification \| grep` finds 2 lines, the API access line (`service: fiap-x-api`, `correlationId` set, no `authorization` header) and the Catalog's `POST /processing-requests` access line |
+| Scale back | `docker compose up -d --wait worker` with `WORKER_REPLICAS` unset: exit 0 in 16 s. One replica remains (worker-1, host 3011). Live check passes. Prometheus drops the two removed targets within one refresh; for a few seconds `up{job="worker"}` still counts 3 while the staleness catches up. `--videos 3` then completed 3/3 |
+| Full gate | `check-observability --self-test` (36 corruptions), `load-test --self-test` (20 assertions), docs-links 0, `check-ci-governance --self-test`: all exit 0 |
+
+Open items (Validar depois):
+
+1. **Log trace stops at the Catalog.** The README's Observability section says `docker compose logs api catalog worker notification | grep <id>` follows one video through all four services. Live, it finds only the two HTTP access lines. The id does travel on the wire, as the outbox rows show. But across ~300 videos, the Worker wrote no line while handling a job (only startup lines), the Notification Service wrote none per delivery, and the Catalog's consumers wrote none (only HTTP access lines). OBS-31 and OBS-46 require the id on *every* line a handler writes, and that holds vacuously, because there are no such lines. Either the consumers log one info line per handled message (a Worker, Notification and Catalog change, out of scope here), or the README claim narrows to "the API and Catalog logs, plus the id on every event". This run did not change code in any service.
+2. **~2× the single-replica rate is not observable with this fixture.** The 8 s fixture processes in well under a second, so a run is bound by upload and polling, not by the Worker. 40 videos took 5 s on 1 replica and 3 s on 3, and a 6-video run finishes before the broker's 5 s stats refresh or Prometheus's 15 s scrape. The depth rise and drain in Prometheus needed the 200-video burst. The load spreads evenly across the replicas, but the throughput gain is not measurable at this size.
+3. **Catalog host port 3001 is fixed.** Unlike 5432, 9000 and the Worker range, `catalog`'s host port cannot be moved by a variable, and `check-observability --live` and the smoke's default assume 3001. On a machine where 3001 is taken, the live check fails on the catalog lines only. A `CATALOG_HOST_PORT` in the "Host ports already in use" pattern would close it.
 
 ---
 

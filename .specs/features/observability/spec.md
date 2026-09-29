@@ -125,20 +125,20 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| OBS-61 | P1: Stack (Prometheus scrape set) | Execute | Implementing (T2, T5) |
-| OBS-62 | P1: Stack (Grafana provisioning) | Execute | Implementing (T3) |
-| OBS-63 | P1: Stack (RabbitMQ plugin) | Execute | Implementing (T1 done; live assertion in T12) |
-| OBS-64 | P1: Stack (resilient startup) | Execute | Implementing (T2, T5) |
-| OBS-65 | P1: Stack (recreate from repo) | Execute | Implementing (T5) |
-| OBS-66 | P1: Stack (config from repo, no creds on targets) | Execute | Implementing (T5) |
-| OBS-67 | P2: Replicas (N workers) | Execute | Implementing (T5; live in T12) |
-| OBS-68 | P2: Load test (N pipelines) | Execute | Implementing (T6; live in T12) |
-| OBS-69 | P2: Load test (dashboard evidence) | Design | Pending |
+| OBS-61 | P1: Stack (Prometheus scrape set) | Execute | Verified live (T2, T5; T12: every target up) |
+| OBS-62 | P1: Stack (Grafana provisioning) | Execute | Verified live (T3, T4; T12: `fiapx-overview` provisioned, 17/18 queries with series) |
+| OBS-63 | P1: Stack (RabbitMQ plugin) | Execute | Verified live (T1; T12: per-queue depth scraped, `processing` 0 → 22 → 0) |
+| OBS-64 | P1: Stack (resilient startup) | Execute | Verified live (T2, T5; T12: clean `up --wait` healthy) |
+| OBS-65 | P1: Stack (recreate from repo) | Execute | Verified live (T5; T12: from `down -v`, no UI step) |
+| OBS-66 | P1: Stack (config from repo, no creds on targets) | Execute | Verified live (T5; T12) |
+| OBS-67 | P2: Replicas (N workers) | Execute | Verified live (T5; T12: 3 healthy replicas, 3 worker targets, scale back to 1) |
+| OBS-68 | P2: Load test (N pipelines) | Execute | Verified live (T6; T12: 6/6, 40/40, 200/200 COMPLETED) |
+| OBS-69 | P2: Load test (dashboard evidence) | Execute | Partial (T12: depth and per-replica processing series recorded; ~2× rate not measurable with the 8 s fixture) |
 | OBS-70 | P2: Load test (failure exit) | Execute | Implementing (T6) |
 | OBS-71 | P2: Load test (self-test) | Execute | Implementing (T6) |
 | OBS-72 | P2: CI (self-test + small live load) | Execute | Implementing (T8; first live run on the PR) |
-| OBS-73 | P3: Documented operator walkthrough | Execute | Implemented (T9; followed end to end in T12) |
-| OBS-74 | P1: Stack (observability check script) | Execute | Implementing (T7, T8) |
+| OBS-73 | P3: Documented operator walkthrough | Execute | Followed end to end in T12; the log-grep correlation trace reaches the API and Catalog only (open item in T12) |
+| OBS-74 | P1: Stack (observability check script) | Execute | Verified live (T7, T8; T12 `--live` at 1 and 3 replicas) |
 
 **ID format:** `OBS-[NUMBER]` — `fiap-x-api` owns OBS-01..15; `processing-catalog` OBS-16..30; `processing-worker` OBS-31..45; `notification-service` OBS-46..60; this repo owns OBS-61..75.
 
@@ -148,6 +148,6 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 
 ## Success Criteria
 
-- [ ] `docker compose up --build -d --wait` yields healthy `prometheus` and `grafana` containers, and Grafana's overview dashboard shows live series from all four services within 60 s.
-- [ ] `WORKER_REPLICAS=3 docker compose up -d worker` yields 3 healthy workers, and `node scripts/load-test.mjs --videos 6` completes 6/6 terminal with the dashboard showing the queue-depth/processing-rate correlation.
+- [x] `docker compose up --build -d --wait` yields healthy `prometheus` and `grafana` containers, and Grafana's overview dashboard shows live series from all four services within 60 s.
+- [x] `WORKER_REPLICAS=3 docker compose up -d worker` yields 3 healthy workers, and `node scripts/load-test.mjs --videos 6` completes 6/6 terminal with the dashboard showing the queue-depth/processing-rate correlation. (T12: 6/6; the depth and rate series move together on a 200-video burst, since a 6-video run drains between scrapes)
 - [ ] CI's `topology` job runs the new check script self-test; the `integration` job runs the load-test self-test plus a small live load.
