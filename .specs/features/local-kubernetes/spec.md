@@ -217,7 +217,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 KEDA install and topology apply; T34 live) |
 | K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 readiness wait + self-test; T34 live) |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Execute | Implemented (T25 600 s wait naming each not-ready workload and its pods' reasons + self-test; observed live in T34) |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers) |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers; the static scan also refuses a raw kind spawn outside `scripts/kube.mjs` + self-test) |
 | K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
 | K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
 | K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |

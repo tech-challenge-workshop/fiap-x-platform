@@ -35,7 +35,13 @@
 //
 // It also scans scripts/*.mjs: no script other than scripts/kube.mjs may
 // spawn kubectl directly (a bare "kubectl" string, or a string that starts a
-// kubectl command line without `--context kind-fiapx`).
+// kubectl command line without `--context kind-fiapx`), nor spawn kind
+// directly (kind rewrites the current context of the kubeconfig it writes;
+// kube.mjs pins it to --name fiapx and ~/.kube/kind-fiapx.config). "kind" is
+// also a Kubernetes field and a smoke target, so the kind rule looks for the
+// shape of a spawn: a child_process call or an injected spawner given "kind"
+// and an argument array, a `sh -c` string starting with kind, or a path to
+// the binary.
 //
 // The per-object rules pass an empty render; the workloads rule does not, so
 // default mode fails on a render that lost a manifest. K8S_RENDER, when set,
@@ -583,6 +589,33 @@ export function rawKubectlProblems(files) {
   return problems;
 }
 
+// `files` as above. Only kube.mjs may spawn kind; elsewhere a spawn-shaped
+// use is refused (see the header). Lines that are `//` comments are not
+// scanned.
+export function rawKindProblems(files) {
+  const problems = [];
+  const name = /(?:[^'"`\s]*\/)?kind/.source;
+  const shapes = [
+    // spawnSync('kind', ...), execSync("kind delete ..."), exec(`/bin/kind ...`)
+    new RegExp(`\\b(?:spawnSync|spawn|execFileSync|execFile|execSync|exec)\\(\\s*(['"\`])${name}(?:\\1|\\s)`),
+    // an injected spawner: run('kind', ['get', 'clusters'])
+    new RegExp(`\\b\\w+\\(\\s*(['"\`])${name}\\1\\s*,\\s*\\[`),
+    // a shell string: ['-c', 'kind create cluster']
+    new RegExp(`(['"\`])-c\\1\\s*,\\s*(['"\`])${name}\\s`),
+    // a path to the binary: '/usr/local/bin/kind'
+    /(['"`])[^'"`\s]*\/kind\1/,
+  ];
+  for (const [file, source] of Object.entries(files)) {
+    if (file === HELPER) continue;
+    const lines = source.split('\n');
+    const at = lines.findIndex((line) => !/^\s*\/\//.test(line) && shapes.some((shape) => shape.test(line)));
+    if (at !== -1) {
+      problems.push(`scripts/${file}:${at + 1}: spawns kind directly; call kind() from scripts/kube.mjs, which pins --name fiapx and --kubeconfig ~/.kube/kind-fiapx.config`);
+    }
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------- live
 
 const LIVE_JOBS = ['api', 'catalog', 'worker', 'notification', 'rabbitmq'];
@@ -702,10 +735,10 @@ function problemsOf(text, files, complete = false) {
   try {
     objects = parseYamlStream(text);
   } catch (error) {
-    return { count: 0, problems: [`the render cannot be read: ${error.message}`, ...rawKubectlProblems(files)] };
+    return { count: 0, problems: [`the render cannot be read: ${error.message}`, ...rawKubectlProblems(files), ...rawKindProblems(files)] };
   }
   const missing = complete ? missingWorkloads(objects) : [];
-  return { count: objects.length, problems: [...manifestProblems(objects), ...missing, ...rawKubectlProblems(files)] };
+  return { count: objects.length, problems: [...manifestProblems(objects), ...missing, ...rawKubectlProblems(files), ...rawKindProblems(files)] };
 }
 
 function main() {
@@ -715,7 +748,7 @@ function main() {
     process.exit(1);
   }
   const pending = PENDING.length > 0 ? ` (pending: ${PENDING.join(', ')})` : '';
-  console.log(`check-kubernetes: ${count} rendered objects pass the offline rules (secrets, credentials, probes, images, worker sizing and replicas, scaling) and hold every required workload${pending}; only scripts/kube.mjs spawns kubectl`);
+  console.log(`check-kubernetes: ${count} rendered objects pass the offline rules (secrets, credentials, probes, images, worker sizing and replicas, scaling) and hold every required workload${pending}; only scripts/kube.mjs spawns kubectl or kind`);
 }
 
 // ---------------------------------------------------------------- self-test
@@ -1093,8 +1126,37 @@ async function selfTest() {
     else if (expected.length > 0) rejected += 1;
     else accepted += 1;
   }
-  // The committed scripts pass the scan.
-  const committed = rawKubectlProblems(scriptSources(dirname(SELF)));
+  // The kind scan. The planted sources build the binary name at run time too,
+  // so this file itself holds no spawn-shaped kind string.
+  const bin = ['ki', 'nd'].join('');
+  const kindMessage = (at) => `${at}: spawns kind directly; call kind() from scripts/kube.mjs, which pins --name fiapx and --kubeconfig ~/.kube/kind-fiapx.config`;
+  const kindCases = [
+    ['spawnSync of the kind binary', { 'k8s-up.mjs': `import { spawnSync } from 'node:child_process';\nspawnSync('${bin}', ['create', 'cluster']);\n` },
+      [kindMessage('scripts/k8s-up.mjs:2')]],
+    ['execSync of a kind command line', { 'down.mjs': `execSync("${bin} delete cluster --name fiapx");\n` }, [kindMessage('scripts/down.mjs:1')]],
+    ['a sh -c string starting with kind', { 'reset.mjs': `spawnSync('sh', ['-c', \`${bin} create cluster --name fiapx\`]);\n` },
+      [kindMessage('scripts/reset.mjs:1')]],
+    ['an injected spawner given kind and an argument array', { 'z.mjs': `const out = run('${bin}', ['get', 'clusters']);\n` }, [kindMessage('scripts/z.mjs:1')]],
+    ['an absolute path to the binary', { 'x.mjs': `const bin = "/usr/local/bin/${bin}";\n` }, [kindMessage('scripts/x.mjs:1')]],
+    ['kube.mjs itself may spawn kind', { 'kube.mjs': `spawnSync('${bin}', ['version']);\n` }, []],
+    ['a call through the helper', { 'k8s-down.mjs': `kind(['delete', 'cluster']);\n` }, []],
+    ['kind as a manifest field and a smoke target (near-miss)',
+      { 'check.mjs': `const d = o.${bin} === 'Job';\nconst y = { ${bin}: 'Deployment' };\nobserverFor('${bin}', { ${bin}: () => '' });\nconst t = ['compose', '${bin}'];\n` }, []],
+    ['a message naming a kind command (near-miss)', { 'k8s-up.mjs': `must(deps.${bin}(['get', 'clusters']), '${bin} get clusters');\n` }, []],
+    ['a comment naming a spawn', { 'k8s-up.mjs': `// spawnSync('${bin}', ['create', 'cluster'])\nconst x = 1;\n` }, []],
+  ];
+  for (const [name, files, expected] of kindCases) {
+    const got = rawKindProblems(files);
+    if (!same(got, expected)) failures.push(`kind scan: ${name}: got ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    else if (expected.length > 0) rejected += 1;
+    else accepted += 1;
+  }
+  // A kind spawn fails default mode like a kubectl spawn does.
+  const kindSpawned = problemsOf('', { 'up.mjs': `spawnSync('${bin}', ['create', 'cluster']);\n` }).problems;
+  if (!same(kindSpawned, [kindMessage('scripts/up.mjs:1')])) failures.push(`kind scan: through problemsOf: got ${JSON.stringify(kindSpawned)}`);
+
+  // The committed scripts pass both scans.
+  const committed = [...rawKubectlProblems(scriptSources(dirname(SELF))), ...rawKindProblems(scriptSources(dirname(SELF)))];
   if (committed.length > 0) failures.push(`scan: the committed scripts: ${JSON.stringify(committed)}`);
 
   // The script itself, on a render whose worker sets replicas, must exit
@@ -1214,7 +1276,7 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the scan, spawned failures (worker replicas, catalog missing) exited non-zero and spawned complete render exited 0, ${liveCases} live cases (healthy, missing HPA, target down, worker targets vs pods, dashboard) exact`,
+    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the kubectl and kind scans, spawned failures (worker replicas, catalog missing) exited non-zero and spawned complete render exited 0, ${liveCases} live cases (healthy, missing HPA, target down, worker targets vs pods, dashboard) exact`,
   );
 }
 
