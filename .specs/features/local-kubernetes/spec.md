@@ -214,33 +214,33 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
-| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24 cluster create/reuse; T25 KEDA install and topology apply; T34 live) |
-| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 readiness wait + self-test; T34 live) |
-| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Execute | Implemented (T25 600 s wait naming each not-ready workload and its pods' reasons + self-test; observed live in T34) |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; 3ee9f9c private kubeconfig for kind and kubectl; T6 static scan; T24 up command through the helper; T25-T28 remaining callers; the static scan also refuses a raw kind spawn outside `scripts/kube.mjs` + self-test; T33 AD-018; T34 live context check) |
-| K8S-05 | P1: Provision - missing tool preflight | Execute | Implemented (T24 tool and daemon preflight + self-test; observed live in T34) |
-| K8S-06 | P1: Provision - busy host port preflight | Execute | Implemented (T24 TCP bind probe of every published host port + self-test; observed live in T34) |
-| K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
-| K8S-08 | P1: Provision - down deletes only `fiapx` | Execute | Implemented (T26 down command deleting only fiapx + self-test; observed live in T34) |
-| K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
-| K8S-10 | P1: Provision - smoke passes with cluster target | Execute | In progress (T27 smoke observation adapter SMOKE_TARGET=kind + self-test; T30 CI step in the kubernetes job; T34 live) |
-| K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
-| K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
+| K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | Verified (T7, T8, T24, T25; T34 live: cluster created from clean, then reused on re-run; topology applied to `fiapx`) |
+| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | Verified (T9-T23, T25; T34 live: up exit 0 in 421 s, every Deployment/StatefulSet 1/1, `storage-init` Complete) |
+| K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Execute | Implemented (T25 600 s wait naming each not-ready workload and its pods' reasons + self-test; T34 live run reached Ready in 421 s, the timeout path was not triggered live) |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | Verified (T5 helper; 3ee9f9c private kubeconfig; T6 static scan incl. raw kind spawn; T24-T28 callers; T33 AD-018; T34 live: `~/.kube/config` current-context and sha identical before and after) |
+| K8S-05 | P1: Provision - missing tool preflight | Execute | Verified (T24 tool and daemon preflight + self-test; T34 live: `PATH=/usr/bin:/bin` exit 1 naming kind, kubectl and docker, nothing created) |
+| K8S-06 | P1: Provision - busy host port preflight | Execute | Verified (T24 TCP bind probe + self-test; T34 live: exit 1 `host port 3001, 9000 are already in use`, nothing created) |
+| K8S-07 | P1: Provision - idempotent re-run | Execute | Verified (T24, T25; T34 live: re-run exit 0 in 15 s with replicas unchanged, and again with the Worker at 5/5, still 5/5, no rollout) |
+| K8S-08 | P1: Provision - down deletes only `fiapx` | Execute | Verified (T26 + self-test; T34 live: `kind get clusters` empty after down; second down exit 0) |
+| K8S-09 | P1: Provision - readiness/liveness probes | Execute | Verified (T6 probe rule + self-test; T15-T18; T34 live: all four Deployments probe `/health` and `/health/live` on 3000/3001/3003/3002) |
+| K8S-10 | P1: Provision - smoke passes with cluster target | Execute | Verified (T27 adapter + self-test; T30 CI step; T34 live: `SMOKE_TARGET=kind` smoke exit 0) |
+| K8S-11 | P1: Provision - host token accepted (issuer) | Execute | Verified (T8, T13, T17; T34 live: host token `iss http://localhost:8080/realms/fiapx` answered 200) |
+| K8S-12 | P1: Provision - presigned URL usable from host | Execute | Verified (T8, T11, T17; T34 live: upload and download URLs used from the host on the storage host port, 39000 via `STORAGE_HOST_PORT`) |
 | K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T33 AD-018 records the rule; T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
-| K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
-| K8S-15 | P1: Secrets - generated at provisioning | Execute | Implemented (T24 per-cluster generated Secrets, fixtures only for the db/init roles + self-test; observed live in T34) |
+| K8S-14 | P1: Secrets - no Secret with data in the repo | Execute | Verified (T6 rule + self-test; T34: the render holds 0 Secret objects) |
+| K8S-15 | P1: Secrets - generated at provisioning | Execute | Verified (T24 per-cluster generated Secrets + self-test; T34 live: seven Secrets created at provisioning, `none (all present)` on re-run) |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Execute | Implemented (T6 rule + self-test; T19 `ScaledObject` `worker`; scaling observed live in T34) |
-| K8S-19 | P1: Autoscale - HPA listed | Execute | In progress (T25 the up command waits for HPA keda-hpa-worker; T28 live rule + self-test; T34 live) |
-| K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
-| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Execute | In progress (T19 HPA scale-down stabilization 60 s; T34 live) |
-| K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
+| K8S-19 | P1: Autoscale - HPA listed | Execute | Verified (T25 wait for keda-hpa-worker; T28 live rule + self-test; T34 live: HPA `keda-hpa-worker` 1..5 listed, `--live` exit 0) |
+| K8S-20 | P1: Autoscale - scale out under load | Execute | Verified (T19; T34 live: 4 × 50 burst took the Worker 1 → 5 in ~11 s, never above 5, all 200 COMPLETED) |
+| K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Execute | Verified (T19 60 s stabilization; T34 live: back to 1 replica 63 s and 52 s after the queues emptied) |
+| K8S-22 | P1: Autoscale - in-flight job survives scale-in | Execute | Verified (T34 live: pod killed 3 s into a job, RabbitMQ `redeliver 0 → 1`, the request COMPLETED on the new pod; the Worker ignores SIGTERM, reported to processing-worker) |
 | K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | Implemented (T6 rule + self-test; T18 manifest: `cpu: "1"` request and limit, `FFMPEG_THREADS=1`) |
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Execute | Implemented (T6 no-host rule + self-test; T19 `TriggerAuthentication` `rabbitmq-management` from Secret `fiapx-keda-rabbitmq`) |
-| K8S-25 | P2: Observe - every Worker pod scraped | Execute | In progress (T21 pod discovery of every Worker replica; T22 ServiceAccount + Role for pod discovery; T28 live rule: one worker target per running pod + self-test; T34 live) |
-| K8S-26 | P2: Observe - other targets up | Execute | In progress (T21 static targets api, catalog, notification, rabbitmq:15692; T22 Prometheus Deployment and Services; T28 live rule: every target up + self-test; T34 live) |
-| K8S-27 | P2: Observe - dashboard from the same JSON | Execute | In progress (T23 Grafana provisioned from grafana/dashboards/overview.json; T28 live rule with the generated admin + self-test; T34 live) |
+| K8S-25 | P2: Observe - every Worker pod scraped | Execute | Verified (T21, T22, T28 + self-test; T34 live: Prometheus worker targets 5/5 with 5 pods, 1/1 after scale-in) |
+| K8S-26 | P2: Observe - other targets up | Execute | Verified (T21, T22, T28 + self-test; T34 live: `--live` every target up) |
+| K8S-27 | P2: Observe - dashboard from the same JSON | Execute | Verified (T23, T28 + self-test; T34 live: `fiapx-overview` served, 200) |
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4; T33 AD-018 records the merge order); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |

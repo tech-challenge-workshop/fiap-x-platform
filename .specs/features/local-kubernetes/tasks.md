@@ -899,14 +899,35 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Every listed AC has recorded evidence (command + key numbers)
-- [ ] The current kube context is identical before and after the run
-- [ ] Test count in the feature validation phase
+- [x] Every listed AC has recorded evidence (command + key numbers)
+- [x] The current kube context is identical before and after the run
+- [x] Test count in the feature validation phase
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `chore(platform): record the live kubernetes verification run`
+
+**Status**: ✅ Complete (2026-09-29). Live run on kind v0.33.0, Docker Desktop arm64 (10 CPUs, 14.6 GB), images `ghcr.io/tech-challenge-workshop/<repo>:main` (multi-arch, private packages, pulled through `ghcr-pull`). Host ports 3001 and 9000 were held by foreign processes, so every command ran with `CATALOG_HOST_PORT=33001 STORAGE_HOST_PORT=39000` (the documented overrides); the up command ran with `GHCR_TOKEN=$(gh auth token) GHCR_USERNAME=GabrielStima`. Every manual kubectl was `KUBECONFIG=~/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx …`. No platform fix was needed: every step passed on the committed code.
+
+Evidence:
+
+- **Context safety (K8S-04)**: before and after the whole run, `kubectl config current-context` = `arn:aws:eks:us-east-1:541036791805:cluster/tech-challenge-eks-cluster` and `shasum ~/.kube/config` = `228cf9a7933d4c7f5d9df58c08c8754853054072`, identical (also re-checked mid-create). The cluster lived only in `~/.kube/kind-fiapx.config`.
+- **Up from clean (K8S-01, K8S-02, K8S-15)**: `node scripts/k8s-up.mjs` exit 0 in **421 s** wall (create, Secrets `fiapx-postgres, fiapx-storage, fiapx-rabbitmq, fiapx-keda-rabbitmq, fiapx-identity-admin, fiapx-grafana-admin, ghcr-pull` generated, KEDA v2.21.0, apply, wait); 9 Deployments 1/1, StatefulSets `postgres` and `storage` 1/1, Job `storage-init` Complete (4m19s, mostly first image pulls), HPA `keda-hpa-worker` 1..5, ScaledObject `worker` READY True. K8S-03's timeout path was not triggered live (self-test only).
+- **Preflights (K8S-05, K8S-06)**: without the overrides, `k8s-up` exit 1 `host port 3001, 9000 are already in use …`; with `PATH=/usr/bin:/bin`, exit 1 `preflight failed, nothing was created: kind not found … kubectl not found … docker not found`; `kind get clusters` empty after both.
+- **Smoke (K8S-10)**: `SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs` exit 0, 30 observations (uploads on `localhost:39000`, COMPLETED with 8 frames, FORMATO_INVALIDO and PROCESSAMENTO_FALHOU, notifications and Mailpit, ownership 404s, bucket lifecycle rules, anonymous 403).
+- **Live check (K8S-19, K8S-25..27)**: `node scripts/check-kubernetes.mjs --live` exit 0: `every workload is Ready, storage-init is Complete, an HPA scales the worker, every Prometheus target is up with one worker target per worker pod, Grafana serves the fiapx-overview dashboard`. `GET /api/dashboards/uid/fiapx-overview` as admin 200.
+- **Host token (K8S-11)**: `node scripts/get-token.mjs alice` → `iss http://localhost:8080/realms/fiapx`; `GET /processing-requests` with it 200, without it 401.
+- **Presigned URLs from the host (K8S-12)**: the smoke uploaded through part URLs on `http://localhost:39000` and its download URL `served 70557 bytes to the host` (the storage host port, moved by `STORAGE_HOST_PORT`; `localhost:9000` by default).
+- **Probes (K8S-09)**: live Deployments api/catalog/notification/worker: readiness `GET /health`, liveness `GET /health/live` on port `http` = 3000/3001/3003/3002.
+- **Secrets (K8S-13, K8S-14)**: the render (`kubectl kustomize`, 45 objects) holds 0 `Secret` objects; its 8 `data:` blocks are all ConfigMaps; 0 env entries named `*PASSWORD*|*SECRET*|*ACCESS_KEY*|*TOKEN*` with a literal `value`.
+- **Idempotent re-run (K8S-07)**: `k8s-up` on the healthy cluster exit 0 in 15 s (`reusing the kind cluster fiapx`, `Secrets created: none (all present)`), every Deployment/StatefulSet `ready/spec` identical before and after. Again during a burst with the Worker at **5/5**: exit 0 in 16 s, Worker still 5/5, one ReplicaSet, generation unchanged (no rollout).
+- **Scaling scene (K8S-18, K8S-20, K8S-21, K8S-25)**: four concurrent `node scripts/load-test.mjs --videos 50 --timeout-seconds 1500`, sampled every 5 s (HPA, Deployment, pods, queue depth, Prometheus worker targets). Burst A: `processing=160` at 13:20:47 → HPA desired 5, `deploy 5/5` at 13:20:58; queues empty 13:21:03; Prometheus worker targets `5/5` with 5 pods; Worker 5 → 3 (13:21:50) → 1 (13:22:06), i.e. **63 s** after the queues emptied, the last Terminating pod gone at 94 s. Burst B: `processing=180` → 5/5 at 13:24:00, queues empty 13:24:00, back to 1 at 13:24:52 (**52 s**). Every run `COMPLETED 50/50`: three bursts of 4 × 50 (A, B, and a third during the kill tests) and four single runs of 50 plus one of 20, 0 FAILED. Never above 5 replicas.
+- **Scale-in redelivery (K8S-22)**: a 590 s 720p video (made with the Worker's ffmpeg, 9.3 MB, ~12 s of processing on 1 CPU) was uploaded; 3 s into `PROCESSING` its pod `worker-…-nklbl` was deleted with `--grace-period=1` (SIGTERM, SIGKILL after 1 s). RabbitMQ `processing`: before `deliver 826 ack 825 redeliver 0` (1 unacked), after `deliver 827 redeliver 1`; the new pod `worker-…-5bsnw` consumed it and the request `624d379e-…` reached **COMPLETED** 20 s after the kill (not FAILED). With the default 30 s grace (plain `kubectl delete pod`), the in-flight job finished on the terminating pod and was acked, also COMPLETED.
+- **Down (K8S-08)**: `node scripts/k8s-down.mjs` exit 0 `deleted the kind cluster fiapx`; `kind get clusters` → `No kind clusters found.`; no `fiapx` container left; a second run exit 0 `does not exist; nothing to delete`.
+- **Build gate after the run**: `kube.mjs`, `check-kubernetes.mjs`, `k8s-up.mjs`, `k8s-down.mjs` self-tests 0; `check-kubernetes.mjs` 0 (45 objects); render + kubeconform `Valid: 45, Invalid: 0`; `check-ci-governance` and its self-test 0 (56 bad / 3 good workflows); `check-docs-links` 0 (`0 unresolved link(s)`); `check-observability` 0; smoke self-test 0 (32 steps, 189 bad / 63 good inputs); load-test self-test 0 (20 assertions); `docker compose config -q` 0.
+
+Observed for the service (not fixed here): the Worker does not act on SIGTERM. `src/main.ts` never calls `app.enableShutdownHooks()` and the image runs `node dist/main` as PID 1, so `ShutdownSignal` (`onModuleDestroy`) never fires, the "left for redelivery" path never runs, and a terminating pod keeps consuming until SIGKILL at the 30 s grace (scaled-in pods stayed Terminating ~26-30 s). Correctness holds through broker redelivery (proven above), but scale-in is slower than it needs to be. Not proven here: the PR runs of the four `image` jobs (K8S-29) and the platform `kubernetes` CI job (K8S-34), which need the push.
 
 ---
 
