@@ -16,7 +16,8 @@
 //                    every panel and query names the `prometheus` uid; every
 //                    PromQL metric is one the services or the broker export;
 //                    no query selects or groups by an owner, email, user or
-//                    request/correlation id label; `fiapx-overview` exists;
+//                    request/correlation id label, and neither does any
+//                    query template variable; `fiapx-overview` exists;
 //   rabbitmq         enabled_plugins lists rabbitmq_management and
 //                    rabbitmq_prometheus and compose mounts it; rabbitmq.conf
 //                    sets the metrics port 15692 and per-object metrics;
@@ -234,6 +235,21 @@ export function promqlNames(expr) {
   return { metrics, labels };
 }
 
+// The names a query template variable uses. Grafana's Prometheus variable
+// forms are label_values([selector,] label), query_result(expr) and a bare
+// expression; label_values' last argument is a label, not a metric.
+export function variableNames(query) {
+  const values = /^\s*label_values\s*\((.*)\)\s*$/s.exec(query);
+  if (values) {
+    const comma = values[1].lastIndexOf(',');
+    const label = values[1].slice(comma + 1).trim();
+    const selector = comma === -1 ? { metrics: [], labels: [] } : promqlNames(values[1].slice(0, comma));
+    return { metrics: selector.metrics, labels: [...selector.labels, label] };
+  }
+  const result = /^\s*query_result\s*\((.*)\)\s*$/s.exec(query);
+  return promqlNames(result ? result[1] : query);
+}
+
 // ---------------------------------------------------------------- structure
 
 // A duration in Prometheus's "15s" / "1m" form, in seconds; NaN otherwise.
@@ -305,6 +321,15 @@ function grafanaProvisioningProblems(tree, problems) {
   }
 }
 
+function namesProblems(where, { metrics, labels }, problems) {
+  for (const metric of metrics) {
+    if (!KNOWN_METRICS.has(metric)) problems.push(`${where}: unknown metric ${metric}`);
+  }
+  for (const label of labels) {
+    if (PII_LABEL.test(label)) problems.push(`${where}: label ${label} may carry personal data or an unbounded id`);
+  }
+}
+
 function dashboardProblems(tree, problems) {
   const files = tree.list('grafana/dashboards').filter((f) => f.endsWith('.json') && !f.startsWith('._'));
   if (files.length === 0) problems.push('grafana/dashboards: no dashboard JSON');
@@ -337,12 +362,17 @@ function dashboardProblems(tree, problems) {
         }
         const { metrics, labels } = promqlNames(target.expr);
         if (metrics.length === 0) problems.push(`${name} query ${target.refId}: references no metric`);
-        for (const metric of metrics) {
-          if (!KNOWN_METRICS.has(metric)) problems.push(`${name} query ${target.refId}: unknown metric ${metric}`);
-        }
-        for (const label of labels) {
-          if (PII_LABEL.test(label)) problems.push(`${name} query ${target.refId}: label ${label} may carry personal data or an unbounded id`);
-        }
+        namesProblems(`${name} query ${target.refId}`, { metrics, labels }, problems);
+      }
+    }
+    // A query variable runs PromQL too: the same metric and label rules hold
+    // for its query (a string, or { query } in newer Grafana) and definition.
+    for (const variable of dashboard.templating?.list ?? []) {
+      if (variable.type !== 'query') continue;
+      const query = typeof variable.query === 'string' ? variable.query : variable.query?.query;
+      const expressions = new Set([query, variable.definition].filter((e) => typeof e === 'string' && e.trim() !== ''));
+      for (const expression of expressions) {
+        namesProblems(`${rel} variable "${variable.name}"`, variableNames(expression), problems);
       }
     }
   }
@@ -666,6 +696,21 @@ async function selfTest() {
     ['grafana/dashboards/overview.json panel "Uploads by outcome" query A: label processingRequestId may carry personal data or an unbounded id']);
   expectProblems('overview uid changed', editDashboard((d) => { d.uid = 'fiapx-overview-2'; }),
     ['grafana/dashboards: no dashboard with uid fiapx-overview']);
+  const variable = (query, definition = query) => ({
+    name: 'v', type: 'query', datasource: { uid: DATASOURCE_UID }, query: { query, refId: 'PrometheusVariableQueryEditor-VariableQuery' }, definition,
+  });
+  expectProblems('M9: a template variable listing owner emails', editDashboard((d) => {
+    d.templating.list.push(variable('label_values(fiapx_uploads_total, owner_email)'));
+  }), ['grafana/dashboards/overview.json variable "v": label owner_email may carry personal data or an unbounded id']);
+  expectProblems('a template variable on an unknown metric (near miss)', editDashboard((d) => {
+    d.templating.list.push({ ...variable('label_values(fiapx_upload_total, outcome)'), query: 'label_values(fiapx_upload_total, outcome)' });
+  }), ['grafana/dashboards/overview.json variable "v": unknown metric fiapx_upload_total']);
+  expectProblems('a template variable whose definition selects by request id', editDashboard((d) => {
+    d.templating.list.push(variable('label_values(outcome)', 'query_result(fiapx_uploads_total{request_id="x"})'));
+  }), ['grafana/dashboards/overview.json variable "v": label request_id may carry personal data or an unbounded id']);
+  expectProblems('a template variable listing replicas (good)', editDashboard((d) => {
+    d.templating.list.push(variable('label_values(fiapx_processing_total, instance)'), { name: 'c', type: 'custom', query: 'owner,email' });
+  }), []);
 
   // RabbitMQ.
   expectProblems('management plugin dropped', edit('rabbitmq/enabled_plugins', 'rabbitmq_management,', ''),
