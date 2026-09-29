@@ -133,14 +133,16 @@ T12
 
 **Done when**:
 
-- [ ] Structural assertions (T7 self-test): datasource + provider files parse and reference resolvable paths
-- [ ] Gate check passes: full self-test gate
-- [ ] Test count: asserted in T7 self-test
+- [x] Structural assertions (T7 self-test): datasource + provider files parse and reference resolvable paths
+- [x] Gate check passes: full self-test gate
+- [x] Test count: asserted in T7 self-test
 
 **Tests**: self-test
 **Gate**: build
 
 **Commit**: `feat(platform): add the grafana provisioning configuration`
+
+**Status**: ✅ Complete (2026-09-28). A throwaway `grafana/grafana:13.2.2` with both directories mounted read-only answered `/api/health` ok and `/api/datasources/uid/prometheus` with the provisioned, read-only datasource (default, `http://prometheus:9090`). Found on the way: Grafana refuses to start when an AppleDouble `._*.yml` sidecar sits in a provisioning directory (`yaml: control characters are not allowed`); the build gate's existing first step, `node clean-appledouble.mjs`, removes them (CI's Linux checkout never has them).
 
 ---
 
