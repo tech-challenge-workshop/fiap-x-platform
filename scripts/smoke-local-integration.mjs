@@ -38,7 +38,8 @@ const OWNER_EMAILS = {
 };
 
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
-const CATALOG_URL = process.env.CATALOG_URL ?? 'http://localhost:3001';
+// CATALOG_HOST_PORT is the variable compose.yaml publishes the Catalog on.
+const CATALOG_URL = process.env.CATALOG_URL ?? `http://localhost:${process.env.CATALOG_HOST_PORT ?? 3001}`;
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL ?? 'http://localhost:3003';
 // STORAGE_HOST_PORT is the variable compose.yaml publishes storage on.
 const STORAGE_URL = process.env.STORAGE_URL ?? `http://localhost:${process.env.STORAGE_HOST_PORT ?? 9000}`;

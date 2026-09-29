@@ -83,7 +83,9 @@ services:
   catalog:
     build: ../processing-catalog
     ports:
-      - "3001:3001"
+      # CATALOG_HOST_PORT moves only the host side, like POSTGRES_HOST_PORT.
+      # Services always reach catalog:3001 inside the network.
+      - "${CATALOG_HOST_PORT:-3001}:3001"
     environment:
       - PORT=3001
       - LOCAL_INTEGRATION=true

@@ -214,23 +214,24 @@ Each service evolves its own tables through its own migrations. This file only c
 
 ### Host ports already in use
 
-Three host ports can be moved when another program on the machine already holds them. Set the variable in `.env` or the shell:
+Four host ports can be moved when another program on the machine already holds them. Set the variable in `.env` or the shell:
 
 | Variable | Default | Service |
 | --- | --- | --- |
 | `POSTGRES_HOST_PORT` | 5432 | `postgres` |
 | `STORAGE_HOST_PORT` | 9000 | `storage` (the S3 API) |
+| `CATALOG_HOST_PORT` | 3001 | `catalog` |
 | `WORKER_HOST_PORT` | the range `3010-3019` | `worker` |
 
 ```sh
-export POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 WORKER_HOST_PORT=33002
+export POSTGRES_HOST_PORT=55432 STORAGE_HOST_PORT=39000 CATALOG_HOST_PORT=33001 WORKER_HOST_PORT=33002
 docker compose up --build -d --wait
 node scripts/smoke-local-integration.mjs
 ```
 
 The Worker's default is a range, not a port, because the Worker can run several replicas (see [Worker replicas and the load test](#worker-replicas-and-the-load-test)) and one host port binds one container only. Docker gives each replica a free port from the range, and `docker compose port --index N worker 3002` prints the one replica N got (`--index 1` is the first). A single port, such as `WORKER_HOST_PORT=33002` above, works only while one replica runs. The range starts at 3010 because one starting at 3002 would contain 3003 and 3005, which `notification` and `grafana` publish.
 
-Only the host side moves. The services still reach `postgres:5432`, `storage:9000` and `worker:3002` inside the network, so nothing else changes. The API signs its URLs for `localhost:${STORAGE_HOST_PORT}`, and the smoke reads the same variable to require that port in every URL, so the same exports run the whole gate. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, needs `DATABASE_PORT` set to the value of `POSTGRES_HOST_PORT`.
+Only the host side moves. The services still reach `postgres:5432`, `storage:9000`, `catalog:3001` and `worker:3002` inside the network, so nothing else changes. The API signs its URLs for `localhost:${STORAGE_HOST_PORT}`, and the smoke reads the same variable to require that port in every URL. The smoke and `node scripts/check-observability.mjs --live` reach the Catalog on `CATALOG_HOST_PORT`, so the same exports run the whole gate. A service's database e2e suite that connects from the host, such as `processing-catalog`'s, needs `DATABASE_PORT` set to the value of `POSTGRES_HOST_PORT`.
 
 ### Worker sizing
 
@@ -250,7 +251,7 @@ This declared value is the contract S9a carries into the Worker's Kubernetes `li
 | Grafana | `http://localhost:3005` | `admin` / `admin`. The overview dashboard is `http://localhost:3005/d/fiapx-overview` (uid `fiapx-overview`) |
 | RabbitMQ metrics | `http://localhost:15692/metrics` | The broker's built-in `rabbitmq_prometheus` plugin, with one series per queue |
 | RabbitMQ management | `http://localhost:15672` | `guest` / `guest` |
-| Service metrics | `http://localhost:3000/metrics` (api), `:3001` (catalog), `:3003` (notification), the Worker on its [published port](#host-ports-already-in-use) | Prometheus text format, no token |
+| Service metrics | `http://localhost:3000/metrics` (api), `:3001` (catalog, or `CATALOG_HOST_PORT`), `:3003` (notification), the Worker on its [published port](#host-ports-already-in-use) | Prometheus text format, no token |
 
 Prometheus scrapes `api:3000`, `catalog:3001`, `notification:3003` and `rabbitmq:15692` by name. It finds the Worker by a DNS lookup of `worker` every 15 s, so each replica is a target of its own and a replica added while the stack runs is picked up. No business service depends on Prometheus or Grafana, and Prometheus depends on nothing: a service that is not up yet is only a target marked down, retried at the next scrape.
 

@@ -28,8 +28,10 @@
 //                    runs 1 replica by default.
 //
 // `--live` probes a running stack: each service's /metrics answers 200 with
-// a `fiapx_` line and /health/live answers 200 (every worker replica, by the
-// host port compose published for it); the broker serves per-queue depth;
+// a `fiapx_` line and /health/live answers 200 (the Catalog on
+// CATALOG_HOST_PORT, default 3001, as compose publishes it; every worker
+// replica by the host port compose published for it); the broker serves
+// per-queue depth;
 // Prometheus reports every target up, one worker target per replica; Grafana
 // serves the provisioned overview dashboard.
 //
@@ -482,12 +484,12 @@ function workerPortsFromPs(output) {
 
 const LIVE_JOBS = ['api', 'catalog', 'worker', 'notification', 'rabbitmq'];
 
-export async function liveProblems({ http = httpGet, workerPs, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), waitMs = 90000, host = 'localhost' }) {
+export async function liveProblems({ http = httpGet, workerPs, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), waitMs = 90000, host = 'localhost', catalogPort = 3001 }) {
   const problems = [];
   const workerPorts = workerPortsFromPs(workerPs());
   if (workerPorts.length === 0) problems.push('live: no worker replica publishes port 3002 on the host');
   const services = [
-    ['api', 3000], ['catalog', 3001], ['notification', 3003],
+    ['api', 3000], ['catalog', catalogPort], ['notification', 3003],
     ...workerPorts.map((port, i) => [`worker replica ${i + 1}`, port]),
   ];
   for (const [name, port] of services) {
@@ -761,11 +763,12 @@ async function selfTest() {
     { Service: 'worker', Publishers: [{ TargetPort: 3002, PublishedPort: 3011 }] },
     { Service: 'worker', Publishers: [{ TargetPort: 3002, PublishedPort: 3012 }] },
   ]);
-  const runLive = async (overrides = {}, workerPs = ps) => {
-    const answers = { ...healthy, ...overrides };
+  const runLive = async (overrides = {}, workerPs = ps, { base = healthy, catalogPort } = {}) => {
+    const answers = { ...base, ...overrides };
     let t = 0;
     return liveProblems({
       host: 'h',
+      catalogPort,
       workerPs: () => workerPs,
       now: () => t,
       sleep: async (ms) => { t += ms; },
@@ -778,8 +781,8 @@ async function selfTest() {
       },
     });
   };
-  const expectLive = async (name, overrides, expected, workerPs) => {
-    const got = await runLive(overrides, workerPs);
+  const expectLive = async (name, overrides, expected, workerPs, options) => {
+    const got = await runLive(overrides, workerPs, options);
     if (JSON.stringify(got) !== JSON.stringify(expected)) failures.push(`${name}: got ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
     else if (expected.length > 0) rejected += 1;
   };
@@ -798,6 +801,12 @@ async function selfTest() {
   oneWorkerScraped.data.activeTargets.pop();
   await expectLive('live: fewer worker targets than replicas', { 'http://h:9090/api/v1/targets?state=active': JSON.stringify(oneWorkerScraped) },
     ['live: Prometheus scrapes 1 worker targets, compose runs 2 replicas']);
+  // CATALOG_HOST_PORT moved: the Catalog is probed on the published port, and
+  // whatever answers on 3001 (another program) is not.
+  const moved = Object.fromEntries(Object.entries(healthy).map(([url, answer]) => [url.replace('http://h:3001/', 'http://h:33001/'), answer]));
+  await expectLive('live: the catalog on a moved host port', {}, [], undefined, { base: moved, catalogPort: 33001 });
+  await expectLive('live: the catalog on a moved host port, probed on 3001', {},
+    ['live: catalog /metrics answered 0 without a fiapx_ line'], undefined, { base: moved });
   await expectLive('live: dashboard not provisioned', { 'http://h:3005/api/dashboards/uid/fiapx-overview': JSON.stringify({ meta: { provisioned: false } }) },
     ['live: Grafana does not serve the provisioned fiapx-overview dashboard (answered 200)']);
 
@@ -842,7 +851,7 @@ if (process.argv.includes('--self-test')) {
     if (run.status !== 0) fail(`docker compose ps failed:\n${(run.stderr ?? '').trim()}`);
     return run.stdout;
   };
-  report(await liveProblems({ workerPs: ps }), 'check-observability --live: every service serves fiapx_ metrics and /health/live, the broker serves per-queue depth, every Prometheus target is up, Grafana serves the overview dashboard');
+  report(await liveProblems({ workerPs: ps, catalogPort: process.env.CATALOG_HOST_PORT ?? 3001 }), 'check-observability --live: every service serves fiapx_ metrics and /health/live, the broker serves per-queue depth, every Prometheus target is up, Grafana serves the overview dashboard');
 } else {
   report(structuralProblems(diskTree(REPO_ROOT, renderCompose())), 'check-observability: prometheus, grafana, the dashboards, the broker plugin and the compose wiring match the observability invariants');
 }
