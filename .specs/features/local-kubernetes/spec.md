@@ -217,7 +217,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-01 | P1: Provision - cluster created/reused, topology applied | Tasks | In Tasks |
 | K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Tasks | In Tasks |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
-| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static rule; T24-T28 callers) |
+| K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static scan; T24-T28 callers) |
 | K8S-05 | P1: Provision - missing tool preflight | Tasks | In Tasks |
 | K8S-06 | P1: Provision - busy host port preflight | Tasks | In Tasks |
 | K8S-07 | P1: Provision - idempotent re-run | Tasks | In Tasks |
@@ -229,14 +229,14 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-13 | P1: Secrets - credentials only via secret refs | Tasks | In Tasks |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
-| K8S-16 | P1: Secrets - check rejects literal credential env | Tasks | In Tasks |
-| K8S-17 | P1: Secrets - check rejects committed Secret data | Tasks | In Tasks |
+| K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
+| K8S-17 | P1: Secrets - check rejects committed Secret data | Execute | Implemented (T6 offline rule + self-test) |
 | K8S-18 | P1: Autoscale - ScaledObject 1–5, processing target 2, validation target 20 | Tasks | In Tasks |
 | K8S-19 | P1: Autoscale - HPA listed | Tasks | In Tasks |
 | K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
 | K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Tasks | In Tasks |
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
-| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Tasks | In Tasks |
+| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | In progress (T6 rule; T18 manifest) |
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Tasks | In Tasks |
 | K8S-25 | P2: Observe - every Worker pod scraped | Tasks | In Tasks |
 | K8S-26 | P2: Observe - other targets up | Tasks | In Tasks |
@@ -246,7 +246,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
 | K8S-31 | P2: Publish - manifests reference GHCR images | Tasks | In Tasks |
 | K8S-32 | P2: CI - topology renders, validates, checks | Tasks | In Tasks |
-| K8S-33 | P2: CI - offline check self-test | Tasks | In Tasks |
+| K8S-33 | P2: CI - offline check self-test | Execute | In progress (T6 self-test; T20 required workloads) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |
 | K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
 | K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |

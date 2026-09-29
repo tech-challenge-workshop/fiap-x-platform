@@ -234,14 +234,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Each rule has a planted corruption that exits non-zero naming the object/variable (≥ 10 corruptions)
-- [ ] Gate: `node scripts/check-kubernetes.mjs --self-test` and default mode exit 0
-- [ ] Test count: ≥ 10 self-test cases
+- [x] Each rule has a planted corruption that exits non-zero naming the object/variable (≥ 10 corruptions)
+- [x] Gate: `node scripts/check-kubernetes.mjs --self-test` and default mode exit 0
+- [x] Test count: ≥ 10 self-test cases
 
 **Tests**: self-test
 **Gate**: Quick
 
 **Commit**: `feat(platform): add the offline kubernetes manifest check`
+
+**Status**: ✅ Complete (2026-09-29). Self-test: 35 planted corruptions rejected with the exact message (planned ≥ 10): Secret with `data`, with `stringData`; literal credential env in a regular container, an init container, a second key name and a Job (`PASSWORD`, `SECRET_ACCESS_KEY`, `ACCESS_KEY`, `TOKEN`); readiness path `/healthz`, readiness on the wrong named port, liveness on `/health`, no liveness; locally built image, near-miss registry `…-fork`, another repo `…-v2`; worker `replicas`, request ≠ limit, threads ≠ CPU, threads 0, no request; ScaledObject max 10, min 0, other target, `processing` "3", `video-validation` "2", missing queue, `amqp`, `MessageRate`, no `authenticationRef`, a `host` in the trigger; an unreadable render (anchor); and 7 raw-kubectl plants in scanned sources (bare binary, `execSync` command line, `sh -c` string, absolute path, near-miss context `kind-fiapx2`, a spawn after a commented line). 9 good inputs accepted (good render, empty render, namespace-only render, a Secret without data, `1000m` = `"1"`, `kube.mjs` exempt, a printed hint carrying `--context kind-fiapx`, a helper call, a `//` comment naming a command). 7 exact parser readings (literal/strip block scalars, wrapped plain scalar, quoted key and number, block scalar in a sequence, double-quoted escapes and folding); the committed scripts pass the scan; the script spawned on a render whose worker sets `replicas` exits 1 with that message alone, and on the good render exits 0. Default mode with no `k8s/` yet: 0 objects, exit 0. Fifteen mutants on scratch copies (one per rule branch) were each killed. Interpretations: objects are named `Kind/name` (kustomize drops file names; each object lives in one manifest); the credential pattern is case-insensitive; the ScaledObject rule also requires `scaleTargetRef.name: worker` and no `host`/`hostFromEnv` in trigger metadata (K8S-18, K8S-24); the static scan skips `//` comment lines, so a message string that begins with `kubectl ` and lacks `--context kind-fiapx` counts as a raw spawn - scripts phrase messages accordingly. The render is read with a strict parser written for kustomize output (`check-observability`'s parser rejects block scalars and `---`). Gate: `node scripts/check-kubernetes.mjs --self-test` 0, default mode 0.
 
 ---
 
