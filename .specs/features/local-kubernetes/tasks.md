@@ -331,12 +331,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the rabbitmq deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/rabbitmq.yaml`, added to `resources`: Deployment `rabbitmq` (1 replica, `strategy: Recreate` so two brokers never overlap), image `rabbitmq:4-management-alpine`, named ports `amqp` 5672, `management` 15672, `prometheus` 15692; `subPath` mounts from ConfigMap `fiapx-rabbitmq-config`: `rabbitmq.conf` at `/etc/rabbitmq/conf.d/10-fiapx.conf` and `enabled_plugins` at `/etc/rabbitmq/enabled_plugins` (the Compose paths); `definitions.json` by `subPath` from Secret `fiapx-rabbitmq` key `definitions.json` at `/etc/rabbitmq/definitions.json`, the path `rabbitmq.conf`'s `load_definitions` names; `emptyDir` at `/var/lib/rabbitmq` (no persisted broker state, as in Compose); readiness `exec rabbitmq-diagnostics -q ping` (5 s period, 10 failures; timeout 10 s rather than Compose's 3 s, since each call starts an Erlang VM); requests 200m / 256Mi, memory limit 1Gi. Services: `rabbitmq` ClusterIP (5672, 15672, 15692) and `rabbitmq-host` NodePort (15672→31672, 15692→31692, matching `kind-config.template.yaml`). Compose's `user: "0:0"` is not carried over: the image already starts as root and its entrypoint drops to the `rabbitmq` user after fixing `/var/lib/rabbitmq` ownership. No credential in env: the broker's only user comes from the definitions Secret. Full gate 0: default mode 13 objects, kubeconform `Valid: 13, Invalid: 0`.
 
 ---
 

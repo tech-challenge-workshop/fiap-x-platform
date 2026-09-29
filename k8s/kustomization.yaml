@@ -15,6 +15,7 @@ namespace: fiapx
 resources:
   - namespace.yaml
   - postgres.yaml
+  - rabbitmq.yaml
 
 # The service images CI publishes on main (AD-018); manifests name the bare
 # repository and pull :main with imagePullPolicy Always.

@@ -1,0 +1,132 @@
+# RabbitMQ, the Compose `rabbitmq` service on the cluster. Same image and the
+# same configuration files: rabbitmq.conf and enabled_plugins come from the
+# generated ConfigMap `fiapx-rabbitmq-config` (the repository files), and
+# definitions.json - the topology plus the broker's only user - comes from
+# Secret `fiapx-rabbitmq`, where scripts/k8s-up.mjs writes the repository file
+# with that user generated per cluster. rabbitmq.conf loads it from
+# /etc/rabbitmq/definitions.json, the path mounted below. No volume for the
+# broker state: the topology is rebuilt from the file on each start, as in
+# Compose.
+#
+# Two Services: `rabbitmq` for the pods (AMQP, the management API KEDA reads,
+# and the metrics Prometheus scrapes), and `rabbitmq-host`, which publishes
+# the management UI and the metrics on the host through the kind port map.
+# AMQP stays internal.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+spec:
+  type: ClusterIP
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
+    - name: prometheus
+      port: 15692
+      targetPort: prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-host
+  labels:
+    app: rabbitmq
+spec:
+  type: NodePort
+  selector:
+    app: rabbitmq
+  ports:
+    - name: management
+      port: 15672
+      targetPort: management
+      nodePort: 31672
+    - name: prometheus
+      port: 15692
+      targetPort: prometheus
+      nodePort: 31692
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+spec:
+  replicas: 1
+  # One broker at a time: two would each load the definitions and split the
+  # queues between them.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4-management-alpine
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+            - name: prometheus
+              containerPort: 15692
+          readinessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - ping
+            periodSeconds: 5
+            # rabbitmq-diagnostics starts an Erlang VM per call, which takes
+            # longer than Compose's 3 s on a busy node.
+            timeoutSeconds: 10
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+            - name: config
+              mountPath: /etc/rabbitmq/conf.d/10-fiapx.conf
+              subPath: rabbitmq.conf
+              readOnly: true
+            # Replaces the image's plugin list: it names both
+            # rabbitmq_management (15672) and rabbitmq_prometheus (15692).
+            - name: config
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+              readOnly: true
+            # The path rabbitmq.conf's load_definitions names.
+            - name: definitions
+              mountPath: /etc/rabbitmq/definitions.json
+              subPath: definitions.json
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: fiapx-rabbitmq-config
+        - name: definitions
+          secret:
+            secretName: fiapx-rabbitmq
+            items:
+              - key: definitions.json
+                path: definitions.json
