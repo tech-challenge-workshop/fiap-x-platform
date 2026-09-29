@@ -262,16 +262,21 @@ What the services expose, the same in all four ([AD-017](.specs/STATE.md)):
 - **`/health/live`** is liveness: 200 while the process serves, whatever its dependencies.
 - **Logs** are one JSON object per line, each carrying `service`, `timestamp` and, inside a request or a message, `correlationId`. Authorization headers, email addresses and storage keys are removed from every line by the logger configuration, not by each call site. `/metrics`, `/health` and `/health/live` are not written to the access log.
 
-**Correlation id.** Every request the API serves carries an `X-Correlation-Id`: the caller's own when it is 1 to 128 printable ASCII characters, a new UUID otherwise, and the API echoes it on the response. The Catalog stores it with the request, and every event about that request carries it, so one id follows a video through the API, the Catalog, the Worker and the Notification Service ([AD-016](.specs/STATE.md)). The id a request keeps is the one its confirmation carried. To follow one video, send your own id on step 3 of [the upload](#uploading-a-video-and-downloading-its-frames) and search the logs for it:
+**Correlation id.** Every request the API serves carries an `X-Correlation-Id`: the caller's own when it is 1 to 128 printable ASCII characters, a new UUID otherwise, and the API echoes it on the response. The API passes it to the Catalog, which stores it on the request (`catalog.processing_request.correlation_id`) and puts it on every event it publishes about that request, to the Worker and to the Notification Service ([AD-016](.specs/STATE.md)). The id a request keeps is the one its confirmation carried. To follow one video, send your own id on step 3 of [the upload](#uploading-a-video-and-downloading-its-frames):
 
 ```sh
 curl -s -X POST http://localhost:3000/uploads/<uploadId>/complete \
   -H "Authorization: Bearer $TOKEN" -H 'Idempotency-Key: my-traced-upload' \
   -H 'X-Correlation-Id: my-trace-1'
-docker compose logs api catalog worker notification | grep my-trace-1
+# The two request log lines: the API's POST /uploads/<uploadId>/complete and the Catalog's POST /processing-requests.
+docker compose logs api catalog | grep my-trace-1
+# The request that carries it, and each event the Catalog published with it.
+docker compose exec -T postgres psql -U postgres -d fiapx \
+  -c "select processing_request_id, status from catalog.processing_request where correlation_id = 'my-trace-1'" \
+  -c "select id, queue, pattern from catalog.outbox where payload->>'correlationId' = 'my-trace-1' order by id"
 ```
 
-A message that arrives without a valid id is still handled: the consumer logs it under a new id.
+For a video that completes, the outbox shows three events with the id: `VideoValidationRequested` on `video-validation`, `ProcessingQueued` on `processing` and `terminal.event` on `notification.terminal`. The Worker and the Notification Service write no log line per message they handle, so their logs do not show the id; the events above are where it travels past the Catalog. The id is optional on every event, and a message without a valid one is still handled.
 
 **The overview dashboard** has four rows:
 
@@ -376,7 +381,6 @@ Step 10 recreates rather than restarts. A recreated `identity` starts from an em
 | `rabbitmq/` | The broker's definitions (queues, dead-letter policy), configuration and enabled plugins |
 | `identity/` | The `fiapx` realm the identity service imports: demo users and the development client |
 | `scripts/` | Local integration smoke test, demo-user token helper, identity check, storage bootstrap scenario runner, database script generator, storage-write check, Worker sizing check, CI governance check, required-checks applier, documentation link check, load test, observability check |
-
 | `ci/` | The required checks of each repository's `protect main` ruleset |
 | `fixtures/` | The committed source video the smoke uploads, the corrupted copy that must fail in processing, and their provenance ([`fixtures/README.md`](fixtures/README.md)) |
 | `db/` | The database bootstrap and the generated database creation script |
