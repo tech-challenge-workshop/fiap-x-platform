@@ -151,11 +151,11 @@
 
 ## Handoff
 
-- **Feature**: S9a local Kubernetes (`.specs/features/local-kubernetes/`)
-- **Phase / Task**: Done locally; T1-T34 complete, Verifier round 2 PASS (`.specs/features/local-kubernetes/validation.md`)
-- **Completed**: T1-T34 (T1-T4 merged to each service's `main`; T5-T34 here), plus the kind-spawn scan in `check-kubernetes` and the two post-verification fixes
+- **Feature**: none in progress. S9a local Kubernetes (`.specs/features/local-kubernetes/`) is delivered: `fiap-x-platform#15` merged as `372c861` on 2026-09-29, CI green including the first `kubernetes` job run (K8S-34)
+- **Phase / Task**: Done; T1-T34 complete, Verifier round 2 PASS (`.specs/features/local-kubernetes/validation.md`)
+- **Completed**: S1-S9a on `main` in all five repositories; the four GHCR packages are public (anonymous multi-arch pull verified), so the cluster and CI pull without a token
 - **In-progress** (file:line): none
-- **Next step**: With the go-ahead, push `feat/local-kubernetes`, open the platform PR and watch the first `kubernetes` CI run (K8S-34), which pulls the private images through `ghcr-pull` (V69).
-- **Blockers**: none on the images: the four `:main` images are published on GHCR (K8S-28 verified); the packages stay private until delivery (V69). Pushing, the platform PR and any ruleset change are remote steps that need a go-ahead.
+- **Next step**: open items in the gap analysis "Validar depois" (V59-V71); S10 (deliverables and demo)
+- **Blockers**: none. Making `kubernetes` a required check of this repository's ruleset is a remote change that needs a go-ahead
 - **Uncommitted files**: none
-- **Branch**: `feat/local-kubernetes` in `fiap-x-platform`; `feat/publish-images` in the four service repositories
+- **Branch**: `main` in every repository
