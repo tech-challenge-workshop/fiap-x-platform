@@ -166,6 +166,62 @@ jobs:
         working-directory: fiap-x-platform
         run: docker compose down -v
 
+  # The whole topology on a kind cluster, pulling the services' :main images
+  # from GHCR (K8S-34). The cluster lives in its own kubeconfig
+  # (~/.kube/kind-fiapx.config, set by scripts/kube.mjs); every manual kubectl
+  # below names that file and --context kind-fiapx.
+  kubernetes:
+    needs: [topology]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install kind v0.33.0 (checksum pinned)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/bin/kind" https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/kind"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # GHCR_TOKEN makes the up command create the ghcr-pull Secret, so the
+      # images pull even if GitHub created the packages private.
+      - name: Create the cluster and wait for every workload
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+        run: node scripts/k8s-up.mjs
+      - name: Run the smoke test against the cluster
+        run: SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs
+      - name: Check the cluster's workloads, HPA, targets and dashboard
+        run: node scripts/check-kubernetes.mjs --live
+      - name: Collect cluster state and pod logs
+        if: failure()
+        run: |
+          set +e
+          KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get pods,jobs,hpa,scaledobjects -o wide > cluster-logs.txt 2>&1
+          KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get events --sort-by=.lastTimestamp >> cluster-logs.txt 2>&1
+          for pod in $(KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx get pods -o name); do
+            echo "==== $pod" >> cluster-logs.txt
+            KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx describe "$pod" >> cluster-logs.txt 2>&1
+            KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx logs "$pod" --all-containers --prefix >> cluster-logs.txt 2>&1
+          done
+          exit 0
+      - name: Upload cluster logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-logs
+          path: cluster-logs.txt
+      - name: Delete the kind cluster
+        if: always()
+        run: node scripts/k8s-down.mjs
+
   docs-links:
     # A required check (ci/required-checks.json): an unresolved relative link
     # in README.md or docs/ fails it, so it blocks the merge.

@@ -223,7 +223,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-07 | P1: Provision - idempotent re-run | Execute | In progress (T24 cluster reuse and create-if-absent Secrets + self-test; T25 apply; T34 live re-run) |
 | K8S-08 | P1: Provision - down deletes only `fiapx` | Execute | Implemented (T26 down command deleting only fiapx + self-test; observed live in T34) |
 | K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
-| K8S-10 | P1: Provision - smoke passes with cluster target | Execute | In progress (T27 smoke observation adapter SMOKE_TARGET=kind + self-test; T30 CI; T34 live) |
+| K8S-10 | P1: Provision - smoke passes with cluster target | Execute | In progress (T27 smoke observation adapter SMOKE_TARGET=kind + self-test; T30 CI step in the kubernetes job; T34 live) |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
 | K8S-13 | P1: Secrets - credentials only via secret refs | Execute | Implemented (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 Grafana admin from fiapx-grafana-admin; T6 rule proves it offline) |
@@ -247,7 +247,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-31 | P2: Publish - manifests reference GHCR images | Execute | Implemented (T6 image rule + self-test; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests render `ghcr.io/tech-challenge-workshop/<repo>:main`) |
 | K8S-32 | P2: CI - topology renders, validates, checks | Execute | Implemented (T29: topology renders with kubectl kustomize, validates with pinned kubeconform v0.8.0 strict over the Kubernetes and KEDA schemas, runs check-kubernetes; proven on the PR run in T34) |
 | K8S-33 | P2: CI - offline check self-test | Execute | Implemented (T6 self-test; T20 required-workload rule + self-test; T29 runs it in the topology job) |
-| K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |
+| K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Execute | In progress (T30 job `kubernetes`: pinned kind v0.33.0, up, smoke with SMOKE_TARGET=kind, live check, logs on failure, teardown always; first green run in T34) |
 | K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
 | K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |
 | K8S-37 | P3: Docs - the scaling scene | Tasks | In Tasks |

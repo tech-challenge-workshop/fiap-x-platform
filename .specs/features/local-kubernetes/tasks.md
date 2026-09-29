@@ -805,12 +805,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Workflow parses; Build gate exits 0 (governance not yet guarding the job - T31)
+- [x] Workflow parses; Build gate exits 0 (governance not yet guarding the job - T31)
 
 **Tests**: none
 **Gate**: Build
 
 **Commit**: `ci(platform): run the topology on a kind cluster`
+
+**Status**: ✅ Complete (2026-09-29). New job `kubernetes` in `.github/workflows/ci.yml`: `needs: [topology]`, no `if:`, `timeout-minutes: 45`, job `permissions: contents: read, packages: read`. Steps: checkout; setup-node 22; install kind v0.33.0 from the release binary `kind-linux-amd64`, checked with `sha256sum -c` against `aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d` (computed from the downloaded file and equal to the release's `.sha256sum`), into `$RUNNER_TEMP/bin` prepended through `GITHUB_PATH` (so it wins over the runner image's own kind); then three unconditioned one-line steps, `node scripts/k8s-up.mjs` (env `GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, `GHCR_USERNAME: ${{ github.actor }}`, so the `ghcr-pull` Secret is created and a private package still pulls), `SMOKE_TARGET=kind node scripts/smoke-local-integration.mjs`, `node scripts/check-kubernetes.mjs --live`. On `failure()`: "Collect cluster state and pod logs" writes `get pods,jobs,hpa,scaledobjects -o wide`, events, and each pod's `describe` and `logs --all-containers --prefix` to `cluster-logs.txt` (`set +e` so one missing resource does not stop the dump), every call written as `KUBECONFIG=$HOME/.kube/kind-fiapx.config kubectl --context kind-fiapx -n fiapx …`; "Upload cluster logs" uploads it. Teardown "Delete the kind cluster" runs `node scripts/k8s-down.mjs` under `always()`, the `integration` job's shape. kubectl is the runner image's (1.37.0). The job runs only on GitHub (T34 records its first run; it cannot pass before the four `:main` images exist). The log script passed `bash -n`; the workflow parses (PyYAML); Build gate 0.
 
 ---
 
