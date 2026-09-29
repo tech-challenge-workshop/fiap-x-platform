@@ -23,15 +23,24 @@
 //                 with min 1 and max 5 replicas and one rabbitmq trigger per
 //                 queue - `processing` value "2", `video-validation` value
 //                 "20" - each QueueLength over protocol http, authenticated
-//                 through an authenticationRef and carrying no host.
+//                 through an authenticationRef and carrying no host;
+//   workloads     the render holds every workload of the topology - the
+//                 Deployments api, catalog, notification, worker, rabbitmq,
+//                 identity, mailpit, prometheus and grafana, the StatefulSets
+//                 postgres and storage, Job storage-init - and the Worker's
+//                 ScaledObject `worker` and TriggerAuthentication
+//                 `rabbitmq-management` (K8S-02). A manifest dropped from
+//                 `resources` fails the check. PENDING names the ones whose
+//                 manifest has not landed yet.
 //
 // It also scans scripts/*.mjs: no script other than scripts/kube.mjs may
 // spawn kubectl directly (a bare "kubectl" string, or a string that starts a
 // kubectl command line without `--context kind-fiapx`).
 //
-// An empty render passes: until k8s/kustomization.yaml exists there is
-// nothing to check. K8S_RENDER, when set, names a file that stands in for the
-// render, so the self-test can spawn this script with a forced failure.
+// The per-object rules pass an empty render; the workloads rule does not, so
+// default mode fails on a render that lost a manifest. K8S_RENDER, when set,
+// names a file that stands in for the render, so the self-test can spawn this
+// script with a forced failure.
 //
 // The render is read with the strict parser below: the repository has no
 // package.json. It understands what kustomize prints - documents separated by
@@ -66,6 +75,26 @@ const SERVICES = {
 const CREDENTIAL_ENV = /PASSWORD|SECRET|ACCESS_KEY|TOKEN/i;
 const SCALING = { min: 1, max: 5, targets: { processing: '2', 'video-validation': '20' } };
 const HELPER = 'kube.mjs';
+// Every object the topology needs, as Kind/name (K8S-02).
+const REQUIRED = [
+  'Deployment/api',
+  'Deployment/catalog',
+  'Deployment/notification',
+  'Deployment/worker',
+  'Deployment/rabbitmq',
+  'Deployment/identity',
+  'Deployment/mailpit',
+  'Deployment/prometheus',
+  'Deployment/grafana',
+  'StatefulSet/postgres',
+  'StatefulSet/storage',
+  'Job/storage-init',
+  'ScaledObject/worker',
+  'TriggerAuthentication/rabbitmq-management',
+];
+// Required objects whose manifest has not landed yet. The task that adds
+// each manifest removes it here: prometheus (T22), grafana (T23).
+const PENDING = ['Deployment/prometheus', 'Deployment/grafana'];
 
 // ---------------------------------------------------------------- YAML
 
@@ -516,6 +545,13 @@ export function manifestProblems(objects) {
   return problems;
 }
 
+// The required objects (REQUIRED less PENDING) the render lacks.
+export function missingWorkloads(objects) {
+  const present = new Set(objects.filter((o) => o !== null && typeof o === 'object').map(id));
+  return REQUIRED.filter((name) => !PENDING.includes(name) && !present.has(name))
+    .map((name) => `${name}: required by the topology but missing from the render; add its manifest to k8s/kustomization.yaml resources`);
+}
+
 // `files` maps a script's file name to its source. Only kube.mjs may spawn
 // kubectl; elsewhere a bare "kubectl" string (a command to spawn) or a string
 // that starts a kubectl command line without the pinned context is refused.
@@ -561,23 +597,27 @@ function scriptSources(dir) {
   );
 }
 
-function problemsOf(text, files) {
+// `complete` adds the workloads rule, which default mode always applies; the
+// per-object self-test cases leave it off, since their renders are partial.
+function problemsOf(text, files, complete = false) {
   let objects;
   try {
     objects = parseYamlStream(text);
   } catch (error) {
     return { count: 0, problems: [`the render cannot be read: ${error.message}`, ...rawKubectlProblems(files)] };
   }
-  return { count: objects.length, problems: [...manifestProblems(objects), ...rawKubectlProblems(files)] };
+  const missing = complete ? missingWorkloads(objects) : [];
+  return { count: objects.length, problems: [...manifestProblems(objects), ...missing, ...rawKubectlProblems(files)] };
 }
 
 function main() {
-  const { count, problems } = problemsOf(render(), scriptSources(join(REPO_ROOT, 'scripts')));
+  const { count, problems } = problemsOf(render(), scriptSources(join(REPO_ROOT, 'scripts')), true);
   if (problems.length > 0) {
     for (const problem of problems) console.error(`check-kubernetes: ${problem}`);
     process.exit(1);
   }
-  console.log(`check-kubernetes: ${count} rendered objects pass the offline rules (secrets, credentials, probes, images, worker sizing and replicas, scaling); only scripts/kube.mjs spawns kubectl`);
+  const pending = PENDING.length > 0 ? ` (pending: ${PENDING.join(', ')})` : '';
+  console.log(`check-kubernetes: ${count} rendered objects pass the offline rules (secrets, credentials, probes, images, worker sizing and replicas, scaling) and hold every required workload${pending}; only scripts/kube.mjs spawns kubectl`);
 }
 
 // ---------------------------------------------------------------- self-test
@@ -756,6 +796,20 @@ spec:
 
 const joinDocs = (docs) => Object.values(docs).join('---\n');
 
+// goodDocs plus a minimal object for every other required workload: a
+// render that passes the workloads rule. Keyed by Kind/name.
+function completeDocs() {
+  const docs = {};
+  for (const text of Object.values(goodDocs())) docs[id(parseYamlStream(text)[0])] = text;
+  const apiVersions = { Deployment: 'apps/v1', StatefulSet: 'apps/v1', Job: 'batch/v1' };
+  for (const name of REQUIRED) {
+    if (PENDING.includes(name) || Object.hasOwn(docs, name)) continue;
+    const [kind, objectName] = name.split('/');
+    docs[name] = `apiVersion: ${apiVersions[kind]}\nkind: ${kind}\nmetadata:\n  name: ${objectName}\n  namespace: fiapx\n`;
+  }
+  return docs;
+}
+
 function selfTest() {
   const failures = [];
   let rejected = 0;
@@ -864,6 +918,38 @@ function selfTest() {
   expectRender('an anchor in the render', corrupt('namespace', 'name: fiapx', 'name: &n fiapx'),
     ['the render cannot be read: line 4: unsupported YAML value "&n fiapx"']);
 
+  // K8S-02: every required workload is in the render. Each case starts from
+  // the complete render and applies the workloads rule, as default mode does.
+  const expectComplete = (name, mutate, expected) => {
+    const docs = completeDocs();
+    mutate(docs);
+    const got = problemsOf(joinDocs(docs), {}, true).problems;
+    if (!same(got, expected)) {
+      failures.push(`${name}: got ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    } else if (expected.length > 0) {
+      rejected += 1;
+    } else {
+      accepted += 1;
+    }
+  };
+  const missing = (name) => `${name}: required by the topology but missing from the render; add its manifest to k8s/kustomization.yaml resources`;
+  expectComplete('the complete render', () => {}, []);
+  // A manifest dropped from `resources` takes its objects out of the render.
+  for (const name of REQUIRED.filter((n) => !PENDING.includes(n))) {
+    expectComplete(`the render without ${name}`, (docs) => { delete docs[name]; }, [missing(name)]);
+  }
+  expectComplete('two manifests dropped', (docs) => { delete docs['Deployment/catalog']; delete docs['Job/storage-init']; },
+    [missing('Deployment/catalog'), missing('Job/storage-init')]);
+  // The kind is part of the requirement: a Deployment postgres is not the StatefulSet.
+  expectComplete('postgres as a Deployment', (docs) => { docs['StatefulSet/postgres'] = docs['StatefulSet/postgres'].replace('apiVersion: apps/v1\nkind: StatefulSet', 'apiVersion: apps/v1\nkind: Deployment'); },
+    [missing('StatefulSet/postgres')]);
+  expectComplete('a ScaledObject named workers', (docs) => { docs['ScaledObject/worker'] = docs['ScaledObject/worker'].replace('  name: worker\n  namespace: fiapx', '  name: workers\n  namespace: fiapx'); },
+    [missing('ScaledObject/worker')]);
+  // A pending workload is not required until its task lands its manifest.
+  for (const name of PENDING) {
+    expectComplete(`pending ${name} absent`, (docs) => { delete docs[name]; }, []);
+  }
+
   // The parser reads what the rules depend on exactly.
   const parsed = parseYamlStream(joinDocs(goodDocs()));
   const cm = parsed.find((o) => o.kind === 'ConfigMap');
@@ -914,13 +1000,17 @@ function selfTest() {
   if (committed.length > 0) failures.push(`scan: the committed scripts: ${JSON.stringify(committed)}`);
 
   // The script itself, on a render whose worker sets replicas, must exit
-  // non-zero with the message on stderr; on the good render it exits 0.
+  // non-zero with the message on stderr; on the complete render it exits 0;
+  // on a render that lost the catalog manifest it exits non-zero naming it.
   const scratch = mkdtempSync(join(tmpdir(), 'check-kubernetes-'));
   try {
-    const bad = goodDocs();
-    corrupt('worker', 'spec:\n  selector:', 'spec:\n  replicas: 1\n  selector:')(bad);
+    const bad = completeDocs();
+    corrupt('Deployment/worker', 'spec:\n  selector:', 'spec:\n  replicas: 1\n  selector:')(bad);
     writeFileSync(join(scratch, 'bad.yaml'), joinDocs(bad));
-    writeFileSync(join(scratch, 'good.yaml'), joinDocs(goodDocs()));
+    writeFileSync(join(scratch, 'good.yaml'), joinDocs(completeDocs()));
+    const lost = completeDocs();
+    delete lost['Deployment/catalog'];
+    writeFileSync(join(scratch, 'lost.yaml'), joinDocs(lost));
     const spawn = (file) => spawnSync(process.execPath, [SELF], { encoding: 'utf8', env: { ...process.env, K8S_RENDER: join(scratch, file) } });
     const spawnedBad = spawn('bad.yaml');
     const expected = 'check-kubernetes: Deployment/worker: must not set spec.replicas; the KEDA HPA owns the replica count\n';
@@ -928,6 +1018,10 @@ function selfTest() {
     if (spawnedBad.stderr !== expected) failures.push(`spawned run printed ${JSON.stringify(spawnedBad.stderr)}, expected ${JSON.stringify(expected)}`);
     const spawnedGood = spawn('good.yaml');
     if (spawnedGood.status !== 0) failures.push(`spawned run on the good render exited ${spawnedGood.status}: ${JSON.stringify(spawnedGood.stderr)}`);
+    const spawnedLost = spawn('lost.yaml');
+    const expectedLost = `check-kubernetes: ${missing('Deployment/catalog')}\n`;
+    if (spawnedLost.status === 0) failures.push('spawned run on a render without the catalog Deployment exited 0, expected non-zero');
+    if (spawnedLost.stderr !== expectedLost) failures.push(`spawned run without catalog printed ${JSON.stringify(spawnedLost.stderr)}, expected ${JSON.stringify(expectedLost)}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -937,7 +1031,7 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the scan, spawned failure exited non-zero and spawned good render exited 0`,
+    `check-kubernetes self-test passed: ${rejected} corruptions rejected with the exact message, ${accepted} good inputs accepted, ${parserCases.length} parser readings exact, the committed scripts pass the scan, spawned failures (worker replicas, catalog missing) exited non-zero and spawned complete render exited 0`,
   );
 }
 

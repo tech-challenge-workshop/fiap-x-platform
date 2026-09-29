@@ -215,7 +215,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | Requirement ID | Story | Phase | Status |
 | -------------- | ----- | ----- | ------ |
 | K8S-01 | P1: Provision - cluster created/reused, topology applied | Execute | In progress (T7 kustomization; T8 kind config; T24-T25 up command) |
-| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T23 services and observability; T25 wait; T34 live) |
+| K8S-02 | P1: Provision - all workloads Ready, bootstrap Complete | Execute | In progress (T9-T14 dependency manifests; T15-T19 service manifests and Worker scaling; T20 required-workload rule; T21-T23 observability; T25 wait; T34 live) |
 | K8S-03 | P1: Provision - 600 s readiness timeout names workloads | Tasks | In Tasks |
 | K8S-04 | P1: Provision - `--context kind-fiapx` on every kubectl call | Execute | In progress (T5 helper; T6 static scan; T24-T28 callers) |
 | K8S-05 | P1: Provision - missing tool preflight | Tasks | In Tasks |
@@ -226,7 +226,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
-| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | In progress (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19, T23 remaining manifests) |
+| K8S-13 | P1: Secrets - credentials only via secret refs | Execute | In progress (T9-T13 dependency manifests read every credential by secretKeyRef or a Secret volume; T15-T19 service and scaling manifests read theirs by secretKeyRef; T23 remaining) |
 | K8S-14 | P1: Secrets - no Secret with data in the repo | Tasks | In Tasks |
 | K8S-15 | P1: Secrets - generated at provisioning | Tasks | In Tasks |
 | K8S-16 | P1: Secrets - check rejects literal credential env | Execute | Implemented (T6 offline rule + self-test) |
@@ -244,9 +244,9 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-28 | P2: Publish - push `:sha` and `:main` on main | Execute | Implemented on `feat/publish-images` in the four service repos (T1-T4); unmerged, first publish proven in T34 |
 | K8S-29 | P2: Publish - PRs build without pushing | Execute | Implemented (T1-T4); the PR run proving build without push is recorded in T34 |
 | K8S-30 | P2: Publish - `GITHUB_TOKEN` + `packages: write` | Execute | Implemented (T1-T4: `GITHUB_TOKEN`, job-level `packages: write`) |
-| K8S-31 | P2: Publish - manifests reference GHCR images | Execute | In progress (T6 image rule; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests) |
+| K8S-31 | P2: Publish - manifests reference GHCR images | Execute | Implemented (T6 image rule + self-test; T7 `images:` mapping to GHCR `:main`; T15-T18 manifests render `ghcr.io/tech-challenge-workshop/<repo>:main`) |
 | K8S-32 | P2: CI - topology renders, validates, checks | Tasks | In Tasks |
-| K8S-33 | P2: CI - offline check self-test | Execute | In progress (T6 self-test; T20 required workloads) |
+| K8S-33 | P2: CI - offline check self-test | Execute | In progress (T6 self-test; T20 required-workload rule + self-test; T29 runs it in CI) |
 | K8S-34 | P2: CI - `kubernetes` job kind + up + smoke | Tasks | In Tasks |
 | K8S-35 | P2: CI - governance guards the `kubernetes` job | Tasks | In Tasks |
 | K8S-36 | P3: Docs - commands, tools, ports, exclusivity | Tasks | In Tasks |

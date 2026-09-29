@@ -561,14 +561,16 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Deleting any service manifest from `resources` fails the default mode (self-test case)
-- [ ] Build gate exits 0 (phase end)
-- [ ] Test count: T6 count + ≥ 2
+- [x] Deleting any service manifest from `resources` fails the default mode (self-test case)
+- [x] Build gate exits 0 (phase end)
+- [x] Test count: T6 count + ≥ 2
 
 **Tests**: self-test
 **Gate**: Build
 
 **Commit**: `feat(platform): require every workload in the kubernetes render`
+
+**Status**: ✅ Complete (2026-09-29). `scripts/check-kubernetes.mjs` gains the workloads rule: `REQUIRED` lists the 14 objects as `Kind/name` (Deployments `api`, `catalog`, `notification`, `worker`, `rabbitmq`, `identity`, `mailpit`, `prometheus`, `grafana`; StatefulSets `postgres`, `storage`; `Job/storage-init`; `ScaledObject/worker`; `TriggerAuthentication/rabbitmq-management`) and the single constant `PENDING` (`Deployment/prometheus`, `Deployment/grafana`) excludes the manifests not landed yet: T22 and T23 each remove their entry. `missingWorkloads()` names every required object the render lacks (kind and name both match: a Deployment `postgres` does not stand in for the StatefulSet). Default mode always applies it, so an empty or partial render now fails; the per-object self-test cases keep their partial renders and leave it off. Self-test: 50 corruptions rejected (T6: 35; planned T6 + ≥ 2) and 12 good inputs accepted (T6: 9): the complete render passes; each of the 12 required non-pending objects dropped alone fails with exactly its message; two dropped together fail with both; postgres as a Deployment and a ScaledObject named `workers` each fail as missing; each pending workload absent is accepted; the spawned script on a render without the catalog Deployment exits non-zero with that message alone (the spawned replicas and good cases now use the complete render, assertions unchanged). On the real tree, dropping `catalog.yaml`, `worker-scaling.yaml` or `storage-init-job.yaml` from `resources` made default mode exit 1 naming the lost objects (restored). Four mutants on scratch copies (pending ignored, kind ignored, default mode without the rule, `storage-init` not required) were each killed. Build gate 0: default mode 35 objects with every required workload, kubeconform `Valid: 35, Invalid: 0`; ci-governance and its self-test, docs-links, check-observability, `docker compose config -q`.
 
 ---
 
