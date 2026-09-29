@@ -515,12 +515,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0 (sizing and no-replicas rules apply)
+- [x] Full gate exits 0 (sizing and no-replicas rules apply)
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the worker deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/worker.yaml`, added to `resources`: Deployment `worker` with no `spec.replicas` (the KEDA HPA owns the count; the Deployment starts at 1), label `app=worker` on the Deployment and the pod template, image `processing-worker` (rendered `ghcr.io/tech-challenge-workshop/processing-worker:main`), `imagePullPolicy: Always`, `terminationGracePeriodSeconds: 30`; env `PORT=3002`, `FFMPEG_THREADS="1"`, `STORAGE_ENDPOINT=http://storage:9000`, `STORAGE_BUCKET=fiapx`, `RABBITMQ_URL` from `fiapx-rabbitmq/URL`, `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` from `fiapx-storage`; resources `cpu: "1"` request and limit, memory 512Mi / 1Gi (AD-006); named port `http` 3002; probes as T15; init container `wait-for-bucket` as T17. No Service: nothing calls the Worker, and Prometheus discovers its pods by label (T21). Full gate 0: default mode 33 objects, kubeconform `Valid: 33, Invalid: 0`. The sizing and no-replicas rules now bind a real object: the rendered manifest with `FFMPEG_THREADS` "2" and with `replicas: 1` each made the default mode exit 1 with its message (scratch renders through `K8S_RENDER`).
 
 ---
 

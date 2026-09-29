@@ -222,7 +222,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-06 | P1: Provision - busy host port preflight | Tasks | In Tasks |
 | K8S-07 | P1: Provision - idempotent re-run | Tasks | In Tasks |
 | K8S-08 | P1: Provision - down deletes only `fiapx` | Tasks | In Tasks |
-| K8S-09 | P1: Provision - readiness/liveness probes | Execute | In progress (T6 probe rule; T15-T18 service manifests) |
+| K8S-09 | P1: Provision - readiness/liveness probes | Execute | Implemented (T6 probe rule + self-test; T15-T18 service manifests; observed live in T34) |
 | K8S-10 | P1: Provision - smoke passes with cluster target | Tasks | In Tasks |
 | K8S-11 | P1: Provision - host token accepted (issuer) | Execute | In progress (T8 host port 8080; T13, T17 manifests; T34 live) |
 | K8S-12 | P1: Provision - presigned URL usable from host | Execute | In progress (T8 `STORAGE_HOST_PORT` mapping; T11, T17 manifests; T34 live) |
@@ -236,7 +236,7 @@ The whole FIAP X topology runs only under Docker Compose, where the Worker scale
 | K8S-20 | P1: Autoscale - scale out under load | Tasks | In Tasks |
 | K8S-21 | P1: Autoscale - scale back to 1 within 300 s | Tasks | In Tasks |
 | K8S-22 | P1: Autoscale - in-flight job survives scale-in | Tasks | In Tasks |
-| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | In progress (T6 rule; T18 manifest) |
+| K8S-23 | P1: Autoscale - CPU request = limit = FFMPEG_THREADS | Execute | Implemented (T6 rule + self-test; T18 manifest: `cpu: "1"` request and limit, `FFMPEG_THREADS=1`) |
 | K8S-24 | P1: Autoscale - TriggerAuthentication from Secret | Tasks | In Tasks |
 | K8S-25 | P2: Observe - every Worker pod scraped | Tasks | In Tasks |
 | K8S-26 | P2: Observe - other targets up | Tasks | In Tasks |
