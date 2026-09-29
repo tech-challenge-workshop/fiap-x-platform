@@ -1,6 +1,6 @@
 # Observability — FIAP X Platform Specification
 
-Part of S8 (observability and autoscale), split across 5 sibling specs (`fiap-x-api` OBS-01..15, `processing-catalog` OBS-16..30, `processing-worker` OBS-31..45, `notification-service` OBS-46..60, `fiap-x-platform` OBS-61..75). This repo's job: wire the observability stack (Prometheus, Grafana, the RabbitMQ metrics plugin), parameterize Worker replicas, provide the repeatable load evidence, and gate it all in CI.
+Part of S8 (observability and autoscale), split across 5 sibling specs (`fiap-x-api` OBS-01..15, `processing-catalog` OBS-16..30, `processing-worker` OBS-31..45, `notification-service` OBS-46..60, `fiap-x-platform` OBS-61..74; OBS-75 is reserved and unused). This repo's job: wire the observability stack (Prometheus, Grafana, the RabbitMQ metrics plugin), parameterize Worker replicas, provide the repeatable load evidence, and gate it all in CI.
 
 ## Problem Statement
 
@@ -133,16 +133,16 @@ The stack runs with zero observability: no Prometheus, no Grafana, no metrics an
 | OBS-66 | P1: Stack (config from repo, no creds on targets) | Execute | Verified live (T5; T12) |
 | OBS-67 | P2: Replicas (N workers) | Execute | Verified live (T5; T12: 3 healthy replicas, 3 worker targets, scale back to 1) |
 | OBS-68 | P2: Load test (N pipelines) | Execute | Verified live (T6; T12: 6/6, 40/40, 200/200 COMPLETED) |
-| OBS-69 | P2: Load test (dashboard evidence) | Execute | Partial (T12: depth and per-replica processing series recorded; ~2× rate not measurable with the 8 s fixture) |
-| OBS-70 | P2: Load test (failure exit) | Execute | Implementing (T6) |
-| OBS-71 | P2: Load test (self-test) | Execute | Implementing (T6) |
-| OBS-72 | P2: CI (self-test + small live load) | Execute | Implementing (T8; first live run on the PR) |
-| OBS-73 | P3: Documented operator walkthrough | Execute | Followed end to end in T12; the log-grep correlation trace reaches the API and Catalog only (open item in T12) |
-| OBS-74 | P1: Stack (observability check script) | Execute | Verified live (T7, T8; T12 `--live` at 1 and 3 replicas) |
+| OBS-69 | P2: Load test (dashboard evidence) | Execute | Verified live on the 200-video burst (T12: depth 0 → 22 → 0, split 66/67/67); ~2× rate restated as unmeasured in the Independent Test and Success Criterion 2 (F3); awaiting re-verification |
+| OBS-70 | P2: Load test (failure exit) | Execute | Verified (T6 self-test; Verifier round 1: M6a, M6b killed) |
+| OBS-71 | P2: Load test (self-test) | Execute | Verified (T6; Verifier round 1: self-test exit 0 with no stack; F2 keeps it an unmasked `topology` step) |
+| OBS-72 | P2: CI (self-test + small live load) | Execute | Verified wiring (T8; Verifier round 1: M7a, M7b killed); first CI run pending on the PR |
+| OBS-73 | P3: Documented operator walkthrough | Execute | Followed end to end in T12; README correlation trace and scaling demo narrowed to what the stack shows (F1, F3); awaiting re-verification |
+| OBS-74 | P1: Stack (observability check script) | Execute | Verified live (T7, T8; T12 `--live` at 1 and 3 replicas); `topology` steps guarded (F2: M7c, M7d, M12 killed); template variables checked (F4: M9 killed); awaiting re-verification |
 
-**ID format:** `OBS-[NUMBER]` — `fiap-x-api` owns OBS-01..15; `processing-catalog` OBS-16..30; `processing-worker` OBS-31..45; `notification-service` OBS-46..60; this repo owns OBS-61..75.
+**ID format:** `OBS-[NUMBER]` — `fiap-x-api` owns OBS-01..15; `processing-catalog` OBS-16..30; `processing-worker` OBS-31..45; `notification-service` OBS-46..60; this repo owns OBS-61..75 and uses OBS-61..74 (OBS-75 is unused).
 
-**Coverage:** 14 total, 0 mapped to tasks, 14 unmapped (mapping happens in Tasks).
+**Coverage:** 14 total, 14 mapped to tasks (T1-T12), 0 unmapped.
 
 ---
 

@@ -142,10 +142,11 @@
 
 ## Handoff
 
-- **Feature**: Platform repository extraction (AD-007)
-- **Phase / Task**: Complete - documents, compose, and smoke script relocated to `fiap-x-platform`
+- **Feature**: S8 observability (`.specs/features/observability/`)
+- **Phase / Task**: Validate, round 2 of 3 - Verifier round 1 FAILED; its fixes F1-F6 are committed (`tasks.md`, Post-verification fixes)
+- **Completed**: T1-T12, F1-F6 (T11's CI proof and the PR description wait on the merge order)
 - **In-progress** (file:line): none
-- **Next step**: Open the S1 (CI) and S2 (full lifecycle) specifications. Attach remote URLs and push only with explicit user authorization.
-- **Blockers**: `docs/FIAP X.pdf` (modelling board) is being redrawn to match AD-005 and is absent from `docs/`.
-- **Uncommitted files**: none
-- **Branch**: `main` in `fiap-x-platform`; `docs/local-first-platform` in the four service repositories
+- **Next step**: Run the Verifier's round 2 on `feat/observability`: re-run the sensor (M7c, M7d, M12, M9 and the rest) and the gate, then record the verdict in `validation.md`.
+- **Blockers**: CI's `integration` job stays red on `generate-db-script --check` until the four service PRs merge; this PR merges last (AD-016). Per-message consumer logging (the full correlation trace) is a follow-up in the service repositories.
+- **Uncommitted files**: `.specs/features/observability/validation.md`, `.specs/LESSONS.md`, `.specs/lessons.json` (the Verifier's)
+- **Branch**: `feat/observability` in `fiap-x-platform` and in the four service repositories
