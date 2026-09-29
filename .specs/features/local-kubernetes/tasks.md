@@ -492,12 +492,14 @@ T33 -> T34
 
 **Done when**:
 
-- [ ] Full gate exits 0
+- [x] Full gate exits 0
 
 **Tests**: none
 **Gate**: Full
 
 **Commit**: `feat(platform): add the api deployment`
+
+**Status**: ✅ Complete (2026-09-29). `k8s/api.yaml`, added to `resources`: Deployment `api` (1 replica, label `app=api`), image `fiap-x-api` (rendered `ghcr.io/tech-challenge-workshop/fiap-x-api:main`), `imagePullPolicy: Always`; env as Compose (`PORT=3000`, `CATALOG_BASE_URL=http://catalog:3001`, `OIDC_ISSUER=http://localhost:8080/realms/fiapx`, `OIDC_AUDIENCE=fiapx-api`, `OIDC_JWKS_URL=http://identity:8080/realms/fiapx/protocol/openid-connect/certs`, `STORAGE_ENDPOINT=http://storage:9000`, `STORAGE_BUCKET=fiapx`), with `STORAGE_PUBLIC_ENDPOINT` from `configMapKeyRef` `fiapx-host/STORAGE_PUBLIC_ENDPOINT` (written by the up command, not in the kustomization) and `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` from `secretKeyRef` `fiapx-storage` `ACCESS_KEY`/`SECRET_KEY`; init container `wait-for-bucket` (`amazon/aws-cli:2.37.4`, `/bin/bash -c` loop on `aws s3api head-bucket --bucket fiapx` every 2 s, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from `fiapx-storage`, `AWS_DEFAULT_REGION=us-east-1`, `AWS_ENDPOINT_URL=http://storage:9000`; requests 50m / 128Mi, memory limit 256Mi); named port `http` 3000; probes as T15; requests 100m / 128Mi, memory limit 512Mi. Services: `api` ClusterIP 3000 and `api-host` NodePort 3000→30000. The API speaks no AMQP, so it has no broker URL (as in Compose). Full gate 0: default mode 32 objects, kubeconform `Valid: 32, Invalid: 0`.
 
 ---
 

@@ -22,6 +22,7 @@ resources:
   - mailpit.yaml
   - catalog.yaml
   - notification.yaml
+  - api.yaml
 
 # The service images CI publishes on main (AD-018); manifests name the bare
 # repository and pull :main with imagePullPolicy Always.
