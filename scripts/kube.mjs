@@ -13,15 +13,31 @@
 // `scripts/check-kubernetes.mjs` fails when any other script spawns kubectl
 // directly.
 //
+// The cluster lives in its own kubeconfig, KUBECONFIG_PATH
+// (~/.kube/kind-fiapx.config), never in ~/.kube/config: `kind create
+// cluster` sets `current-context` in the file it writes and has no flag to
+// stop it, so writing the default file would switch the machine's current
+// context away from the cluster it points at today. `kind()` below passes
+// `--kubeconfig KUBECONFIG_PATH` to every create and delete, and `kubectl()`
+// runs with KUBECONFIG set to that file alone, so the other contexts are not
+// even loaded.
+// SPEC_DEVIATION: design.md runs `kind create cluster` against the default
+// kubeconfig. Reason: kind v0.33 always sets current-context in the file it
+// writes (pkg/cluster/internal/kubeconfig/internal/kubeconfig/merge.go),
+// which K8S-04 forbids.
+//
 // `--self-test` spawns nothing: it drives `kubectl()` with an injected
 // spawner and requires the exact argument list, and requires each refused
 // argument to throw its message without spawning.
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const KIND_CLUSTER = 'fiapx';
 export const KUBE_CONTEXT = `kind-${KIND_CLUSTER}`;
 export const NAMESPACE = 'fiapx';
+export const KUBECONFIG_PATH = join(homedir(), '.kube', `${KUBE_CONTEXT}.config`);
 
 // Flags that would send the call to another cluster or credential set.
 const REDIRECTING_FLAGS = ['--context', '--kubeconfig', '--cluster', '--server', '-s', '--user'];
@@ -48,10 +64,33 @@ export function kubectlArgs(args) {
   return ['--context', KUBE_CONTEXT, ...args];
 }
 
-// Runs `kubectl --context kind-fiapx <args>` and returns spawnSync's result.
-// `opts` go to the spawner (input, env, maxBuffer, ...); utf8 by default.
+// Runs `kubectl --context kind-fiapx <args>` with KUBECONFIG set to
+// KUBECONFIG_PATH alone and returns spawnSync's result. `opts` go to the
+// spawner (input, env, maxBuffer, ...); utf8 by default; an `env` given is
+// kept except for KUBECONFIG.
 export function kubectl(args, opts = {}, spawner = spawnSync) {
-  return spawner('kubectl', kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+  const env = { ...(opts.env ?? process.env), KUBECONFIG: KUBECONFIG_PATH };
+  return spawner('kubectl', kubectlArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts, env });
+}
+
+// The kind commands the scripts run. `create cluster` and `delete cluster`
+// always name the cluster `fiapx` and write KUBECONFIG_PATH; the caller may
+// not pass `--name` or `--kubeconfig` itself.
+const KIND_COMMANDS = ['version', 'get clusters', 'create cluster', 'delete cluster'];
+export function kindArgs(args) {
+  if (!Array.isArray(args) || args.length === 0 || args.some((arg) => typeof arg !== 'string')) {
+    throw new Error('kind: arguments must be a non-empty array of strings');
+  }
+  const command = KIND_COMMANDS.find((c) => args.slice(0, c.split(' ').length).join(' ') === c);
+  if (!command) throw new Error(`kind: only ${KIND_COMMANDS.join(', ')} are run, got "${args.slice(0, 2).join(' ')}"`);
+  const flag = args.find((arg) => ['--name', '--kubeconfig', '-n'].some((f) => arg === f || arg.startsWith(`${f}=`)));
+  if (flag) throw new Error(`kind: ${flag.split('=')[0]} is refused; the cluster is always ${KIND_CLUSTER} in ${KUBECONFIG_PATH}`);
+  return command.endsWith(' cluster') ? [...args, '--name', KIND_CLUSTER, '--kubeconfig', KUBECONFIG_PATH] : [...args];
+}
+
+// Runs `kind <args>` (see kindArgs) and returns spawnSync's result.
+export function kind(args, opts = {}, spawner = spawnSync) {
+  return spawner('kind', kindArgs(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 
 function selfTest() {
@@ -96,6 +135,12 @@ function selfTest() {
   calls.length = 0;
   kubectl(['apply', '-f', '-'], { input: 'x' }, spawner);
   expect('options pass through', [calls[0]?.options.input, calls[0]?.options.encoding], ['x', 'utf8']);
+  // The cluster's own kubeconfig, never ~/.kube/config, and nothing else.
+  expect('KUBECONFIG_PATH', KUBECONFIG_PATH, join(homedir(), '.kube', 'kind-fiapx.config'));
+  expect('KUBECONFIG is the cluster file', calls[0]?.options.env?.KUBECONFIG, KUBECONFIG_PATH);
+  calls.length = 0;
+  kubectl(['get', 'pods'], { env: { PATH: '/bin', KUBECONFIG: '/home/me/.kube/config' } }, spawner);
+  expect('a given env keeps its variables but not its KUBECONFIG', calls[0]?.options.env, { PATH: '/bin', KUBECONFIG: KUBECONFIG_PATH });
 
   // Refused calls: each throws its message and spawns nothing.
   const pinned = (flag) => `kubectl: ${flag} is refused; every call is pinned to --context kind-fiapx`;
@@ -125,12 +170,46 @@ function selfTest() {
     expect(`${JSON.stringify(args)} spawns nothing`, calls.length, 0);
   }
 
+  // kind: create and delete always name fiapx and write KUBECONFIG_PATH.
+  const kindAccepted = [
+    [['version'], ['version']],
+    [['get', 'clusters'], ['get', 'clusters']],
+    [['create', 'cluster', '--config', '/tmp/k.yaml', '--wait', '120s'], ['create', 'cluster', '--config', '/tmp/k.yaml', '--wait', '120s', '--name', 'fiapx', '--kubeconfig', KUBECONFIG_PATH]],
+    [['delete', 'cluster'], ['delete', 'cluster', '--name', 'fiapx', '--kubeconfig', KUBECONFIG_PATH]],
+  ];
+  for (const [args, expected] of kindAccepted) {
+    calls.length = 0;
+    try {
+      kind(args, {}, spawner);
+      expect(`kind ${JSON.stringify(args)} command`, [calls[0]?.command, calls[0]?.args], ['kind', expected]);
+    } catch (error) {
+      failures.push(`kind ${JSON.stringify(args)}: threw ${JSON.stringify(error.message)}, expected it to run`);
+    }
+  }
+  const kindRefused = [
+    [['delete', 'cluster', '--name', 'other'], `kind: --name is refused; the cluster is always fiapx in ${KUBECONFIG_PATH}`],
+    [['create', 'cluster', '--kubeconfig=/home/me/.kube/config'], `kind: --kubeconfig is refused; the cluster is always fiapx in ${KUBECONFIG_PATH}`],
+    [['export', 'kubeconfig'], 'kind: only version, get clusters, create cluster, delete cluster are run, got "export kubeconfig"'],
+    [['delete', 'clusters', '--all'], 'kind: only version, get clusters, create cluster, delete cluster are run, got "delete clusters"'],
+    [[], 'kind: arguments must be a non-empty array of strings'],
+  ];
+  for (const [args, message] of kindRefused) {
+    calls.length = 0;
+    try {
+      kind(args, {}, spawner);
+      failures.push(`kind ${JSON.stringify(args)}: ran, expected it to throw ${JSON.stringify(message)}`);
+    } catch (error) {
+      expect(`kind ${JSON.stringify(args)} message`, error.message, message);
+    }
+    expect(`kind ${JSON.stringify(args)} spawns nothing`, calls.length, 0);
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`kube self-test failed: ${failure}`);
     process.exit(1);
   }
   console.log(
-    `kube self-test passed: ${accepted.length + 1} calls spawned with --context kind-fiapx first, ${refused.length} refused calls threw the expected message and spawned nothing`,
+    `kube self-test passed: ${accepted.length + 2} calls spawned with --context kind-fiapx first and KUBECONFIG ${KUBECONFIG_PATH}, ${refused.length} refused calls threw the expected message and spawned nothing; ${kindAccepted.length} kind calls built exactly, ${kindRefused.length} refused`,
   );
 }
 
